@@ -51,13 +51,15 @@ struct Status {
 }
 
 enum Audio {
-    Running(Engine),
+    // Boxed: with WASAPI's stream inside, the engine is far larger than the
+    // other variant.
+    Running(Box<Engine>),
     Unavailable { reason: String, retry_at: Instant },
 }
 
 fn open_audio() -> Audio {
     match Engine::open_default_output() {
-        Ok(engine) => Audio::Running(engine),
+        Ok(engine) => Audio::Running(Box::new(engine)),
         Err(err) => Audio::Unavailable {
             reason: err.to_string(),
             retry_at: Instant::now() + REOPEN_INTERVAL,
@@ -122,7 +124,7 @@ impl OlioApp {
             audio: if options.silent {
                 // An engine nobody renders: voices start and are tracked,
                 // but nothing is heard.
-                Audio::Running(Engine::offline(48_000).0)
+                Audio::Running(Box::new(Engine::offline(48_000).0))
             } else {
                 open_audio()
             },
