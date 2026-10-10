@@ -3,7 +3,7 @@
 //! to "Cmd+O" wherever the glyphs are missing, so nothing breaks without
 //! it.
 
-use egui::{FontData, FontDefinitions, FontFamily};
+use egui::FontDefinitions;
 
 /// Where macOS keeps the font with the modifier symbols.
 #[cfg(target_os = "macos")]
@@ -20,6 +20,8 @@ pub fn install(ctx: &egui::Context) {
 
 #[cfg(target_os = "macos")]
 fn add_symbols(definitions: &mut FontDefinitions) -> bool {
+    use egui::{FontData, FontFamily};
+
     let Ok(bytes) = std::fs::read(SYMBOL_FONT) else {
         return false;
     };
