@@ -1,0 +1,12 @@
+# Normalise line endings so the repo behaves the same on Windows and macOS.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.wav binary
+*.aiff binary
+*.mp3 binary
+*.flac binary
+*.m4a binary
+*.ogg binary
+*.mp4 binary

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Format and lint before every commit. Enable once per clone with:
+#   git config core.hooksPath .githooks
+exec cargo xtask lint

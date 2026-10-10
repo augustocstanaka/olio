@@ -1,0 +1,25 @@
+[package]
+name = "olio-app"
+description = "Olio desktop application: the soundboard window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "olio"
+path = "src/main.rs"
+
+[dependencies]
+olio-audio.workspace = true
+olio-library.workspace = true
+olio-control.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+egui_kittest.workspace = true

@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = ["crates/audio", "crates/library", "crates/control", "crates/app", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/augustocstanaka/olio"
+publish = false
+
+[workspace.dependencies]
+olio-audio = { path = "crates/audio" }
+olio-library = { path = "crates/library" }
+olio-control = { path = "crates/control" }
+
+# audio (ADR 0002)
+cpal = "0.18"
+# Every codec and container Symphonia has; all are royalty-free to decode.
+symphonia = { version = "0.6", default-features = false, features = ["all", "opt-simd"] }
+rtrb = "0.4"
+
+# library (ADR 0003)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+blake3 = "1"
+dirs = "7"
+thiserror = "2"
+
+# app (ADR 0001; all egui-family crates pinned to the 0.36 generation)
+eframe = "0.36"
+egui = "0.36"
+rfd = "0.17"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# dev
+tempfile = "3"
+egui_kittest = { version = "0.36", features = ["wgpu", "eframe"] }
+
+# Planned, same generation, added to a crate when its milestone lands:
+#   egui_extras 0.36 and twemoji-assets 1.5 (emoji on tiles, M1)
+#   emojis 0.9 (emoji picker, M1)
+#   global-hotkey 0.8 (Show Olio hotkey, M2)
+#   rubato 5 (editor export, M3)
+#   argon2 0.6, zip 9 (locked sets, .olioset bundles, M4)
+#   midir 0.11, rosc 0.11, tungstenite 0.30 (MIDI, OSC, control API, M5)
+#   resvg 0.48 (Stream Deck key images, M5)
+
+# Optimise dependencies even in dev builds so decoding, mixing and the UI stay
+# responsive while our own crates keep fast incremental compiles.
+[profile.dev.package."*"]
+opt-level = 2
