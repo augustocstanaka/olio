@@ -14,6 +14,10 @@ pub enum Command {
     StopTile(TileId),
     /// Stop everything at once.
     StopAll,
+    /// Fade everything out over a couple of seconds, then stop it.
+    FadeAll,
+    /// Set the master volume, 0 (silent) to 1 (full).
+    SetMasterVolume(f32),
     /// Bring a set to the front, so its tiles answer the keyboard.
     SelectSet(SetId),
     /// Change one of a tile's settings. Looping and reverb also change a

@@ -8,8 +8,9 @@ date: 2026-10-10
 Olio will be driven from the keyboard and mouse, MIDI controllers, OSC apps
 (TouchOSC), Elgato Stream Decks and automations. Each of these turns its
 input into an `olio_control::Command` (toggle, play or stop a tile, stop
-all, select a set, change a tile setting), and the app carries out every
-command in one function, `OlioApp::execute`. Tiles and sets are addressed
+or fade all, set the master volume, select a set, change a tile setting),
+and the app carries out every command in one function,
+`OlioApp::execute`. Tiles and sets are addressed
 by UUID, so a command means the same thing whichever set is in front.
 
 **Stream Deck** support is a committed feature (M5). The plan:

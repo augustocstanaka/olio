@@ -94,8 +94,17 @@ end.
 _Avoid_: player, backend
 
 **Stop All**:
-Stop every voice at once (button, or hold Esc).
+Stop every voice at once (button, Cmd-Esc, or hold Esc).
 _Avoid_: panic, kill
+
+**Fade All**:
+Fade every voice out over two seconds, then stop it (button, or `-`).
+_Avoid_: fade out all, dim
+
+**Master volume**:
+The level of the whole mix, with a mute; a preference, not part of the
+library.
+_Avoid_: main volume, output level
 
 **Bubble**:
 A playing tile's button in the toolbar, which stops it.
@@ -116,3 +125,13 @@ _Avoid_: controller (alone), device (reserved for audio devices)
 **Inspector**:
 The right-hand panel showing the selected tile's settings.
 _Avoid_: properties, sidebar (that is the sets list)
+
+**Menu action**:
+A request that concerns only the window (show a panel, open a dialog,
+move the selection), as opposed to a command. Listed in the menu bar.
+_Avoid_: command (reserved for what control surfaces send)
+
+**Preferences**:
+Window settings kept beside the library in `preferences.ron`: theme,
+master volume, which panels show, single-click playback.
+_Avoid_: settings (reserved for the planned Settings window), config

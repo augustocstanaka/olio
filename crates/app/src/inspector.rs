@@ -1,7 +1,7 @@
 //! The panel on the right: the selected tile's sound, playback, fades and
 //! reverb.
 
-use egui::{Align, Layout, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{Button, Color32, RichText, Sense, Stroke, Ui, Vec2};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
 
@@ -12,29 +12,37 @@ pub enum InspectorAction {
     Command(Command),
     Rename(TileId, String),
     Recolor(TileId, TileColor),
+    /// Asks to remove the tile; the app confirms first.
     Remove(TileId),
+}
+
+pub struct View<'a> {
+    pub set: &'a Set,
+    pub tile: Option<&'a Tile>,
+    pub state: Option<&'a ClipState>,
+    pub playing: bool,
+    /// Put the cursor in the title field.
+    pub focus_title: bool,
 }
 
 pub fn show(
     ui: &mut Ui,
-    set: &Set,
-    tile: Option<&Tile>,
-    state: Option<&ClipState>,
-    playing: bool,
+    view: &View,
     title_draft: &mut Option<(TileId, String)>,
 ) -> Vec<InspectorAction> {
     let mut actions = Vec::new();
     egui::ScrollArea::vertical()
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            ui.add_space(8.0);
-            match tile {
+            ui.add_space(10.0);
+            match view.tile {
                 Some(tile) => {
-                    title_field(ui, tile, title_draft, &mut actions);
-                    tile_settings(ui, tile, state, playing, &mut actions);
+                    title_field(ui, tile, view.focus_title, title_draft, &mut actions);
+                    tile_settings(ui, tile, view.state, view.playing, &mut actions);
                 }
-                None => set_summary(ui, set),
+                None => set_summary(ui, view.set),
             }
+            ui.add_space(10.0);
         });
     actions
 }
@@ -46,6 +54,7 @@ pub fn show(
 fn title_field(
     ui: &mut Ui,
     tile: &Tile,
+    focus: bool,
     draft: &mut Option<(TileId, String)>,
     actions: &mut Vec<InspectorAction>,
 ) {
@@ -64,8 +73,12 @@ fn title_field(
         egui::TextEdit::singleline(text)
             .id(id)
             .font(egui::TextStyle::Heading)
+            .hint_text("Title")
             .desired_width(f32::INFINITY),
     );
+    if focus {
+        field.request_focus();
+    }
     if field.changed() && !text.trim().is_empty() {
         actions.push(InspectorAction::Rename(tile.id, text.clone()));
     }
@@ -87,10 +100,10 @@ fn set_summary(ui: &mut Ui, set: &Set) {
         1 => "1 tile".to_owned(),
         count => format!("{count} tiles"),
     });
-    ui.add_space(12.0);
-    ui.label("Select a tile to change its fades, reverb and how it plays.");
-    ui.add_space(6.0);
-    ui.weak("Double-click a tile or press its key to play it. Hold Esc to stop everything.");
+    ui.add_space(16.0);
+    ui.label("Select a tile to change its title, colour, fades, reverb and how it plays.");
+    ui.add_space(10.0);
+    ui.weak("Press a tile's key or double-click it to play it. The arrow keys move the selection and Return plays it. Hold Esc to stop everything.");
 }
 
 fn tile_settings(
@@ -103,8 +116,9 @@ fn tile_settings(
     let set = |setting| InspectorAction::Command(Command::SetTile(tile.id, setting));
 
     // Colour.
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         for color in TileColor::ALL {
             if swatch(ui, color, color == tile.color).clicked() {
                 actions.push(InspectorAction::Recolor(tile.id, color));
@@ -123,7 +137,7 @@ fn tile_settings(
             let trimmed = full - region.len() as f64 / rate;
             let mut line = format!("Key {key} · {}", format::clock(region.len() as f64 / rate));
             if tile.trim_silence && trimmed >= 0.05 {
-                line.push_str(&format!(" · {:.1} s of silence trimmed", trimmed));
+                line.push_str(&format!(" · {trimmed:.1} s of silence trimmed"));
             }
             line
         }
@@ -131,15 +145,15 @@ fn tile_settings(
         Some(ClipState::Loading) | None => format!("Key {key} · loading…"),
     };
     ui.weak(details);
-    ui.weak(&tile.sound.original_name)
+    ui.add(egui::Label::new(RichText::new(&tile.sound.original_name).weak()).truncate())
         .on_hover_text("The file this sound was imported from");
 
-    ui.add_space(8.0);
+    ui.add_space(10.0);
     let label = if playing { "■ Stop" } else { "▶ Play" };
-    if ui
-        .add_sized([ui.available_width(), 28.0], egui::Button::new(label))
-        .clicked()
-    {
+    let button = Button::new(label)
+        .shortcut_text(&key)
+        .min_size(Vec2::new(ui.available_width(), 32.0));
+    if ui.add(button).clicked() {
         actions.push(InspectorAction::Command(Command::ToggleTile(tile.id)));
     }
 
@@ -162,47 +176,41 @@ fn tile_settings(
     }
 
     section(ui, "Fades");
-    egui::Grid::new("olio-fades")
-        .num_columns(2)
-        .spacing([10.0, 8.0])
-        .show(ui, |ui| {
-            ui.label("Fade in");
-            let mut fade_in = tile.fade_in_seconds;
-            if ui.add(fade_slider(&mut fade_in)).changed() {
-                actions.push(set(TileSetting::FadeIn(fade_in)));
-            }
-            ui.end_row();
-            ui.label("Fade out")
-                .on_hover_text("Before the end, and when you stop the tile");
-            let mut fade_out = tile.fade_out_seconds;
-            if ui.add(fade_slider(&mut fade_out)).changed() {
-                actions.push(set(TileSetting::FadeOut(fade_out)));
-            }
-            ui.end_row();
-        });
+    fill_with_slider(ui);
+    ui.label("Fade in");
+    let mut fade_in = tile.fade_in_seconds;
+    if ui.add(fade_slider(&mut fade_in)).changed() {
+        actions.push(set(TileSetting::FadeIn(fade_in)));
+    }
+    ui.add_space(4.0);
+    ui.label("Fade out")
+        .on_hover_text("Before the end, and when you stop the tile");
+    let mut fade_out = tile.fade_out_seconds;
+    if ui.add(fade_slider(&mut fade_out)).changed() {
+        actions.push(set(TileSetting::FadeOut(fade_out)));
+    }
 
     section(ui, "Effects");
-    egui::Grid::new("olio-effects")
-        .num_columns(2)
-        .spacing([10.0, 8.0])
-        .show(ui, |ui| {
-            ui.label("Reverb");
-            let mut percent = tile.reverb * 100.0;
-            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-                .suffix(" %")
-                .max_decimals(0);
-            if ui.add(slider).changed() {
-                actions.push(set(TileSetting::Reverb(percent / 100.0)));
-            }
-            ui.end_row();
-        });
+    ui.label("Reverb");
+    let mut percent = tile.reverb * 100.0;
+    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+        .suffix(" %")
+        .max_decimals(0);
+    if ui.add(slider).changed() {
+        actions.push(set(TileSetting::Reverb(percent / 100.0)));
+    }
 
-    ui.add_space(20.0);
-    ui.with_layout(Layout::top_down(Align::Min), |ui| {
-        if ui.button("Remove Tile").clicked() {
-            actions.push(InspectorAction::Remove(tile.id));
-        }
-    });
+    ui.add_space(28.0);
+    let remove = Button::new(RichText::new("Remove Tile…").color(palette::danger()))
+        .stroke(Stroke::new(1.0, palette::danger().gamma_multiply(0.6)))
+        .fill(Color32::TRANSPARENT);
+    if ui
+        .add(remove)
+        .on_hover_text("Take the tile off the board; the sound file stays")
+        .clicked()
+    {
+        actions.push(InspectorAction::Remove(tile.id));
+    }
 }
 
 fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
@@ -213,22 +221,35 @@ fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
         .max_decimals(2)
 }
 
+/// Makes the sliders below fill the panel, leaving room for the value box.
+fn fill_with_slider(ui: &mut Ui) {
+    let value_box = 64.0;
+    let width = (ui.available_width() - value_box - ui.spacing().item_spacing.x).max(80.0);
+    ui.spacing_mut().slider_width = width;
+}
+
 fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(14.0);
+    ui.add_space(16.0);
     ui.label(RichText::new(title).strong());
-    ui.add_space(4.0);
+    ui.add_space(6.0);
 }
 
 fn swatch(ui: &mut Ui, color: TileColor, chosen: bool) -> egui::Response {
     let dark = ui.visuals().dark_mode;
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
     let painter = ui.painter();
-    painter.circle_filled(rect.center(), 7.5, palette::strong(color, dark));
+    painter.circle_filled(rect.center(), 8.0, palette::strong(color, dark));
     if chosen {
         painter.circle_stroke(
             rect.center(),
-            9.5,
+            10.5,
             Stroke::new(2.0, ui.visuals().strong_text_color()),
+        );
+    } else if response.hovered() {
+        painter.circle_stroke(
+            rect.center(),
+            10.5,
+            Stroke::new(1.0, ui.visuals().weak_text_color()),
         );
     }
     response.on_hover_text(color.name())

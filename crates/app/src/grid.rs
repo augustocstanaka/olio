@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
-    WidgetInfo, WidgetType,
+    Align2, Color32, FontId, Id, Painter, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    Vec2, WidgetInfo, WidgetType,
 };
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{Set, Slot, Tile, TileId};
@@ -22,6 +22,7 @@ const ROUNDING: u8 = 10;
 #[derive(Clone, Copy, Debug)]
 pub struct Progress {
     pub elapsed_seconds: f64,
+    pub total_seconds: f64,
     /// 0 at the start of the clip, 1 at its end.
     pub fraction: f32,
 }
@@ -31,6 +32,11 @@ pub struct GridView<'a> {
     pub clips: &'a Clips,
     pub playing: &'a HashMap<TileId, Progress>,
     pub selected: Option<TileId>,
+    /// Scroll so the selected tile is in view.
+    pub reveal_selected: bool,
+    /// A single click plays a tile; otherwise it only selects it and a
+    /// double-click plays it.
+    pub click_plays: bool,
     /// Files are being dragged over the window.
     pub files_hovering: bool,
 }
@@ -38,7 +44,11 @@ pub struct GridView<'a> {
 #[derive(Default)]
 pub struct GridOutput {
     pub commands: Vec<Command>,
+    /// Tiles whose removal was asked for (the app confirms first).
     pub remove: Vec<TileId>,
+    /// A tile whose title should be edited.
+    pub rename: Option<TileId>,
+    pub recolor: Vec<(TileId, olio_library::TileColor)>,
     /// `Some` when the selection changed: the tile clicked, or `None` for
     /// a click on an empty slot.
     pub select: Option<Option<TileId>>,
@@ -123,10 +133,14 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
                 }
             }
             if view.set.tiles.is_empty() && !view.files_hovering {
+                let add = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::O,
+                ));
                 ui.painter().text(
                     grid_rect.center(),
                     Align2::CENTER_CENTER,
-                    "Drop audio files here, or use Add Sound",
+                    format!("Drop audio files or folders here, or press {add} to add sounds"),
                     FontId::proportional(16.0),
                     ui.visuals().weak_text_color(),
                 );
@@ -152,7 +166,17 @@ fn tile_ui(
         info.selected = Some(progress.is_some());
         info
     });
-    if response.double_clicked() {
+    if view.reveal_selected && view.selected == Some(tile.id) {
+        ui.scroll_to_rect(rect, None);
+    }
+    // With click-to-play, the click plays and the double-click's second
+    // click must not stop it again.
+    let plays = if view.click_plays {
+        response.clicked() && !response.double_clicked()
+    } else {
+        response.double_clicked()
+    };
+    if plays {
         output.commands.push(Command::ToggleTile(tile.id));
     }
     if response.clicked() || response.secondary_clicked() {
@@ -164,6 +188,11 @@ fn tile_ui(
             output.commands.push(Command::ToggleTile(tile.id));
             ui.close();
         }
+        if ui.button("Rename…").clicked() {
+            output.rename = Some(tile.id);
+            ui.close();
+        }
+        ui.separator();
         let mut looping = tile.looping;
         if ui.checkbox(&mut looping, "Loop").changed() {
             output
@@ -176,8 +205,23 @@ fn tile_ui(
                 .commands
                 .push(Command::SetTile(tile.id, TileSetting::TrimSilence(trim)));
         }
+        ui.menu_button("Color", |ui| {
+            for color in olio_library::TileColor::ALL {
+                let label = if color == tile.color {
+                    format!("✔ {}", color.name())
+                } else {
+                    format!("    {}", color.name())
+                };
+                let swatch = RichText::new("●").color(palette::strong(color, dark));
+                let button = egui::Button::new((swatch, label));
+                if ui.add(button).clicked() {
+                    output.recolor.push((tile.id, color));
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
-        if ui.button("Remove Tile").clicked() {
+        if ui.button("Remove Tile…").clicked() {
             output.remove.push(tile.id);
             ui.close();
         }
@@ -243,26 +287,41 @@ fn paint_tile(
         );
     }
 
-    // Elapsed time, key and duration along the bottom.
+    // Along the bottom: the key in the middle; while playing, the time
+    // elapsed on the left and the time left on the right; otherwise just
+    // the duration on the right.
     let times = FontId::proportional(12.5);
-    let elapsed = progress.map_or(0.0, |progress| progress.elapsed_seconds);
-    painter.text(
-        inner.left_bottom(),
-        Align2::LEFT_BOTTOM,
-        format::clock(elapsed),
-        times.clone(),
-        strong,
-    );
-    if let Some(ClipState::Ready(ready)) = state {
-        let region = ready.region(tile.trim_silence);
-        let seconds = region.len() as f64 / f64::from(ready.clip.rate());
-        painter.text(
-            inner.right_bottom(),
-            Align2::RIGHT_BOTTOM,
-            format::clock(seconds),
-            times,
-            strong,
-        );
+    match progress {
+        Some(progress) => {
+            painter.text(
+                inner.left_bottom(),
+                Align2::LEFT_BOTTOM,
+                format::clock(progress.elapsed_seconds),
+                times.clone(),
+                strong,
+            );
+            let left = (progress.total_seconds - progress.elapsed_seconds).max(0.0);
+            painter.text(
+                inner.right_bottom(),
+                Align2::RIGHT_BOTTOM,
+                format!("-{}", format::clock(left)),
+                times,
+                strong,
+            );
+        }
+        None => {
+            if let Some(ClipState::Ready(ready)) = state {
+                let region = ready.region(tile.trim_silence);
+                let seconds = region.len() as f64 / f64::from(ready.clip.rate());
+                painter.text(
+                    inner.right_bottom(),
+                    Align2::RIGHT_BOTTOM,
+                    format::clock(seconds),
+                    times,
+                    palette::tint(tile.color, dark, 200),
+                );
+            }
+        }
     }
     if let Some(key) = TileKey::for_slot(tile.slot) {
         key_badge(painter, inner.center_bottom(), &key.label(), tile, dark);
@@ -320,7 +379,7 @@ fn waveform(
     };
     let half = rect.height() / 2.0;
     let middle = rect.center().y;
-    let unplayed = palette::tint(tile.color, dark, if dark { 95 } else { 75 });
+    let unplayed = palette::tint(tile.color, dark, if dark { 95 } else { 110 });
     let played_color = palette::tint(tile.color, dark, 235);
     let peaks = ready.peaks.columns_between(columns, from, to);
     for (column, (low, high)) in peaks.into_iter().enumerate() {

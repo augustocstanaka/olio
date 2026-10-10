@@ -154,7 +154,7 @@ fn selecting_a_tile_shows_its_settings_in_the_inspector() {
     harness.get_by_label("Loop");
     harness.get_by_label("Trim silence");
     harness.get_by_label("Reverb");
-    harness.get_by_label("Remove Tile");
+    harness.get_by_label("Remove Tile…");
 }
 
 #[test]
@@ -194,21 +194,113 @@ fn a_tile_can_be_renamed_with_spaces_in_the_inspector() {
 }
 
 #[test]
+fn arrow_keys_move_the_selection_and_return_plays_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    // Nothing selected: the first tile.
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), Some("Applause"));
+    harness.key_press(egui::Key::ArrowRight);
+    harness.key_press(egui::Key::ArrowDown);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), Some("Pensive"));
+    // Nothing further right on that row.
+    harness.key_press(egui::Key::ArrowRight);
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), Some("Tense"));
+
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(harness.state().playing_titles(), ["Tense"]);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    assert!(harness.state().playing_titles().is_empty());
+
+    // A tap of Escape clears the selection.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), None);
+}
+
+#[test]
+fn removing_a_tile_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Backspace);
+    harness.run_steps(2);
+    // Cancelled: the tile stays.
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(2);
+    harness.get_by_label("Big Game");
+    assert_eq!(harness.query_all_by_label("Cancel").count(), 0);
+
+    harness.key_press(egui::Key::Delete);
+    harness.run_steps(2);
+    harness.get_by_label("Remove").click();
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Big Game").count(), 0);
+    assert_eq!(harness.state().selected_title(), None);
+}
+
+#[test]
+fn the_minus_key_fades_everything_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.key_press(egui::Key::Num1);
+    harness.key_press(egui::Key::Num2);
+    harness.run_steps(2);
+    assert_eq!(harness.state().playing_titles().len(), 2);
+    harness.key_press(egui::Key::Minus);
+    harness.run_steps(2);
+    assert!(harness.state().playing_titles().is_empty());
+}
+
+#[test]
+fn the_view_menu_hides_the_inspector_and_a_shortcut_shows_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    // Menu items are labelled with their shortcut too.
+    harness.get_by_label_contains("✔ Inspector").click();
+    harness.run_steps(2);
+    assert!(!harness.state().preferences().show_inspector);
+    assert_eq!(harness.query_all_by_label("Trim silence").count(), 0);
+
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::I,
+    );
+    harness.run_steps(2);
+    assert!(harness.state().preferences().show_inspector);
+}
+
+#[test]
 fn render_the_window_to_a_png() {
     if std::env::var_os("OLIO_RENDER").is_none() {
         eprintln!("skipped: set OLIO_RENDER=1 to render the window");
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let mut harness = window(library(dir.path()), true);
-    harness.get_by_label("Pensive").click();
-    harness.key_press(egui::Key::Num2);
-    harness.key_press(egui::Key::Q);
-    harness.run_steps(4);
-    let image = harness.render().expect("a GPU adapter to render with");
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    let path = out.join("window.png");
-    image.save(&path).unwrap();
-    println!("rendered {}", path.display());
+    for (theme, name) in [
+        (egui::Theme::Dark, "window.png"),
+        (egui::Theme::Light, "window-light.png"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = window(library(dir.path()), true);
+        harness.ctx.set_theme(theme);
+        harness.get_by_label("Pensive").click();
+        harness.key_press(egui::Key::Num2);
+        harness.key_press(egui::Key::Q);
+        harness.run_steps(4);
+        let image = harness.render().expect("a GPU adapter to render with");
+        let path = out.join(name);
+        image.save(&path).unwrap();
+        println!("rendered {}", path.display());
+    }
 }

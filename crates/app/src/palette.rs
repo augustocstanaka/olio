@@ -38,3 +38,8 @@ pub fn tile_background(dark: bool) -> Color32 {
         Color32::WHITE
     }
 }
+
+/// For buttons that remove things.
+pub fn danger() -> Color32 {
+    Color32::from_rgb(205, 52, 60)
+}

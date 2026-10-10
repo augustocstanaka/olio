@@ -1,31 +1,42 @@
 //! The main window: what it holds and how a frame runs.
 //!
-//! Every playback request, from a key, a click or (later) a controller, is
-//! an `olio_control::Command` carried out by [`OlioApp::execute`].
+//! Every playback request, from a key, a click, a menu or (later) a
+//! controller, is an `olio_control::Command` carried out by
+//! [`OlioApp::execute`]. Requests that only concern this window (show a
+//! panel, open a dialog) are `MenuAction`s, carried out by `act`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use egui::{Align, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand};
+use egui::{
+    Align, CornerRadius, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo,
+    WidgetType,
+};
 use olio_audio::{Engine, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, TileColor, TileId};
 
 use crate::Options;
 use crate::clips::{ClipState, Clips};
+use crate::confirm::{self, Confirm, Pending, Reply};
 use crate::grid::{self, GridLayout, GridView, Progress};
 use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
+use crate::menu::{self, Direction, MenuAction, MenuState};
+use crate::prefs::Preferences;
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::{keys, palette};
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
 const STOP_ALL_HOLD: Duration = Duration::from_millis(300);
-/// How long a status message stays up.
+/// How long Fade All takes.
+const FADE_ALL: Duration = Duration::from_secs(2);
+/// How long a status message stays up; mistakes stay longer.
 const STATUS_TIME: Duration = Duration::from_secs(6);
+const ERROR_TIME: Duration = Duration::from_secs(12);
 /// How often to try opening the audio output again after it failed.
 const REOPEN_INTERVAL: Duration = Duration::from_secs(2);
 /// Redraw interval while sounds play, for smooth progress.
@@ -33,6 +44,7 @@ const PLAYING_REPAINT: Duration = Duration::from_millis(33);
 /// Edits are saved this long after the last one, so dragging a slider does
 /// not write the library every frame.
 const SAVE_DELAY: Duration = Duration::from_millis(500);
+const WEBSITE: &str = "https://github.com/augustocstanaka/olio";
 
 /// A tile that is sounding.
 struct Playing {
@@ -48,6 +60,13 @@ struct Status {
     text: String,
     error: bool,
     since: Instant,
+}
+
+impl Status {
+    fn remaining(&self) -> Option<Duration> {
+        let time = if self.error { ERROR_TIME } else { STATUS_TIME };
+        time.checked_sub(self.since.elapsed())
+    }
 }
 
 enum Audio {
@@ -82,8 +101,12 @@ pub struct OlioApp {
     /// Why the library on disk could not be read. While set nothing is
     /// saved, so the file is never replaced by an empty library.
     load_error: Option<String>,
+    prefs: Preferences,
     current: SetId,
     selected: Option<TileId>,
+    /// Scroll the grid to the selected tile this frame (it was chosen
+    /// from the keyboard, so it may be out of view).
+    reveal_selected: bool,
     audio: Audio,
     clips: Clips,
     playing: HashMap<TileId, Playing>,
@@ -95,17 +118,38 @@ pub struct OlioApp {
     rename: Option<Rename>,
     /// The inspector's title field while it is being edited.
     title_draft: Option<(TileId, String)>,
-    show_inspector: bool,
+    /// Give the inspector's title field the focus this frame.
+    focus_title: bool,
+    confirm: Option<Confirm>,
+    show_shortcuts: bool,
     grid_layout: Option<GridLayout>,
     screenshot: Option<ScreenshotJob>,
 }
 
 impl OlioApp {
     pub fn new(cc: &eframe::CreationContext<'_>, store: Store, options: Options) -> Self {
+        crate::fonts::install(&cc.egui_ctx);
         cc.egui_ctx.all_styles_mut(|style| {
-            style.spacing.button_padding = egui::vec2(10.0, 5.0);
+            style.spacing.button_padding = egui::vec2(12.0, 6.0);
             style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+            style.spacing.interact_size.y = 28.0;
+            style.visuals.slider_trailing_fill = true;
+            let widgets = &mut style.visuals.widgets;
+            for visuals in [
+                &mut widgets.noninteractive,
+                &mut widgets.inactive,
+                &mut widgets.hovered,
+                &mut widgets.active,
+                &mut widgets.open,
+            ] {
+                visuals.corner_radius = CornerRadius::same(6);
+            }
+            style.visuals.menu_corner_radius = CornerRadius::same(8);
+            style.visuals.window_corner_radius = CornerRadius::same(10);
         });
+        let prefs = Preferences::load(cc.storage);
+        cc.egui_ctx.set_theme(prefs.theme.preference());
+
         let (mut library, load_error) = match store.load() {
             Ok(library) => (library, None),
             Err(err) => (Library::default(), Some(err.to_string())),
@@ -120,7 +164,9 @@ impl OlioApp {
             load_error,
             _lock: lock,
             store,
+            prefs,
             selected: None,
+            reveal_selected: false,
             audio: if options.silent {
                 // An engine nobody renders: voices start and are tracked,
                 // but nothing is heard.
@@ -136,7 +182,9 @@ impl OlioApp {
             escape_fired: false,
             rename: None,
             title_draft: None,
-            show_inspector: true,
+            focus_title: false,
+            confirm: None,
+            show_shortcuts: false,
             grid_layout: None,
             screenshot: options.screenshot.map(|path| ScreenshotJob {
                 path,
@@ -144,6 +192,7 @@ impl OlioApp {
                 requested: false,
             }),
         };
+        app.apply_master_gain();
         if let Some(name) = &options.set {
             match app.library.sets.iter().find(|set| &set.name == name) {
                 Some(set) => app.current = set.id,
@@ -180,6 +229,17 @@ impl OlioApp {
         &self.current_set().name
     }
 
+    /// The selected tile's title.
+    pub fn selected_title(&self) -> Option<&str> {
+        self.selected
+            .and_then(|id| self.library.tile(id))
+            .map(|(_, tile)| tile.title.as_str())
+    }
+
+    pub fn preferences(&self) -> &Preferences {
+        &self.prefs
+    }
+
     fn current_set(&self) -> &Set {
         self.library
             .set(self.current)
@@ -196,6 +256,12 @@ impl OlioApp {
 
     fn changed(&mut self) {
         self.unsaved_since.get_or_insert_with(Instant::now);
+    }
+
+    fn apply_master_gain(&mut self) {
+        if let Audio::Running(engine) = &mut self.audio {
+            engine.set_master_gain(self.prefs.master_gain());
+        }
     }
 
     // ----- commands -------------------------------------------------------
@@ -215,11 +281,11 @@ impl OlioApp {
                 self.play_tile(id);
             }
             Command::StopTile(id) => self.stop_tile(id),
-            Command::StopAll => {
-                if let Audio::Running(engine) = &mut self.audio {
-                    engine.stop_all(Duration::ZERO);
-                }
-                self.playing.clear();
+            Command::StopAll => self.stop_all(Duration::ZERO),
+            Command::FadeAll => self.stop_all(FADE_ALL),
+            Command::SetMasterVolume(volume) => {
+                self.prefs.volume = volume.clamp(0.0, 1.0);
+                self.apply_master_gain();
             }
             Command::SelectSet(id) => {
                 if self.library.set(id).is_some() && id != self.current {
@@ -289,6 +355,13 @@ impl OlioApp {
         }
     }
 
+    fn stop_all(&mut self, fade: Duration) {
+        if let Audio::Running(engine) = &mut self.audio {
+            engine.stop_all(fade);
+        }
+        self.playing.clear();
+    }
+
     fn set_tile(&mut self, id: TileId, setting: TileSetting) {
         let Some(tile) = self.library.tile_mut(id) else {
             return;
@@ -311,6 +384,151 @@ impl OlioApp {
                 TileSetting::Reverb(amount) => engine.set_reverb(playing.voice, amount),
                 _ => {}
             }
+        }
+    }
+
+    // ----- menu actions ---------------------------------------------------
+
+    /// Carries out a request that concerns only this window.
+    fn act(&mut self, ctx: &egui::Context, action: MenuAction) {
+        match action {
+            MenuAction::AddSound => self.add_sound_dialog(),
+            MenuAction::ImportFolder => self.import_folder_dialog(),
+            MenuAction::ImportBoard => self.import_board_dialog(),
+            MenuAction::ShowLibraryFolder => self.show_library_folder(),
+            MenuAction::NewSet => self.apply_sidebar(SidebarAction::NewSet),
+            MenuAction::RenameSet => {
+                self.rename = self.library.set(self.current).map(Rename::new);
+            }
+            MenuAction::RemoveSet => self.ask_remove_set(self.current),
+            MenuAction::RenameTile => {
+                if self.selected.is_some() {
+                    self.prefs.show_inspector = true;
+                    self.focus_title = true;
+                }
+            }
+            MenuAction::RemoveTile => {
+                if let Some(id) = self.selected {
+                    self.ask_remove_tile(id);
+                }
+            }
+            MenuAction::ToggleSets => self.prefs.show_sets = !self.prefs.show_sets,
+            MenuAction::ToggleInspector => {
+                self.prefs.show_inspector = !self.prefs.show_inspector;
+            }
+            MenuAction::Theme(theme) => {
+                self.prefs.theme = theme;
+                ctx.set_theme(theme.preference());
+            }
+            MenuAction::PlaySelected => {
+                if let Some(id) = self.selected {
+                    self.execute(Command::ToggleTile(id));
+                }
+            }
+            MenuAction::StopAll => self.execute(Command::StopAll),
+            MenuAction::FadeAll => self.execute(Command::FadeAll),
+            MenuAction::ToggleMute => {
+                self.prefs.muted = !self.prefs.muted;
+                self.apply_master_gain();
+            }
+            MenuAction::SetVolume(volume) => self.execute(Command::SetMasterVolume(volume)),
+            MenuAction::ToggleClickPlays => self.prefs.click_plays = !self.prefs.click_plays,
+            MenuAction::Move(direction) => self.move_selection(direction),
+            MenuAction::ShowShortcuts => self.show_shortcuts = true,
+            MenuAction::OpenWebsite => ctx.open_url(egui::OpenUrl::new_tab(WEBSITE)),
+        }
+    }
+
+    /// Moves the selection to the nearest tile in `direction`: along the
+    /// row for left and right, to the closest tile of the nearest row above
+    /// or below for up and down. With nothing selected, the first tile.
+    fn move_selection(&mut self, direction: Direction) {
+        let set = self.current_set();
+        let Some(from) = self
+            .selected
+            .and_then(|id| set.tile(id))
+            .map(|tile| tile.slot)
+        else {
+            self.selected = set
+                .tiles
+                .iter()
+                .min_by_key(|tile| (tile.slot.row, tile.slot.column))
+                .map(|tile| tile.id);
+            self.reveal_selected = self.selected.is_some();
+            return;
+        };
+        let distance = |slot: Slot| -> Option<(u8, u8)> {
+            let (row, column) = (slot.row, slot.column);
+            match direction {
+                Direction::Left if row == from.row && column < from.column => {
+                    Some((0, from.column - column))
+                }
+                Direction::Right if row == from.row && column > from.column => {
+                    Some((0, column - from.column))
+                }
+                Direction::Up if row < from.row => {
+                    Some((from.row - row, column.abs_diff(from.column)))
+                }
+                Direction::Down if row > from.row => {
+                    Some((row - from.row, column.abs_diff(from.column)))
+                }
+                _ => None,
+            }
+        };
+        let nearest = set
+            .tiles
+            .iter()
+            .filter_map(|tile| distance(tile.slot).map(|distance| (distance, tile.id)))
+            .min_by_key(|(distance, _)| *distance);
+        if let Some((_, id)) = nearest {
+            self.selected = Some(id);
+            self.reveal_selected = true;
+        }
+    }
+
+    fn ask_remove_tile(&mut self, id: TileId) {
+        let Some((_, tile)) = self.library.tile(id) else {
+            return;
+        };
+        self.confirm = Some(Confirm {
+            title: format!("Remove “{}”?", tile.title),
+            body: "The tile leaves this set. The sound file stays in the library.".to_owned(),
+            verb: "Remove",
+            pending: Pending::RemoveTile(id),
+        });
+    }
+
+    fn ask_remove_set(&mut self, id: SetId) {
+        if self.library.sets.len() <= 1 {
+            return;
+        }
+        let Some(set) = self.library.set(id) else {
+            return;
+        };
+        let tiles = match set.tiles.len() {
+            0 => "It has no tiles.".to_owned(),
+            1 => "Its tile goes with it; the sound file stays in the library.".to_owned(),
+            n => format!("Its {n} tiles go with it; the sound files stay in the library."),
+        };
+        self.confirm = Some(Confirm {
+            title: format!("Remove the set “{}”?", set.name),
+            body: tiles,
+            verb: "Remove",
+            pending: Pending::RemoveSet(id),
+        });
+    }
+
+    fn show_library_folder(&mut self) {
+        let root = self.store.root().to_path_buf();
+        let program = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        if let Err(err) = std::process::Command::new(program).arg(&root).spawn() {
+            self.set_status(format!("Could not open {}: {err}", root.display()), true);
         }
     }
 
@@ -350,25 +568,11 @@ impl OlioApp {
         let Some(index) = self.library.sets.iter().position(|set| set.id == id) else {
             return;
         };
-        let set = &self.library.sets[index];
-        let confirmed = self.screenshot.is_none()
-            && matches!(
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Warning)
-                    .set_title("Remove set")
-                    .set_description(format!(
-                        "Remove the set “{}” and its {} tiles? The sound files stay in the library.",
-                        set.name,
-                        set.tiles.len()
-                    ))
-                    .set_buttons(rfd::MessageButtons::OkCancel)
-                    .show(),
-                rfd::MessageDialogResult::Ok
-            );
-        if !confirmed {
-            return;
-        }
-        let tiles: Vec<TileId> = set.tiles.iter().map(|tile| tile.id).collect();
+        let tiles: Vec<TileId> = self.library.sets[index]
+            .tiles
+            .iter()
+            .map(|tile| tile.id)
+            .collect();
         for tile in tiles {
             self.stop_tile(tile);
         }
@@ -402,7 +606,14 @@ impl OlioApp {
                 self.rename = self.library.set(id).map(Rename::new);
                 self.changed();
             }
-            SidebarAction::RemoveSet(id) => self.remove_set(id),
+            SidebarAction::RemoveSet(id) => self.ask_remove_set(id),
+        }
+    }
+
+    fn resolve(&mut self, pending: Pending) {
+        match pending {
+            Pending::RemoveTile(id) => self.remove_tile(id),
+            Pending::RemoveSet(id) => self.remove_set(id),
         }
     }
 
@@ -503,6 +714,7 @@ impl OlioApp {
                     {
                         let message = format!("Playing through {}", output.device);
                         self.set_status(message, false);
+                        self.apply_master_gain();
                     }
                 } else {
                     ctx.request_repaint_after(*retry_at - now);
@@ -539,8 +751,10 @@ impl OlioApp {
             .map(|(&id, playing)| {
                 let position = engine.position(playing.voice).unwrap_or(playing.start);
                 let into = position.saturating_sub(playing.start).min(playing.length);
+                let rate = f64::from(playing.rate);
                 let progress = Progress {
-                    elapsed_seconds: into as f64 / f64::from(playing.rate),
+                    elapsed_seconds: into as f64 / rate,
+                    total_seconds: playing.length as f64 / rate,
                     fraction: if playing.length == 0 {
                         0.0
                     } else {
@@ -600,7 +814,8 @@ impl OlioApp {
         commands
     }
 
-    /// Holding Escape stops everything; a tap only explains that.
+    /// Holding Escape stops everything. A tap clears the selection, and
+    /// explains the hold if something is playing.
     fn escape_hold(&mut self, ctx: &egui::Context, commands: &mut Vec<Command>) {
         let typing = ctx.text_edit_focused();
         let pressed = !typing
@@ -612,8 +827,9 @@ impl OlioApp {
                             key: Key::Escape,
                             pressed: true,
                             repeat: false,
+                            modifiers,
                             ..
-                        }
+                        } if modifiers.is_none()
                     )
                 })
             });
@@ -636,8 +852,12 @@ impl OlioApp {
                 ctx.request_repaint_after(STOP_ALL_HOLD - held);
             }
         } else {
-            if !self.escape_fired && !self.playing.is_empty() {
-                self.set_status("Hold Esc to stop all sounds", false);
+            if !self.escape_fired {
+                if self.playing.is_empty() {
+                    self.selected = None;
+                } else {
+                    self.set_status("Hold Esc to stop all sounds", false);
+                }
             }
             self.escape_down_since = None;
         }
@@ -701,11 +921,35 @@ impl OlioApp {
 
     // ----- panels ---------------------------------------------------------
 
-    fn toolbar(&self, ui: &mut Ui, commands: &mut Vec<Command>) {
+    /// Master volume, the playing bubbles, Fade All and Stop All.
+    fn toolbar(&self, ui: &mut Ui, commands: &mut Vec<Command>, actions: &mut Vec<MenuAction>) {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new("Olio").strong().size(18.0));
+            let muted = self.prefs.muted;
+            let mute = ui
+                .selectable_label(muted, if muted { "🔇" } else { "🔊" })
+                .on_hover_text(format!(
+                    "{} ({})",
+                    if muted { "Unmute" } else { "Mute" },
+                    menu::shortcut_text(ui.ctx(), MenuAction::ToggleMute)
+                ));
+            mute.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, muted, "Mute"));
+            if mute.clicked() {
+                actions.push(MenuAction::ToggleMute);
+            }
+            let mut percent = (self.prefs.volume * 100.0).round();
+            ui.spacing_mut().slider_width = 120.0;
+            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+                .show_value(false)
+                .trailing_fill(true);
+            let slider = ui
+                .add_enabled(!self.prefs.muted, slider)
+                .on_hover_text(format!("Master volume: {percent:.0}%"));
+            if slider.changed() {
+                actions.push(MenuAction::SetVolume(percent / 100.0));
+            }
             ui.separator();
+
             let dark = ui.visuals().dark_mode;
             let mut playing: Vec<(&str, TileColor, TileId)> = self
                 .playing
@@ -725,68 +969,92 @@ impl OlioApp {
                 }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let any = !self.playing.is_empty();
+                ui.add_space(4.0);
                 if ui
-                    .button("⏹ Stop All")
-                    .on_hover_text("Stop every sound (or hold Esc)")
+                    .add_enabled(any, egui::Button::new("⏹ Stop All"))
+                    .on_hover_text(format!(
+                        "Stop every sound ({}, or hold Esc)",
+                        menu::shortcut_text(ui.ctx(), MenuAction::StopAll)
+                    ))
                     .clicked()
                 {
                     commands.push(Command::StopAll);
+                }
+                if ui
+                    .add_enabled(any, egui::Button::new("Fade All"))
+                    .on_hover_text(format!(
+                        "Fade every sound out over {} s ({})",
+                        FADE_ALL.as_secs(),
+                        menu::shortcut_text(ui.ctx(), MenuAction::FadeAll)
+                    ))
+                    .clicked()
+                {
+                    commands.push(Command::FadeAll);
                 }
             });
         });
     }
 
-    /// The bottom bar; returns the button that was clicked, if any.
-    fn bottom_bar(&self, ui: &mut Ui) -> Option<BarButton> {
-        let mut clicked = None;
+    /// Panel toggles, Add Sound and Import, the status line, and the output
+    /// device.
+    fn bottom_bar(&self, ui: &mut Ui, actions: &mut Vec<MenuAction>) {
         ui.horizontal(|ui| {
-            if ui.button("+ Add Sound…").clicked() {
-                clicked = Some(BarButton::AddSound);
+            let ctx = ui.ctx().clone();
+            if ui
+                .selectable_label(self.prefs.show_sets, "Sets")
+                .on_hover_text(format!(
+                    "Show or hide the sets ({})",
+                    menu::shortcut_text(&ctx, MenuAction::ToggleSets)
+                ))
+                .clicked()
+            {
+                actions.push(MenuAction::ToggleSets);
+            }
+            ui.separator();
+            if ui
+                .button("+ Add Sound…")
+                .on_hover_text(format!(
+                    "Add audio or video files to this set ({})",
+                    menu::shortcut_text(&ctx, MenuAction::AddSound)
+                ))
+                .clicked()
+            {
+                actions.push(MenuAction::AddSound);
             }
             ui.menu_button("Import", |ui| {
                 if ui.button("Folder as Set…").clicked() {
-                    clicked = Some(BarButton::ImportFolder);
+                    actions.push(MenuAction::ImportFolder);
                     ui.close();
                 }
                 if ui.button("Board (JSON)…").clicked() {
-                    clicked = Some(BarButton::ImportBoard);
+                    actions.push(MenuAction::ImportBoard);
                     ui.close();
                 }
             });
-            let inspector = if self.show_inspector {
-                "Hide Inspector"
-            } else {
-                "Show Inspector"
-            };
-            if ui.button(inspector).clicked() {
-                clicked = Some(BarButton::ToggleInspector);
-            }
             ui.separator();
-            if let Some(error) = &self.load_error {
-                ui.colored_label(
-                    ui.visuals().error_fg_color,
-                    format!("Library not loaded, changes are not saved: {error}"),
-                );
-            } else if let Some(status) = self
-                .status
-                .as_ref()
-                .filter(|s| s.since.elapsed() < STATUS_TIME)
-            {
-                if status.error {
-                    ui.colored_label(ui.visuals().error_fg_color, &status.text);
-                } else {
-                    ui.label(&status.text);
-                }
-            }
+
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .selectable_label(self.prefs.show_inspector, "Inspector")
+                    .on_hover_text(format!(
+                        "Show or hide the inspector ({})",
+                        menu::shortcut_text(&ctx, MenuAction::ToggleInspector)
+                    ))
+                    .clicked()
+                {
+                    actions.push(MenuAction::ToggleInspector);
+                }
+                ui.separator();
                 match &self.audio {
                     Audio::Running(engine) => {
                         if let Some(output) = engine.output() {
                             ui.weak(format!(
-                                "🔈 {} · {:.1} kHz",
+                                "{} · {:.1} kHz",
                                 output.device,
                                 output.rate as f32 / 1000.0
-                            ));
+                            ))
+                            .on_hover_text("The output device");
                         }
                     }
                     Audio::Unavailable { reason, .. } => {
@@ -796,17 +1064,29 @@ impl OlioApp {
                         );
                     }
                 }
+                ui.separator();
+                // The status takes what is left, truncated.
+                let status = if let Some(error) = &self.load_error {
+                    Some((
+                        format!("Library not loaded, changes are not saved: {error}"),
+                        true,
+                    ))
+                } else {
+                    self.status
+                        .as_ref()
+                        .filter(|status| status.remaining().is_some())
+                        .map(|status| (status.text.clone(), status.error))
+                };
+                if let Some((text, error)) = status {
+                    let mut text = RichText::new(text);
+                    if error {
+                        text = text.color(ui.visuals().error_fg_color);
+                    }
+                    ui.add(egui::Label::new(text).truncate());
+                }
             });
         });
-        clicked
     }
-}
-
-enum BarButton {
-    AddSound,
-    ImportFolder,
-    ImportBoard,
-    ToggleInspector,
 }
 
 impl eframe::App for OlioApp {
@@ -823,36 +1103,58 @@ impl eframe::App for OlioApp {
             self.selected = None;
         }
 
-        let mut commands = self.keyboard_commands(&ctx);
-        self.escape_hold(&ctx, &mut commands);
+        // A confirmation takes the keyboard while it is up.
+        if let Some(confirm) = self.confirm.take() {
+            match confirm::show(&ctx, &confirm) {
+                Reply::Waiting => self.confirm = Some(confirm),
+                Reply::Cancelled => {}
+                Reply::Confirmed => self.resolve(confirm.pending),
+            }
+        }
+        let mut commands = Vec::new();
+        let mut actions = Vec::new();
+        if self.confirm.is_none() {
+            actions = menu::pressed(&ctx);
+            commands = self.keyboard_commands(&ctx);
+            self.escape_hold(&ctx, &mut commands);
+        }
         self.import_dropped_files(&ctx);
         let files_hovering = ctx.input(|input| !input.raw.hovered_files.is_empty());
 
-        egui::Panel::top("olio-toolbar").show(ui, |ui| {
-            ui.add_space(4.0);
-            self.toolbar(ui, &mut commands);
+        egui::Panel::top("olio-top").show(ui, |ui| {
+            let state = MenuState {
+                prefs: &self.prefs,
+                tile_selected: self.selected.is_some(),
+                set_removable: self.library.sets.len() > 1,
+                playing: !self.playing.is_empty(),
+            };
+            actions.extend(menu::bar(ui, &state));
+            ui.separator();
             ui.add_space(2.0);
+            self.toolbar(ui, &mut commands, &mut actions);
+            ui.add_space(4.0);
         });
-        let bar = egui::Panel::bottom("olio-bottom")
-            .show(ui, |ui| {
-                ui.add_space(2.0);
-                let clicked = self.bottom_bar(ui);
-                ui.add_space(2.0);
-                clicked
-            })
-            .inner;
+        egui::Panel::bottom("olio-bottom").show(ui, |ui| {
+            ui.add_space(4.0);
+            self.bottom_bar(ui, &mut actions);
+            ui.add_space(4.0);
+        });
 
         let sounding: HashSet<SetId> = self.playing.values().map(|playing| playing.set).collect();
-        let sidebar_actions = egui::Panel::left("olio-sets")
-            .resizable(true)
-            .default_size(210.0)
-            .min_size(150.0)
-            .show(ui, |ui| {
-                sidebar::show(ui, &self.library, self.current, &sounding, &mut self.rename)
-            })
-            .inner;
+        let sidebar_actions = if self.prefs.show_sets {
+            egui::Panel::left("olio-sets")
+                .resizable(true)
+                .default_size(210.0)
+                .min_size(150.0)
+                .show(ui, |ui| {
+                    sidebar::show(ui, &self.library, self.current, &sounding, &mut self.rename)
+                })
+                .inner
+        } else {
+            Vec::new()
+        };
 
-        let inspector_actions = if self.show_inspector {
+        let inspector_actions = if self.prefs.show_inspector {
             // Fields, not `current_set()`, so the draft can be borrowed too.
             let set = self
                 .library
@@ -861,12 +1163,20 @@ impl eframe::App for OlioApp {
             let tile = self.selected.and_then(|id| set.tile(id));
             let state = tile.and_then(|tile| self.clips.get(&tile.sound.hash));
             let playing = tile.is_some_and(|tile| self.playing.contains_key(&tile.id));
+            let focus_title = std::mem::take(&mut self.focus_title);
             egui::Panel::right("olio-inspector")
                 .resizable(true)
-                .default_size(280.0)
-                .min_size(220.0)
+                .default_size(300.0)
+                .min_size(240.0)
                 .show(ui, |ui| {
-                    inspector::show(ui, set, tile, state, playing, &mut self.title_draft)
+                    let view = inspector::View {
+                        set,
+                        tile,
+                        state,
+                        playing,
+                        focus_title,
+                    };
+                    inspector::show(ui, &view, &mut self.title_draft)
                 })
                 .inner
         } else {
@@ -874,6 +1184,7 @@ impl eframe::App for OlioApp {
         };
 
         let progress = self.progress();
+        let reveal_selected = std::mem::take(&mut self.reveal_selected);
         let grid = egui::CentralPanel::default()
             .show(ui, |ui| {
                 let view = GridView {
@@ -881,6 +1192,8 @@ impl eframe::App for OlioApp {
                     clips: &self.clips,
                     playing: &progress,
                     selected: self.selected,
+                    reveal_selected,
+                    click_plays: self.prefs.click_plays,
                     files_hovering,
                 };
                 grid::show(ui, &view)
@@ -892,12 +1205,23 @@ impl eframe::App for OlioApp {
         }
         commands.extend(grid.commands);
 
-        let acted = !commands.is_empty();
+        if self.show_shortcuts {
+            menu::shortcuts_window(&ctx, &mut self.show_shortcuts);
+        }
+
+        let acted = !commands.is_empty() || !actions.is_empty();
         for command in commands {
             self.execute(command);
         }
         for id in grid.remove {
-            self.remove_tile(id);
+            self.ask_remove_tile(id);
+        }
+        for (id, color) in grid.recolor {
+            self.recolor_tile(id, color);
+        }
+        if let Some(id) = grid.rename {
+            self.selected = Some(id);
+            self.act(&ctx, MenuAction::RenameTile);
         }
         for action in sidebar_actions {
             self.apply_sidebar(action);
@@ -907,15 +1231,11 @@ impl eframe::App for OlioApp {
                 InspectorAction::Command(command) => self.execute(command),
                 InspectorAction::Rename(id, title) => self.rename_tile(id, title),
                 InspectorAction::Recolor(id, color) => self.recolor_tile(id, color),
-                InspectorAction::Remove(id) => self.remove_tile(id),
+                InspectorAction::Remove(id) => self.ask_remove_tile(id),
             }
         }
-        match bar {
-            Some(BarButton::AddSound) => self.add_sound_dialog(),
-            Some(BarButton::ImportFolder) => self.import_folder_dialog(),
-            Some(BarButton::ImportBoard) => self.import_board_dialog(),
-            Some(BarButton::ToggleInspector) => self.show_inspector = !self.show_inspector,
-            None => {}
+        for action in actions {
+            self.act(&ctx, action);
         }
 
         self.autosave(&ctx);
@@ -925,12 +1245,13 @@ impl eframe::App for OlioApp {
         if !self.playing.is_empty() {
             ctx.request_repaint_after(PLAYING_REPAINT);
         }
-        if let Some(status) = &self.status {
-            let shown = status.since.elapsed();
-            if shown < STATUS_TIME {
-                ctx.request_repaint_after(STATUS_TIME - shown);
-            }
+        if let Some(remaining) = self.status.as_ref().and_then(Status::remaining) {
+            ctx.request_repaint_after(remaining);
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.prefs.store(storage);
     }
 
     fn on_exit(&mut self) {

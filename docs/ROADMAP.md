@@ -22,22 +22,31 @@ are intentions, reordered as real use dictates.
   silence**, **fades**, a **room reverb** send, **folder import** in
   natural alphabetical order, **video audio extraction**, **board JSON**
   and the headless **`olio import`** for scripts.
+- Window ergonomics: a menu bar (File, Tile, Playback, View, Help) with
+  every shortcut written the platform's way and a Keyboard Shortcuts
+  window; master volume and mute; Fade All (`-`) beside Stop All
+  (Cmd-Esc); arrow keys move the selection, Return plays it, Delete
+  removes it after an in-window confirmation (sets too); right-click
+  menus on tiles (rename, colour, remove) and sets; the single-click
+  playback setting; the Sets and Inspector panels can be hidden; theme
+  choice (system, light, dark); window size, panel widths and
+  preferences remembered per library; tiles show the time left while
+  playing.
 
 ## M1 - Core playback
 
 - Solo (stops other tiles), Pausable (second press pauses), Only Play While
   Pressed (hold to play).
-- Per-tile volume with A and B levels; master volume with A/B flags, a fade
-  between them, and mute.
-- Pause All (Space), Fade All (Dash, 2 s), Stop All and reset (Cmd-Esc);
-  Shift+Ctrl solo, Shift+Ctrl+Cmd fade-and-solo.
-- Selection: Cmd-click and drag selection, Return plays the selection.
+- Per-tile volume with A and B levels; master volume A/B flags and a fade
+  between them.
+- Pause All (Space); Shift+Ctrl solo, Shift+Ctrl+Cmd fade-and-solo.
+- Selection: Cmd-click and drag selection of several tiles.
 - A peak limiter on the output instead of the hard clip; level meters in
   the toolbar and inspector.
 - Tile context menu: duplicate, play counts and reset; drag tiles between
   slots and to other sets (copy, Cmd to move).
-- Emoji on tiles (picker with search), the trigger bounce, single-click
-  playback setting.
+- Emoji on tiles (picker with search), the trigger bounce.
+- Undo for removing tiles and sets.
 - Peaks cached on disk so large sets draw before decoding; decoding of all
   sets in the background; garbage collection of sounds no tile uses.
 
@@ -47,8 +56,8 @@ are intentions, reordered as real use dictates.
   device (loop ignored, headphones badge).
 - Per-tile output device and channel pair for multichannel interfaces.
 - Following the default device and recovering when one is unplugged.
-- Settings window (General, Controllers, Mappings, Search); theme choice;
-  global Show Olio hotkey and Cmd-0.
+- Settings window (General, Controllers, Mappings, Search); global Show
+  Olio hotkey and Cmd-0.
 - Background imports with progress, so long videos do not pause the window.
 
 ## M3 - Editor

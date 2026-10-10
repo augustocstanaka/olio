@@ -41,6 +41,9 @@ fn main() -> eframe::Result {
     }
     let native = eframe::NativeOptions {
         viewport,
+        // Window size, panel widths and preferences live beside the
+        // library, so a scratch library has its own.
+        persistence_path: Some(store.root().join("preferences.ron")),
         ..Default::default()
     };
     eframe::run_native(

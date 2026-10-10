@@ -48,14 +48,25 @@ pub fn show(
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("+ New Set").clicked() {
+            let new_set = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
+            if ui
+                .button("+ New Set")
+                .on_hover_text(format!(
+                    "Add a set ({})",
+                    ui.ctx().format_shortcut(&new_set)
+                ))
+                .clicked()
+            {
                 actions.push(SidebarAction::NewSet);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let removable = library.sets.len() > 1;
                 let remove = ui
-                    .add_enabled(removable, egui::Button::new("−"))
-                    .on_hover_text("Remove the selected set");
+                    .add_enabled(
+                        removable,
+                        egui::Button::new("−").min_size(Vec2::new(32.0, 0.0)),
+                    )
+                    .on_hover_text("Remove the front set…");
                 if remove.clicked() {
                     actions.push(SidebarAction::RemoveSet(current));
                 }
@@ -157,9 +168,19 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
 
     if response.double_clicked() {
         actions.push(SidebarAction::StartRename(row.set.id));
-    } else if response.clicked() {
+    } else if response.clicked() || response.secondary_clicked() {
         actions.push(SidebarAction::Select(row.set.id));
     }
+    response.context_menu(|ui| {
+        if ui.button("Rename").clicked() {
+            actions.push(SidebarAction::StartRename(row.set.id));
+            ui.close();
+        }
+        if ui.button("Remove Set…").clicked() {
+            actions.push(SidebarAction::RemoveSet(row.set.id));
+            ui.close();
+        }
+    });
 }
 
 fn rename_row(ui: &mut Ui, rename: &mut Rename, actions: &mut Vec<SidebarAction>) {

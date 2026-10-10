@@ -17,10 +17,14 @@ and UI text.
   or audio dependency.
 - `crates/control` (`olio-control`): the `Command` vocabulary every control
   surface speaks, and `keymap.rs` (slot <-> key).
-- `crates/app` (`olio-app`, binary `olio`): `app.rs` frame loop and
-  `execute(Command)`, `grid.rs` tiles, `sidebar.rs` sets, `inspector.rs`
-  tile settings, `import.rs` files/folders/boards (shared with `cli.rs`,
-  the headless `olio import`), `clips.rs` background decoding.
+- `crates/app` (`olio-app`, binary `olio`): `app.rs` frame loop,
+  `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
+  every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
+  `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
+  `prefs.rs` window preferences (`preferences.ron` beside the library),
+  `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
+  `import.rs` files/folders/boards (shared with `cli.rs`, the headless
+  `olio import`), `clips.rs` background decoding.
 - `xtask/`: the `cargo xtask` commands below; `demo.rs` synthesises the
   demo pack.
 - `docs/ARCHITECTURE.md`: threads, data flow, where a feature goes.
@@ -42,9 +46,14 @@ and UI text.
   you can rebuild while a window is open). `cargo xtask demo` builds a demo
   library to open with `--library target/demo/library`.
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-  to `target/screenshots/window.png`; use it for visual changes. The
-  window's own `--screenshot` only works while the window is visible on
-  screen.
+  in both themes to `target/screenshots/window.png` and
+  `window-light.png`; use it for visual changes, and copy the results to
+  `docs/images/` when they change. The window's own `--screenshot` only
+  works while the window is visible on screen.
+- UI rules: every command reachable from a menu, with its shortcut
+  declared once in `menu.rs`; shortcuts formatted by egui so they read
+  ⌘ on macOS and Ctrl on Windows; anything destructive confirms in the
+  window (`confirm.rs`), never with a native dialog; check both themes.
 
 ## Platform notes
 

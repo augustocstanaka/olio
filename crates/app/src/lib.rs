@@ -12,12 +12,16 @@
 pub mod app;
 pub mod cli;
 mod clips;
+mod confirm;
+mod fonts;
 mod format;
 mod grid;
 pub mod import;
 mod inspector;
 mod keys;
+mod menu;
 mod palette;
+pub mod prefs;
 mod sidebar;
 
 use std::path::PathBuf;

@@ -27,7 +27,30 @@ On a generation bump, re-check every line below and update the versions.
 - Text in a fixed width: `LayoutJob::simple_singleline` plus
   `TextWrapping::truncate_at_width`, then `painter.layout_job`.
 - Glyphs outside the default fonts (such as `▾`) draw as boxes; the emoji
-  font covers `🔁`, `🔊`, `■`, `▶`, `⏹`.
+  font covers `🔁`, `🔊`, `🔇`, `■`, `▶`, `⏹`, `●`, and `✔` (the full list
+  is in egui's `lib.rs` under "special emojis").
+- Menus: `egui::MenuBar::new().ui(ui, ...)` with `ui.menu_button` inside;
+  a `menu_button` inside a menu becomes a submenu. `ui.close()` closes the
+  menu after a click. `Button::shortcut_text` puts the shortcut on the
+  right; it becomes part of the accessibility label ("Add Sound… ⌘O"), so
+  tests query it with `get_by_label_contains`. Menus have no check marks:
+  `menu.rs` prefixes `✔ ` itself.
+- Shortcuts: declare `KeyboardShortcut`s once, show them with
+  `ctx.format_shortcut` and take them with
+  `input_mut(|i| i.consume_shortcut(..))`, which removes the key event so
+  nothing else sees it. `Modifiers::COMMAND` means Cmd on macOS and Ctrl
+  on Windows. `gui_zoom::zoom_menu_buttons` gives the zoom items and egui
+  handles the zoom keys itself. `format_shortcut` writes ⌘⇧⌥ only if the
+  Body font has those glyphs, else "Cmd+Shift+O"; egui's bundled fonts do
+  not, so `fonts.rs` adds macOS's Apple Symbols as a fallback family.
+- `egui::Modal` draws in an `Area` with a backdrop; `should_close()`
+  consumes Escape, so check your own keys (Return) after it. Buttons in a
+  modal are found by label like any other.
+- Persistence: the `persistence` feature of eframe stores egui's memory
+  (panel widths), the window geometry and whatever `App::save` writes
+  with `eframe::set_value`. `persistence_path` names the file; it must be
+  set, or the default `olio/app.ron` lands in the library folder on
+  case-insensitive file systems.
 
 ## egui_kittest 0.36
 
@@ -37,6 +60,9 @@ On a generation bump, re-check every line below and update the versions.
   clicks one step apart are not a double-click. The window tests use
   `with_step_dt(1.0 / 60.0)`.
 - Queries match accessibility labels: give custom-painted widgets one with
-  `response.widget_info(...)`, as tiles and set rows do.
+  `response.widget_info(...)`, as tiles and set rows do. Calling it on a
+  built-in widget's response replaces its label (the mute button reads
+  "Mute", not "🔊").
+- `harness.ctx.set_theme(egui::Theme::Light)` renders the light theme.
 - `.wgpu()` on the builder plus `harness.render()` gives an image; it needs
   a GPU adapter, so rendering tests are opt-in (`OLIO_RENDER=1`).
