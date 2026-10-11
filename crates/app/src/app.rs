@@ -31,7 +31,7 @@ use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
 use crate::prefs::{Polish, Preferences, TileStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
-use crate::undo::{History, Removed};
+use crate::undo::{Change, History};
 use crate::{keys, palette, polish};
 
 /// Escape must be held this long to stop everything, so a stray tap does
@@ -508,6 +508,12 @@ impl OlioApp {
                 }
             }
             MenuAction::Undo => self.undo(),
+            MenuAction::DuplicateTile => {
+                if let Some(id) = self.selected {
+                    self.duplicate_tile(id, None);
+                }
+            }
+            MenuAction::MoveTile(direction) => self.nudge_selected(direction),
             MenuAction::Redo => self.redo(),
             MenuAction::ToggleSpectrograms => {
                 self.prefs.show_spectrograms = !self.prefs.show_spectrograms;
@@ -673,16 +679,87 @@ impl OlioApp {
 
     // ----- library edits --------------------------------------------------
 
+    /// Records a change just made: it can be undone, and the status says
+    /// what happened, with an Undo button.
+    fn record(&mut self, change: Change) {
+        if let Some(message) = change.done_message() {
+            self.set_undo_status(message);
+        }
+        self.history.record(change);
+    }
+
     /// Removes a tile at once; Undo puts it back.
     fn remove_tile(&mut self, id: TileId) {
-        if let Some(removed) = self.take_tile(id) {
-            self.set_undo_status(removed.removed_message());
-            self.history.record(removed);
+        if let Some(change) = self.take_tile(id) {
+            self.record(change);
         }
     }
 
+    /// Copies a tile into `at`, or the next free slot, and selects the copy.
+    fn duplicate_tile(&mut self, id: TileId, at: Option<Slot>) {
+        let Some((set, tile)) = self.library.tile(id) else {
+            return;
+        };
+        let (set, source) = (set.id, tile.title.clone());
+        let copy = self
+            .library
+            .set_mut(set)
+            .and_then(|target| target.duplicate(id, at));
+        let Some((_, tile)) = copy.and_then(|copy| self.library.tile(copy)) else {
+            self.set_status("There is no free slot in this set for a copy", true);
+            return;
+        };
+        let tile = Box::new(tile.clone());
+        self.selected = Some(tile.id);
+        self.reveal_selected = true;
+        self.changed();
+        self.record(Change::Duplicated { set, tile, source });
+    }
+
+    /// Moves a tile to another slot of its set, swapping with a tile there.
+    fn move_tile(&mut self, id: TileId, to: Slot) {
+        if let Some(change) = self.shift_tile(id, to) {
+            self.record(change);
+        }
+    }
+
+    /// Moves the selected tile one slot over, swapping with a tile there.
+    fn nudge_selected(&mut self, direction: Direction) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        let Some((set, tile)) = self.library.tile(id) else {
+            return;
+        };
+        let Slot { row, column } = tile.slot;
+        let to = match direction {
+            Direction::Up => row.checked_sub(1).map(|row| Slot::new(row, column)),
+            Direction::Down => Some(Slot::new(row + 1, column)),
+            Direction::Left => column.checked_sub(1).map(|column| Slot::new(row, column)),
+            Direction::Right => Some(Slot::new(row, column + 1)),
+        };
+        if let Some(to) = to.filter(|&to| set.contains(to)) {
+            self.move_tile(id, to);
+            self.reveal_selected = true;
+        }
+    }
+
+    fn shift_tile(&mut self, id: TileId, to: Slot) -> Option<Change> {
+        let (set, tile) = self.library.tile(id)?;
+        let (set, title) = (set.id, tile.title.clone());
+        let from = self.library.set_mut(set)?.move_tile(id, to)?;
+        self.changed();
+        Some(Change::Moved {
+            set,
+            tile: id,
+            title,
+            from,
+            to,
+        })
+    }
+
     /// Takes a tile off its set, for removing or redoing a removal.
-    fn take_tile(&mut self, id: TileId) -> Option<Removed> {
+    fn take_tile(&mut self, id: TileId) -> Option<Change> {
         let set = self.library.tile(id)?.0.id;
         self.stop_tile(id);
         let tile = self.library.set_mut(set)?.remove_tile(id)?;
@@ -690,14 +767,14 @@ impl OlioApp {
             self.selected = None;
         }
         self.changed();
-        Some(Removed::Tile {
+        Some(Change::RemovedTile {
             set,
             tile: Box::new(tile),
         })
     }
 
     /// Takes a set out of the library (never the last one).
-    fn take_set(&mut self, id: SetId) -> Option<Removed> {
+    fn take_set(&mut self, id: SetId) -> Option<Change> {
         if self.library.sets.len() <= 1 {
             return None;
         }
@@ -716,78 +793,162 @@ impl OlioApp {
             self.selected = None;
         }
         self.changed();
-        Some(Removed::Set { index, set })
+        Some(Change::RemovedSet { index, set })
     }
 
-    /// Puts back what a removal took, and returns a record of it as it is
-    /// now, for redoing. Gives it back if there is no room.
-    fn put_back(&mut self, removed: Removed) -> Result<Removed, Removed> {
-        match removed {
-            Removed::Tile { set, tile } => {
-                let home = if self.library.set(set).is_some() {
-                    set
-                } else {
-                    self.current
-                };
-                let record = tile.clone();
-                let Some(target) = self.library.set_mut(home) else {
-                    return Err(Removed::Tile { set, tile });
-                };
-                let Some(slot) = target.put_back(&tile) else {
-                    self.set_status("There is no free slot to put the tile back in", true);
-                    return Err(Removed::Tile { set, tile });
-                };
-                let mut record = record;
-                record.slot = slot;
-                self.execute(Command::SelectSet(home));
-                self.selected = Some(record.id);
-                self.reveal_selected = true;
-                self.changed();
-                Ok(Removed::Tile {
-                    set: home,
-                    tile: record,
+    /// Puts a whole tile into its set (or the front set, if that is gone):
+    /// in its own slot if free, else the first free one. Selects it.
+    fn insert_tile(
+        &mut self,
+        set: SetId,
+        mut tile: Box<Tile>,
+    ) -> Result<(SetId, Box<Tile>), Box<Tile>> {
+        let home = if self.library.set(set).is_some() {
+            set
+        } else {
+            self.current
+        };
+        let slot = self
+            .library
+            .set_mut(home)
+            .and_then(|target| target.put_back(&tile));
+        let Some(slot) = slot else {
+            self.set_status("There is no free slot to put the tile back in", true);
+            return Err(tile);
+        };
+        tile.slot = slot;
+        self.execute(Command::SelectSet(home));
+        self.selected = Some(tile.id);
+        self.reveal_selected = true;
+        self.changed();
+        Ok((home, tile))
+    }
+
+    /// Makes a change again (redo). Returns the record for undoing it.
+    fn apply(&mut self, change: Change) -> Result<Change, Change> {
+        match change {
+            Change::RemovedTile { set, tile } => {
+                let id = tile.id;
+                self.take_tile(id).ok_or(Change::RemovedTile { set, tile })
+            }
+            Change::RemovedSet { index, set } => {
+                let id = set.id;
+                self.take_set(id).ok_or(Change::RemovedSet { index, set })
+            }
+            Change::Duplicated { set, tile, source } => match self.insert_tile(set, tile) {
+                Ok((set, tile)) => Ok(Change::Duplicated { set, tile, source }),
+                Err(tile) => Err(Change::Duplicated { set, tile, source }),
+            },
+            Change::Moved {
+                set,
+                tile,
+                title,
+                from,
+                to,
+            } => {
+                let moved = self.shift_tile(tile, to);
+                self.show_moved(set, tile);
+                moved.ok_or(Change::Moved {
+                    set,
+                    tile,
+                    title,
+                    from,
+                    to,
                 })
             }
-            Removed::Set { index, set } => {
+        }
+    }
+
+    /// Undoes a change. Returns the record for redoing it.
+    fn revert(&mut self, change: Change) -> Result<Change, Change> {
+        match change {
+            Change::RemovedTile { set, tile } => match self.insert_tile(set, tile) {
+                Ok((set, tile)) => Ok(Change::RemovedTile { set, tile }),
+                Err(tile) => Err(Change::RemovedTile { set, tile }),
+            },
+            Change::RemovedSet { index, set } => {
                 let id = set.id;
                 let index = index.min(self.library.sets.len());
                 let record = set.clone();
                 self.library.sets.insert(index, set);
                 self.execute(Command::SelectSet(id));
                 self.changed();
-                Ok(Removed::Set { index, set: record })
+                Ok(Change::RemovedSet { index, set: record })
             }
+            Change::Duplicated { set, tile, source } => match self.take_tile(tile.id) {
+                Some(Change::RemovedTile { set, tile }) => {
+                    Ok(Change::Duplicated { set, tile, source })
+                }
+                _ => Err(Change::Duplicated { set, tile, source }),
+            },
+            Change::Moved {
+                set,
+                tile,
+                title,
+                from,
+                to,
+            } => {
+                let moved = self.shift_tile(tile, from);
+                self.show_moved(set, tile);
+                let change = Change::Moved {
+                    set,
+                    tile,
+                    title,
+                    from,
+                    to,
+                };
+                if moved.is_some() {
+                    Ok(change)
+                } else {
+                    Err(change)
+                }
+            }
+        }
+    }
+
+    /// Brings a moved tile into view, selected.
+    fn show_moved(&mut self, set: SetId, tile: TileId) {
+        if self.library.tile(tile).is_some() {
+            self.execute(Command::SelectSet(set));
+            self.selected = Some(tile);
+            self.reveal_selected = true;
         }
     }
 
     fn undo(&mut self) {
-        let Some(removed) = self.history.take_undo() else {
+        let Some(change) = self.history.take_undo() else {
             return;
         };
-        match self.put_back(removed) {
-            Ok(restored) => {
-                self.set_status(restored.put_back_message(), false);
-                // Redo removes it again.
-                self.history.push_redo(restored);
+        match self.revert(change) {
+            Ok(change) => {
+                self.set_status(change.undone_message(), false);
+                self.history.push_redo(change);
             }
-            Err(removed) => self.history.push_undo(removed),
+            // No free slot yet: it can be undone once there is one.
+            Err(change @ Change::RemovedTile { .. }) => self.history.push_undo(change),
+            Err(change) => self.set_status(
+                format!("“{}” can no longer be undone", change.describe()),
+                true,
+            ),
         }
     }
 
     fn redo(&mut self) {
-        let Some(removed) = self.history.take_redo() else {
+        let Some(change) = self.history.take_redo() else {
             return;
         };
-        let taken = match &removed {
-            Removed::Tile { tile, .. } => self.take_tile(tile.id),
-            Removed::Set { set, .. } => self.take_set(set.id),
-        };
-        match taken {
-            Some(taken) => {
-                self.set_undo_status(taken.removed_message());
-                self.history.push_undo(taken);
+        match self.apply(change) {
+            Ok(change) => {
+                if let Some(message) = change.done_message() {
+                    self.set_undo_status(message);
+                }
+                self.history.push_undo(change);
             }
-            None => self.history.push_redo(removed),
+            Err(change @ Change::Duplicated { .. }) => self.history.push_redo(change),
+            Err(change) => self.set_status(
+                format!("“{}” can no longer be redone", change.describe()),
+                true,
+            ),
         }
     }
 
@@ -864,9 +1025,8 @@ impl OlioApp {
 
     /// Removes a set (after the confirmation); Undo puts it back.
     fn remove_set(&mut self, id: SetId) {
-        if let Some(removed) = self.take_set(id) {
-            self.set_undo_status(removed.removed_message());
-            self.history.record(removed);
+        if let Some(change) = self.take_set(id) {
+            self.record(change);
         }
     }
 
@@ -1480,8 +1640,8 @@ impl eframe::App for OlioApp {
                     .and_then(|id| self.library.tile(id))
                     .is_some_and(|(_, tile)| self.prefs.polish.applies_to(tile)),
                 set_has_tiles: !self.current_set().tiles.is_empty(),
-                undo: self.history.next_undo().map(Removed::describe),
-                redo: self.history.next_redo().map(Removed::describe),
+                undo: self.history.next_undo().map(Change::describe),
+                redo: self.history.next_redo().map(Change::describe),
                 set_removable: self.library.sets.len() > 1,
                 playing: !self.playing.is_empty(),
             };
@@ -1597,6 +1757,17 @@ impl eframe::App for OlioApp {
         }
         for id in grid.polish {
             self.polish_tile(id);
+        }
+        for drop in grid.drops {
+            if drop.copy {
+                self.duplicate_tile(drop.tile, Some(drop.slot));
+            } else {
+                self.move_tile(drop.tile, drop.slot);
+                self.selected = Some(drop.tile);
+            }
+        }
+        if let Some(id) = grid.duplicate {
+            self.duplicate_tile(id, None);
         }
         if let Some(id) = grid.choose_emoji {
             self.selected = Some(id);

@@ -29,7 +29,11 @@ pub enum MenuAction {
     EditPolish,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
-    /// Put back the last removed tile or set.
+    /// Copy the selected tile into the next free slot.
+    DuplicateTile,
+    /// Move the selected tile one slot over, swapping with a tile there.
+    MoveTile(Direction),
+    /// Undo the last change to the board.
     Undo,
     /// Remove it again.
     Redo,
@@ -59,6 +63,7 @@ pub enum Direction {
 
 const CMD: Modifiers = Modifiers::COMMAND;
 const CMD_SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
+const SHIFT: Modifiers = Modifiers::SHIFT;
 const NONE: Modifiers = Modifiers::NONE;
 
 /// Every shortcut. The first entry for an action is the one the menus
@@ -122,6 +127,26 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::Move(Direction::Right),
         KeyboardShortcut::new(NONE, Key::ArrowRight),
+    ),
+    (
+        MenuAction::DuplicateTile,
+        KeyboardShortcut::new(CMD, Key::D),
+    ),
+    (
+        MenuAction::MoveTile(Direction::Up),
+        KeyboardShortcut::new(SHIFT, Key::ArrowUp),
+    ),
+    (
+        MenuAction::MoveTile(Direction::Down),
+        KeyboardShortcut::new(SHIFT, Key::ArrowDown),
+    ),
+    (
+        MenuAction::MoveTile(Direction::Left),
+        KeyboardShortcut::new(SHIFT, Key::ArrowLeft),
+    ),
+    (
+        MenuAction::MoveTile(Direction::Right),
+        KeyboardShortcut::new(SHIFT, Key::ArrowRight),
     ),
 ];
 
@@ -257,6 +282,32 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 selected,
                 &mut actions,
             );
+            ui.separator();
+            item(
+                ui,
+                "Duplicate",
+                MenuAction::DuplicateTile,
+                selected,
+                &mut actions,
+            );
+            ui.add_enabled_ui(selected, |ui| {
+                ui.menu_button("Move", |ui| {
+                    for (direction, label) in [
+                        (Direction::Up, "Up"),
+                        (Direction::Down, "Down"),
+                        (Direction::Left, "Left"),
+                        (Direction::Right, "Right"),
+                    ] {
+                        item(
+                            ui,
+                            label,
+                            MenuAction::MoveTile(direction),
+                            true,
+                            &mut actions,
+                        );
+                    }
+                });
+            });
             ui.separator();
             let polish = if state.tile_polished {
                 "Remove Polish"
@@ -474,6 +525,11 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                             "Select the tile to the right",
                         ),
                         (MenuAction::RemoveTile, "Remove the selected tile"),
+                        (MenuAction::DuplicateTile, "Duplicate the selected tile"),
+                        (
+                            MenuAction::MoveTile(Direction::Left),
+                            "Move the selected tile (with any arrow)",
+                        ),
                         (
                             MenuAction::PolishSelected,
                             "Polish the selected tile, or unpolish it",
@@ -496,6 +552,17 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                     let set_key = ctx.format_shortcut(&KeyboardShortcut::new(CMD, Key::Num1));
                     row(ui, format!("{set_key} … 9"), "Bring a set to the front");
                     row(ui, "Double-click a set".to_owned(), "Rename it");
+                    row(
+                        ui,
+                        "Drag a tile".to_owned(),
+                        "Move it; onto another tile to swap them",
+                    );
+                    let copy = if cfg!(target_os = "macos") {
+                        "⌥"
+                    } else {
+                        "Ctrl+"
+                    };
+                    row(ui, format!("{copy}drag a tile"), "Drop a copy of it");
                 });
         });
 }

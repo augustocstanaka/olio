@@ -76,10 +76,39 @@ pub struct GridOutput {
     pub polish: Vec<TileId>,
     /// A tile whose emoji should be chosen.
     pub choose_emoji: Option<TileId>,
+    /// A tile to copy into the next free slot.
+    pub duplicate: Option<TileId>,
+    /// Tiles dropped on a slot by dragging.
+    pub drops: Vec<Drop>,
     /// `Some` when the selection changed: the tile clicked, or `None` for
     /// a click on an empty slot.
     pub select: Option<Option<TileId>>,
     pub layout: Option<GridLayout>,
+}
+
+/// A tile dragged onto a slot: moved there (swapping with a tile already
+/// there), or copied there when the copy modifier was held.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drop {
+    pub tile: TileId,
+    pub slot: Slot,
+    pub copy: bool,
+}
+
+/// The modifier that makes a drag drop a copy: Option on macOS, Ctrl
+/// elsewhere, as in each platform's file manager.
+fn copy_modifier(modifiers: egui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.alt
+    } else {
+        modifiers.ctrl || modifiers.alt
+    }
+}
+
+/// Where the grab point sits inside a dragged tile, kept from the start of
+/// the drag so the ghost does not jump.
+fn grab_offset_id() -> Id {
+    Id::new("olio-drag-offset")
 }
 
 /// Where the grid was drawn this frame, for finding the slot under a drop.
@@ -150,21 +179,73 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
             layout.origin = grid_rect.min + Vec2::splat(inset);
             let dark = ui.visuals().dark_mode;
             let pointer = ui.ctx().pointer_latest_pos();
+            let dragging = egui::DragAndDrop::payload::<TileId>(ui.ctx())
+                .map(|id| *id)
+                .filter(|&id| view.set.tile(id).is_some());
+            // The release, if the button came up this frame: where and with
+            // which modifiers (the pointer may already be gone).
+            let release = ui.input(|input| {
+                input.events.iter().find_map(|event| match event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers,
+                    } => Some((*pos, *modifiers)),
+                    _ => None,
+                })
+            });
+            let target = dragging
+                .and(release.map(|(pos, _)| pos).or(pointer))
+                .and_then(|pos| layout.slot_at(pos));
             for row in 0..rows {
                 for column in 0..columns {
                     let slot = Slot::new(row, column);
                     let rect = layout.rect(slot);
                     match view.set.tile_at(slot) {
-                        Some(tile) => tile_ui(ui, rect, tile, view, dark, &mut output),
+                        Some(tile) => {
+                            let lifted = Lifted {
+                                lifted: dragging == Some(tile.id),
+                                // Hovering another tile: it shows where it
+                                // will go, the dragged tile's old slot.
+                                swap_in: target
+                                    .filter(|&target| target != tile.slot)
+                                    .and_then(|target| view.set.tile_at(target)),
+                            };
+                            tile_ui(ui, rect, tile, view, dark, lifted, &mut output);
+                        }
                         None => {
                             let targeted = pointer.is_some_and(|pos| rect.contains(pos));
                             let response =
                                 ui.interact(rect, Id::new(("slot", slot)), Sense::click());
+                            if let Some(key) = TileKey::for_slot(slot) {
+                                response.widget_info(|| {
+                                    WidgetInfo::labeled(
+                                        WidgetType::Button,
+                                        true,
+                                        format!("Empty slot {}", key.label()),
+                                    )
+                                });
+                            }
                             if response.clicked() {
                                 output.select = Some(None);
                             }
                             empty_slot(ui, rect, slot, view, targeted);
                         }
+                    }
+                }
+            }
+            if let Some(id) = dragging {
+                drag_feedback(ui, view, &layout, id, target, pointer);
+                if let (Some((_, modifiers)), Some(slot)) = (release, target) {
+                    let copy = copy_modifier(modifiers);
+                    let from = view.set.tile(id).map(|tile| tile.slot);
+                    if copy || from != Some(slot) {
+                        output.drops.push(Drop {
+                            tile: id,
+                            slot,
+                            copy,
+                        });
                     }
                 }
             }
@@ -186,15 +267,109 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
     output
 }
 
+/// While a tile is dragged: the target slot outlined (a tile there will
+/// swap), the grabbing hand, and a ghost of the tile under the pointer.
+fn drag_feedback(
+    ui: &Ui,
+    view: &GridView,
+    layout: &GridLayout,
+    id: TileId,
+    target: Option<Slot>,
+    pointer: Option<Pos2>,
+) {
+    let Some(tile) = view.set.tile(id) else {
+        return;
+    };
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    let dark = ui.visuals().dark_mode;
+    if let Some(slot) = target.filter(|&slot| slot != tile.slot) {
+        let rect = layout.rect(slot);
+        let visuals = ui.visuals();
+        if view.set.is_free(slot) {
+            ui.painter().rect_filled(
+                rect,
+                ROUNDING,
+                visuals.selection.bg_fill.gamma_multiply(0.3),
+            );
+        }
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            ROUNDING + 2,
+            Stroke::new(2.5, visuals.selection.stroke.color),
+            StrokeKind::Outside,
+        );
+    }
+    let Some(pointer) = pointer else {
+        return;
+    };
+    let offset = ui
+        .ctx()
+        .data(|data| data.get_temp::<Vec2>(grab_offset_id()))
+        .unwrap_or(layout.cell / 2.0);
+    let ghost = Rect::from_min_size(pointer - offset, layout.cell);
+    let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("olio-drag-ghost"));
+    let mut painter = ui.ctx().layer_painter(layer);
+    let shadow = Shadow {
+        offset: [0, 8],
+        blur: 22,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 140 } else { 70 }),
+    };
+    painter.add(shadow.as_shape(ghost, ROUNDING));
+    painter.multiply_opacity(0.92);
+    let look = Look {
+        selected: false,
+        hovered: true,
+        dark,
+        style: view.style,
+        scale: 1.0,
+        meter: None,
+        spectrogram: view.spectrograms,
+    };
+    let state = view.clips.get(&tile.sound.hash);
+    let progress = view.playing.get(&tile.id).copied();
+    // With the key it would have where it is held.
+    let mut ghost_tile = tile.clone();
+    if let Some(slot) = target {
+        ghost_tile.slot = slot;
+    }
+    paint_tile(
+        &painter,
+        ghost,
+        &ghost_tile,
+        state,
+        progress,
+        look,
+        view.images,
+    );
+}
+
+/// How a tile is shown while it is being dragged.
+#[derive(Clone, Copy)]
+struct Lifted<'a> {
+    lifted: bool,
+    /// The tile it would swap with, previewed in its place.
+    swap_in: Option<&'a Tile>,
+}
+
 fn tile_ui(
     ui: &mut Ui,
     rect: Rect,
     tile: &Tile,
     view: &GridView,
     dark: bool,
+    lifted: Lifted,
     output: &mut GridOutput,
 ) {
-    let response = ui.interact(rect, Id::new(("tile", tile.id)), Sense::click());
+    let response = ui.interact(rect, Id::new(("tile", tile.id)), Sense::click_and_drag());
+    response.dnd_set_drag_payload(tile.id);
+    if response.drag_started()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let offset = pointer - rect.min;
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(grab_offset_id(), offset));
+    }
     let progress = view.playing.get(&tile.id).copied();
     let state = view.clips.get(&tile.sound.hash);
     response.widget_info(|| {
@@ -230,6 +405,10 @@ fn tile_ui(
         }
         if ui.button("Emoji…").clicked() {
             output.choose_emoji = Some(tile.id);
+            ui.close();
+        }
+        if ui.button("Duplicate").clicked() {
+            output.duplicate = Some(tile.id);
             ui.close();
         }
         let polish = if view.polish.applies_to(tile) {
@@ -297,7 +476,35 @@ fn tile_ui(
             .filter(|meter| !meter.is_resting(view.now))
             .copied(),
     };
-    paint_tile(ui.painter(), rect, tile, state, progress, look, view.images);
+    let mut painter = ui.painter().clone();
+    if !lifted.lifted {
+        paint_tile(&painter, rect, tile, state, progress, look, view.images);
+        return;
+    }
+    match lifted.swap_in {
+        Some(other) => {
+            // The tile it would swap with, faintly, where it would land.
+            painter.multiply_opacity(0.5);
+            let state = view.clips.get(&other.sound.hash);
+            let progress = view.playing.get(&other.id).copied();
+            // With the key it would have there.
+            let mut other = other.clone();
+            other.slot = tile.slot;
+            let other = &other;
+            let look = Look {
+                selected: false,
+                hovered: false,
+                meter: None,
+                ..look
+            };
+            paint_tile(&painter, rect, other, state, progress, look, view.images);
+        }
+        None => {
+            // Left behind faintly while its ghost follows the pointer.
+            painter.multiply_opacity(0.3);
+            paint_tile(&painter, rect, tile, state, progress, look, view.images);
+        }
+    }
 }
 
 /// How a tile is drawn this frame.

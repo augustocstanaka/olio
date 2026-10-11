@@ -1,87 +1,115 @@
-//! Undo and redo for removing tiles and sets.
+//! Undo and redo for changes to the board: removing a tile or a set,
+//! duplicating a tile, and moving one to another slot.
 //!
 //! A removal keeps the whole tile or set, so undoing it brings back its
-//! slot, title, emoji and settings exactly. Only removals are recorded:
-//! other edits are small and made in plain sight in the inspector.
+//! slot, title, emoji and settings exactly. Settings changed in the
+//! inspector are not recorded: they are small and made in plain sight.
 
-use olio_library::{Set, SetId, Tile};
+use olio_library::{Set, SetId, Slot, Tile, TileId};
 
-/// The most removals remembered.
+/// The most changes remembered.
 const LIMIT: usize = 50;
 
-/// Something removed, kept so it can be put back.
+/// A change that can be undone, holding what is needed to undo or redo it.
 #[derive(Clone, Debug)]
-pub enum Removed {
-    // Boxed: a tile is much larger than the set variant's Vec.
-    Tile { set: SetId, tile: Box<Tile> },
-    Set { index: usize, set: Set },
+pub enum Change {
+    // Tiles are boxed: one is much larger than a set's Vec.
+    RemovedTile {
+        set: SetId,
+        tile: Box<Tile>,
+    },
+    RemovedSet {
+        index: usize,
+        set: Set,
+    },
+    /// A copy of the tile titled `source`.
+    Duplicated {
+        set: SetId,
+        tile: Box<Tile>,
+        source: String,
+    },
+    /// The tile went from one slot to another, swapping with any tile there.
+    Moved {
+        set: SetId,
+        tile: TileId,
+        title: String,
+        from: Slot,
+        to: Slot,
+    },
 }
 
-impl Removed {
-    /// What the removal was, for the Edit menu: "Remove “Applause”".
+impl Change {
+    /// What it was, for the Edit menu: "Remove “Applause”".
     pub fn describe(&self) -> String {
         match self {
-            Self::Tile { tile, .. } => format!("Remove “{}”", tile.title),
-            Self::Set { set, .. } => format!("Remove Set “{}”", set.name),
+            Self::RemovedTile { tile, .. } => format!("Remove “{}”", tile.title),
+            Self::RemovedSet { set, .. } => format!("Remove Set “{}”", set.name),
+            Self::Duplicated { source, .. } => format!("Duplicate “{source}”"),
+            Self::Moved { title, .. } => format!("Move “{title}”"),
         }
     }
 
-    /// The status after removing it: "Removed “Applause”".
-    pub fn removed_message(&self) -> String {
+    /// The status after making (or redoing) it, if it deserves one.
+    pub fn done_message(&self) -> Option<String> {
         match self {
-            Self::Tile { tile, .. } => format!("Removed “{}”", tile.title),
-            Self::Set { set, .. } => format!("Removed the set “{}”", set.name),
+            Self::RemovedTile { tile, .. } => Some(format!("Removed “{}”", tile.title)),
+            Self::RemovedSet { set, .. } => Some(format!("Removed the set “{}”", set.name)),
+            Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
+            // The tile is seen moving; no need to say so.
+            Self::Moved { .. } => None,
         }
     }
 
-    /// The status after undoing it: "Put back “Applause”".
-    pub fn put_back_message(&self) -> String {
+    /// The status after undoing it.
+    pub fn undone_message(&self) -> String {
         match self {
-            Self::Tile { tile, .. } => format!("Put back “{}”", tile.title),
-            Self::Set { set, .. } => format!("Put back the set “{}”", set.name),
+            Self::RemovedTile { tile, .. } => format!("Put back “{}”", tile.title),
+            Self::RemovedSet { set, .. } => format!("Put back the set “{}”", set.name),
+            Self::Duplicated { tile, .. } => format!("Removed the copy “{}”", tile.title),
+            Self::Moved { title, .. } => format!("Moved “{title}” back"),
         }
     }
 }
 
 #[derive(Default)]
 pub struct History {
-    undo: Vec<Removed>,
-    redo: Vec<Removed>,
+    undo: Vec<Change>,
+    redo: Vec<Change>,
 }
 
 impl History {
-    /// A new removal: it can be undone, and what was undone before can no
+    /// A new change: it can be undone, and what was undone before can no
     /// longer be redone.
-    pub fn record(&mut self, removed: Removed) {
+    pub fn record(&mut self, change: Change) {
         self.redo.clear();
-        self.push_undo(removed);
+        self.push_undo(change);
     }
 
     /// Back on the undo list after a redo, keeping the rest of the redo list.
-    pub fn push_undo(&mut self, removed: Removed) {
-        self.undo.push(removed);
+    pub fn push_undo(&mut self, change: Change) {
+        self.undo.push(change);
         if self.undo.len() > LIMIT {
             self.undo.remove(0);
         }
     }
 
-    pub fn push_redo(&mut self, removed: Removed) {
-        self.redo.push(removed);
+    pub fn push_redo(&mut self, change: Change) {
+        self.redo.push(change);
     }
 
-    pub fn take_undo(&mut self) -> Option<Removed> {
+    pub fn take_undo(&mut self) -> Option<Change> {
         self.undo.pop()
     }
 
-    pub fn take_redo(&mut self) -> Option<Removed> {
+    pub fn take_redo(&mut self) -> Option<Change> {
         self.redo.pop()
     }
 
-    pub fn next_undo(&self) -> Option<&Removed> {
+    pub fn next_undo(&self) -> Option<&Change> {
         self.undo.last()
     }
 
-    pub fn next_redo(&self) -> Option<&Removed> {
+    pub fn next_redo(&self) -> Option<&Change> {
         self.redo.last()
     }
 }
@@ -90,19 +118,19 @@ impl History {
 mod tests {
     use super::*;
 
-    fn set(name: &str) -> Removed {
-        Removed::Set {
+    fn set(name: &str) -> Change {
+        Change::RemovedSet {
             index: 0,
             set: Set::new(name),
         }
     }
 
-    fn name(removed: Option<&Removed>) -> Option<String> {
-        removed.map(Removed::describe)
+    fn name(change: Option<&Change>) -> Option<String> {
+        change.map(Change::describe)
     }
 
     #[test]
-    fn undo_and_redo_walk_back_and_forth_and_a_new_removal_ends_redo() {
+    fn undo_and_redo_walk_back_and_forth_and_a_new_change_ends_redo() {
         let mut history = History::default();
         history.record(set("A"));
         history.record(set("B"));
@@ -118,11 +146,11 @@ mod tests {
         let b = history.take_undo().unwrap();
         history.push_redo(b);
         history.record(set("C"));
-        assert!(history.next_redo().is_none(), "a new removal ends redo");
+        assert!(history.next_redo().is_none(), "a new change ends redo");
     }
 
     #[test]
-    fn only_the_last_fifty_removals_are_kept() {
+    fn only_the_last_fifty_changes_are_kept() {
         let mut history = History::default();
         for n in 0..60 {
             history.record(set(&n.to_string()));
@@ -132,5 +160,19 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, LIMIT);
+    }
+
+    #[test]
+    fn moves_are_described_but_not_announced() {
+        let moved = Change::Moved {
+            set: Set::new("S").id,
+            tile: TileId::random(),
+            title: "Applause".to_owned(),
+            from: Slot::new(0, 0),
+            to: Slot::new(1, 1),
+        };
+        assert_eq!(moved.describe(), "Move “Applause”");
+        assert_eq!(moved.done_message(), None);
+        assert_eq!(moved.undone_message(), "Moved “Applause” back");
     }
 }

@@ -40,9 +40,15 @@ Milestone 0, the playable skeleton, is done. Olio can:
 - **Stay in control.** A master volume and mute in the toolbar, a bubble
   for every playing sound, Fade All and Stop All. Removing a tile happens
   at once and ⌘Z (Ctrl+Z) or the Undo button in the status bar puts it
-  back; removing a set asks first and can be undone too. Menus list every
-  command with its shortcut (Help ▸ Keyboard
-  Shortcuts has them all), written the way the platform writes them.
+  back; removing a set asks first and can be undone too.
+- **Arrange the board.** Drag a tile to another slot to give it that key;
+  drop it on another tile and the two swap, with a preview of where each
+  will go. Hold Option (Ctrl on Windows) while dropping to drop a copy,
+  or press ⌘D (Ctrl+D) to duplicate the selected tile. Shift and an arrow
+  key move the selected tile from the keyboard. ⌘Z undoes any of it.
+- **Find your way.** Menus list every command with its shortcut (Help ▸
+  Keyboard Shortcuts has them all), written the way the platform writes
+  them.
 - **Shape each sound.** The inspector sets a tile's name, colour, loop, fade
   in, fade out (also used when you stop it) and reverb. Silence at the
   start and end of a sound is trimmed automatically, and every sound is

@@ -24,7 +24,7 @@ and UI text.
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
   `polish.rs` the Polish Preset window, `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
-  redo of removals,
+  redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless

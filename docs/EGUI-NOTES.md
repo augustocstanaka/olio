@@ -71,6 +71,15 @@ On a generation bump, re-check every line below and update the versions.
   and counts as a click outside.
 - Shortcut matching ignores extra Shift and Alt: ⌘Z also matches a
   press of ⇧⌘Z. `menu.rs` checks shortcuts with more modifiers first.
+- Drag and drop: give the source `Sense::click_and_drag()` (clicks and
+  double-clicks still work under the drag threshold) and call
+  `response.dnd_set_drag_payload(id)` every frame; read it anywhere with
+  `DragAndDrop::payload::<T>(ctx)`. egui clears it after the frame the
+  button is released and on Escape. Take the drop point and modifiers
+  from the `PointerButton { pressed: false }` event: kittest's `drop_at`
+  removes the pointer in the same frame. A ghost goes on an
+  `Order::Tooltip` layer painter; `painter.multiply_opacity` fades a copy
+  of the painter, not the original.
 - Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
   only lays out the visible rows (the emoji picker's 1,900 emoji).
 - Persistence: the `persistence` feature of eframe stores egui's memory

@@ -517,6 +517,132 @@ fn the_view_menu_switches_to_soft_tiles() {
     assert_eq!(harness.state().playing_titles(), ["Applause"]);
 }
 
+/// Drags with the primary button from one point to another, moving in
+/// steps as a hand would, and releases with `modifiers` held.
+fn drag(
+    harness: &mut Harness<'static, OlioApp>,
+    from: egui::Pos2,
+    to: egui::Pos2,
+    modifiers: egui::Modifiers,
+) {
+    harness.hover_at(from);
+    harness.run_steps(1);
+    harness.drag_at(from);
+    harness.run_steps(1);
+    for step in 1..=10 {
+        harness.hover_at(from + (to - from) * (step as f32 / 10.0));
+        harness.run_steps(1);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers,
+    });
+    harness.run_steps(2);
+}
+
+fn slot_of(harness: &Harness<'static, OlioApp>) -> (u8, u8) {
+    let tile = harness.state().selected_tile().expect("a tile is selected");
+    (tile.slot.row, tile.slot.column)
+}
+
+fn center(harness: &Harness<'static, OlioApp>, label: &str) -> egui::Pos2 {
+    harness.get_by_label(label).rect().center()
+}
+
+#[test]
+fn dragging_a_tile_to_an_empty_slot_moves_it_and_undo_moves_it_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, to) = (
+        center(&harness, "Big Game"),
+        center(&harness, "Empty slot A"),
+    );
+    drag(&mut harness, from, to, egui::Modifiers::NONE);
+    assert_eq!(harness.state().selected_title(), Some("Big Game"));
+    assert_eq!(slot_of(&harness), (2, 0), "now played by A");
+    harness.get_by_label("Empty slot 2");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 1));
+    harness.get_by_label("Moved “Big Game” back");
+}
+
+#[test]
+fn dropping_a_tile_on_another_swaps_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, to) = (center(&harness, "Applause"), center(&harness, "Tense"));
+    drag(&mut harness, from, to, egui::Modifiers::NONE);
+    assert_eq!(slot_of(&harness), (1, 2));
+    harness.get_by_label("Tense").click();
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 0));
+    // E now plays Applause.
+    harness.key_press(egui::Key::E);
+    harness.run_steps(2);
+    assert_eq!(harness.state().playing_titles(), ["Applause"]);
+}
+
+#[test]
+fn a_drag_with_the_copy_modifier_drops_a_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, to) = (
+        center(&harness, "Pensive"),
+        center(&harness, "Empty slot S"),
+    );
+    drag(&mut harness, from, to, egui::Modifiers::ALT);
+    assert_eq!(harness.state().selected_title(), Some("Pensive copy"));
+    assert_eq!(slot_of(&harness), (2, 1));
+    harness.get_by_label("Pensive");
+    harness.get_by_label("Duplicated “Pensive”");
+}
+
+#[test]
+fn duplicate_copies_into_the_next_free_slot_and_undo_takes_it_away() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Country Rock").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    harness.run_steps(2);
+    let copy = harness.state().selected_tile().unwrap();
+    assert_eq!(copy.title, "Country Rock copy");
+    assert!(copy.looping, "settings come along");
+    // Row 1 is full, so the first free slot after it: A.
+    assert_eq!(slot_of(&harness), (2, 0));
+
+    harness.get_by_label("Edit").click();
+    harness.run_steps(2);
+    harness
+        .get_by_label_contains("Undo Duplicate “Country Rock”")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Country Rock copy").count(), 0);
+}
+
+#[test]
+fn shift_and_an_arrow_moves_the_selected_tile() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Country Rock").click();
+    harness.run_steps(2);
+    // The last column: nowhere to go right.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 2));
+    // Down swaps with Tense; the plain arrows still move the selection.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (1, 2));
+    harness.key_press(egui::Key::ArrowUp);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), Some("Tense"));
+}
+
 #[test]
 fn render_the_window_to_a_png() {
     if std::env::var_os("OLIO_RENDER").is_none() {
@@ -550,4 +676,21 @@ fn render_the_window_to_a_png() {
         image.save(&path).unwrap();
         println!("rendered {}", path.display());
     }
+
+    // Mid-drag: Big Game held over Tense, which would swap.
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), true);
+    let (from, to) = (center(&harness, "Big Game"), center(&harness, "Tense"));
+    harness.hover_at(from);
+    harness.run_steps(1);
+    harness.drag_at(from);
+    harness.run_steps(1);
+    for step in 1..=10 {
+        harness.hover_at(from + (to - from + egui::vec2(18.0, 14.0)) * (step as f32 / 10.0));
+        harness.run_steps(1);
+    }
+    let image = harness.render().expect("a GPU adapter to render with");
+    let path = out.join("window-drag.png");
+    image.save(&path).unwrap();
+    println!("rendered {}", path.display());
 }

@@ -159,3 +159,71 @@ fn an_old_library_without_normalize_turns_it_on() {
     let tile: olio_library::Tile = serde_json::from_str(json).unwrap();
     assert!(tile.normalize && tile.trim_silence);
 }
+
+#[test]
+fn moving_a_tile_to_an_empty_slot_or_onto_another_swaps_them() {
+    let mut set = Set::new("Test");
+    let a = set.place(sound("a"), Some(Slot::new(0, 0))).unwrap();
+    let b = set.place(sound("b"), Some(Slot::new(0, 1))).unwrap();
+
+    assert_eq!(set.move_tile(a, Slot::new(2, 3)), Some(Slot::new(0, 0)));
+    assert_eq!(set.tile(a).unwrap().slot, Slot::new(2, 3));
+
+    // Onto b: they swap.
+    assert_eq!(set.move_tile(a, Slot::new(0, 1)), Some(Slot::new(2, 3)));
+    assert_eq!(set.tile(a).unwrap().slot, Slot::new(0, 1));
+    assert_eq!(set.tile(b).unwrap().slot, Slot::new(2, 3));
+
+    // Nowhere, or outside the grid: nothing moves.
+    assert_eq!(set.move_tile(a, Slot::new(0, 1)), None);
+    assert_eq!(set.move_tile(a, Slot::new(0, 9)), None);
+    assert_eq!(set.move_tile(a, Slot::new(MAX_ROWS, 0)), None);
+}
+
+#[test]
+fn a_duplicate_takes_the_next_free_slot_with_every_setting() {
+    let mut set = Set::new("Test");
+    let a = set.place(sound("a"), Some(Slot::new(0, 1))).unwrap();
+    set.place(sound("b"), Some(Slot::new(0, 2))).unwrap();
+    {
+        let tile = set.tile_mut(a).unwrap();
+        tile.color = TileColor::Teal;
+        tile.reverb = 0.3;
+        tile.emoji = "🎉".to_owned();
+    }
+    let copy = set.duplicate(a, None).unwrap();
+    let (original, copy) = (set.tile(a).unwrap(), set.tile(copy).unwrap());
+    assert_ne!(original.id, copy.id);
+    assert_eq!(
+        copy.slot,
+        Slot::new(0, 3),
+        "the first free slot after the original"
+    );
+    assert_eq!(copy.title, "a copy");
+    assert_eq!(copy.sound, original.sound);
+    assert_eq!(
+        (copy.color, copy.reverb, copy.emoji.as_str()),
+        (TileColor::Teal, 0.3, "🎉")
+    );
+
+    // Into a chosen slot, or the next free one after it if it is taken.
+    let at = set.duplicate(a, Some(Slot::new(3, 0))).unwrap();
+    assert_eq!(set.tile(at).unwrap().slot, Slot::new(3, 0));
+    let after = set.duplicate(a, Some(Slot::new(0, 2))).unwrap();
+    assert_eq!(set.tile(after).unwrap().slot, Slot::new(1, 0));
+}
+
+#[test]
+fn free_slots_after_wrap_round_and_run_out() {
+    let mut set = Set::new("Test");
+    set.columns = 2;
+    assert_eq!(set.free_slot_after(Slot::new(7, 1)), Some(Slot::new(0, 0)));
+    for row in 0..MAX_ROWS {
+        for column in 0..2 {
+            set.place(sound("x"), Some(Slot::new(row, column))).unwrap();
+        }
+    }
+    assert_eq!(set.free_slot_after(Slot::new(0, 0)), None);
+    let id = set.tiles[0].id;
+    assert_eq!(set.duplicate(id, None), None, "a full set takes no copy");
+}

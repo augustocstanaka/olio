@@ -27,7 +27,9 @@ _Avoid_: button, pad, cue, cell
 
 **Slot**:
 A position in a set's grid (row, column). Rows 0 to 3 follow the keyboard's
-rows; rows 4 to 7 repeat them with Option (Alt).
+rows; rows 4 to 7 repeat them with Option (Alt). Dragging a tile to
+another slot moves it (and so changes its key); onto another tile, the
+two swap.
 _Avoid_: cell, position (alone), index
 
 **Key**:
@@ -80,9 +82,16 @@ over frequency as it plays, low at the bottom.
 _Avoid_: spectrum (one moment, not over time), EQ
 
 **Undo**:
-Putting back the last removed tile or set, exactly as it was (⌘Z); Redo
-removes it again. Only removals are recorded.
+Reversing the last change to the board (⌘Z): a removed tile or set comes
+back exactly as it was, a duplicate goes away, a moved tile goes back.
+Redo makes the change again. Settings changed in the inspector are not
+recorded.
 _Avoid_: restore, trash
+
+**Duplicate**:
+A copy of a tile, with the same sound and settings and " copy" after its
+title, in the next free slot (or where it is dropped).
+_Avoid_: clone
 
 **Trim silence**:
 A tile setting that makes its region the audible part of the clip, skipping

@@ -190,6 +190,57 @@ impl Set {
         Some(id)
     }
 
+    /// Moves a tile to `to`. A tile already there takes the moved tile's
+    /// old slot, so the two swap. Returns the slot the tile came from;
+    /// `None` if the tile is not here, `to` is outside the grid, or it is
+    /// already there.
+    pub fn move_tile(&mut self, id: TileId, to: Slot) -> Option<Slot> {
+        if !self.contains(to) {
+            return None;
+        }
+        let from = self.tile(id)?.slot;
+        if from == to {
+            return None;
+        }
+        if let Some(other) = self.tiles.iter_mut().find(|tile| tile.slot == to) {
+            other.slot = from;
+        }
+        self.tile_mut(id)?.slot = to;
+        Some(from)
+    }
+
+    /// The first free slot after `slot`, reading row by row and wrapping
+    /// round to the top; `None` when the set is full.
+    pub fn free_slot_after(&self, slot: Slot) -> Option<Slot> {
+        let columns = usize::from(self.columns.max(1));
+        let count = usize::from(MAX_ROWS) * columns;
+        let start = usize::from(slot.row) * columns + usize::from(slot.column);
+        (1..=count)
+            .map(|step| (start + step) % count)
+            .map(|index| Slot::new((index / columns) as u8, (index % columns) as u8))
+            .find(|&slot| self.is_free(slot))
+    }
+
+    /// Copies a tile, with all its settings and the same sound, into `at`
+    /// if that slot is free, else the first free slot after it (after the
+    /// original, without `at`). Returns the copy's id; `None` if the tile
+    /// is not here or the set is full.
+    pub fn duplicate(&mut self, id: TileId, at: Option<Slot>) -> Option<TileId> {
+        let original = self.tile(id)?;
+        let slot = match at {
+            Some(at) if self.is_free(at) => at,
+            Some(at) => self.free_slot_after(at)?,
+            None => self.free_slot_after(original.slot)?,
+        };
+        let mut copy = original.clone();
+        copy.id = TileId::random();
+        copy.slot = slot;
+        copy.title = format!("{} copy", original.title);
+        let id = copy.id;
+        self.tiles.push(copy);
+        Some(id)
+    }
+
     /// `slot` if it is free, else the earliest free slot; `None` when the
     /// set is full.
     pub fn free_slot_from(&self, slot: Slot) -> Option<Slot> {
