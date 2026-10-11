@@ -53,6 +53,8 @@ pub struct GridView<'a> {
     /// The Polish preset, to label the context menu item.
     pub polish: Polish,
     pub style: TileStyle,
+    /// Draw a spectrogram under each waveform.
+    pub spectrograms: bool,
     pub images: &'a EmojiImages,
     /// Level meters of tiles that are playing or have just stopped.
     pub levels: &'a HashMap<TileId, Meter>,
@@ -252,6 +254,12 @@ fn tile_ui(
                 .commands
                 .push(Command::SetTile(tile.id, TileSetting::TrimSilence(trim)));
         }
+        let mut normalize = tile.normalize;
+        if ui.checkbox(&mut normalize, "Normalize Level").changed() {
+            output
+                .commands
+                .push(Command::SetTile(tile.id, TileSetting::Normalize(normalize)));
+        }
         ui.menu_button("Color", |ui| {
             for color in olio_library::TileColor::ALL {
                 let label = if color == tile.color {
@@ -268,7 +276,7 @@ fn tile_ui(
             }
         });
         ui.separator();
-        if ui.button("Remove Tile…").clicked() {
+        if ui.button("Remove Tile").clicked() {
             output.remove.push(tile.id);
             ui.close();
         }
@@ -282,6 +290,7 @@ fn tile_ui(
         dark,
         style: view.style,
         scale: bounce(ui, tile.id, progress.is_some()),
+        spectrogram: view.spectrograms,
         meter: view
             .levels
             .get(&tile.id)
@@ -302,6 +311,7 @@ struct Look {
     scale: f32,
     /// The tile's level, while there is one to show.
     meter: Option<Meter>,
+    spectrogram: bool,
 }
 
 /// The tile's size this frame: a short dip when it starts playing, like a
@@ -468,16 +478,52 @@ fn paint_tile(
         );
     };
     match state {
-        Some(ClipState::Ready(ready)) => waveform(
-            painter,
-            wave,
-            ready,
-            progress.map(|progress| progress.fraction),
-            tile,
-            dark,
-        ),
+        Some(ClipState::Ready(ready)) => {
+            let played = progress.map(|progress| progress.fraction);
+            // The spectrogram takes the bottom of the space when there is
+            // room for both.
+            let strip_height = (wave.height() * 0.3).max(10.0);
+            if look.spectrogram && wave.height() - strip_height >= 20.0 {
+                let (top, strip) = wave.split_top_bottom_at_y(wave.bottom() - strip_height);
+                let top = top.with_max_y(top.max.y - 3.0);
+                waveform(painter, top, ready, played, tile, dark);
+                spectrogram(painter, strip, ready, played, tile, dark);
+            } else {
+                waveform(painter, wave, ready, played, tile, dark);
+            }
+        }
         Some(ClipState::Failed(_)) => note("Can't play this sound", Color32::from_rgb(220, 60, 60)),
         Some(ClipState::Loading) | None => note("Loading…", palette::tint(tile.color, dark, 150)),
+    }
+}
+
+/// The sound's spectrogram over the part that plays, glowing in the tile's
+/// colour: low frequencies at the bottom.
+pub fn spectrogram(
+    painter: &Painter,
+    rect: Rect,
+    ready: &Ready,
+    played: Option<f32>,
+    tile: &Tile,
+    dark: bool,
+) {
+    let frames = ready.clip.frames().max(1) as f32;
+    let region = ready.region(tile.trim_silence);
+    let uv = Rect::from_x_y_ranges(
+        region.start as f32 / frames..=region.end as f32 / frames,
+        0.0..=1.0,
+    );
+    painter.rect_filled(rect, 3, palette::tint(tile.color, dark, 14));
+    let texture = ready.spectrogram_texture(painter.ctx());
+    let glow = palette::tint(tile.color, dark, if dark { 235 } else { 255 });
+    painter.image(texture.id(), rect, uv, glow);
+    if let Some(played) = played {
+        let x = rect.left() + played.clamp(0.0, 1.0) * rect.width();
+        painter.vline(
+            x,
+            rect.y_range(),
+            Stroke::new(1.5, palette::strong(tile.color, dark)),
+        );
     }
 }
 

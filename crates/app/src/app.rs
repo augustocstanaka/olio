@@ -31,6 +31,7 @@ use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
 use crate::prefs::{Polish, Preferences, TileStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
+use crate::undo::{History, Removed};
 use crate::{keys, palette, polish};
 
 /// Escape must be held this long to stop everything, so a stray tap does
@@ -63,6 +64,8 @@ struct Playing {
 struct Status {
     text: String,
     error: bool,
+    /// Show an Undo button beside it: the status reports a removal.
+    undo: bool,
     since: Instant,
 }
 
@@ -147,6 +150,7 @@ pub struct OlioApp {
     confirm: Option<Confirm>,
     show_shortcuts: bool,
     show_polish: bool,
+    history: History,
     emoji_picker: Option<emoji::Picker>,
     images: EmojiImages,
     /// The output's left and right levels.
@@ -219,6 +223,7 @@ impl OlioApp {
             confirm: None,
             show_shortcuts: false,
             show_polish: false,
+            history: History::default(),
             emoji_picker: None,
             images: EmojiImages::default(),
             output_meters: [Meter::default(); 2],
@@ -328,6 +333,17 @@ impl OlioApp {
         self.status = Some(Status {
             text: text.into(),
             error,
+            undo: false,
+            since: Instant::now(),
+        });
+    }
+
+    /// A status for something that was removed, with an Undo button.
+    fn set_undo_status(&mut self, text: impl Into<String>) {
+        self.status = Some(Status {
+            text: text.into(),
+            error: false,
+            undo: true,
             since: Instant::now(),
         });
     }
@@ -390,7 +406,7 @@ impl OlioApp {
             Some(ClipState::Ready(ready)) => {
                 let region = ready.region(tile.trim_silence);
                 let options = PlayOptions {
-                    gain: 1.0,
+                    gain: ready.gain(tile.normalize, tile.trim_silence),
                     looping: tile.looping,
                     region: Some(region.clone()),
                     fade_in: Duration::from_secs_f32(tile.fade_in_seconds),
@@ -447,6 +463,7 @@ impl OlioApp {
         match setting {
             TileSetting::Looping(looping) => tile.looping = looping,
             TileSetting::TrimSilence(trim) => tile.trim_silence = trim,
+            TileSetting::Normalize(normalize) => tile.normalize = normalize,
             TileSetting::FadeIn(seconds) => {
                 tile.fade_in_seconds = seconds.clamp(0.0, MAX_FADE_SECONDS);
             }
@@ -487,8 +504,13 @@ impl OlioApp {
             }
             MenuAction::RemoveTile => {
                 if let Some(id) = self.selected {
-                    self.ask_remove_tile(id);
+                    self.remove_tile(id);
                 }
+            }
+            MenuAction::Undo => self.undo(),
+            MenuAction::Redo => self.redo(),
+            MenuAction::ToggleSpectrograms => {
+                self.prefs.show_spectrograms = !self.prefs.show_spectrograms;
             }
             MenuAction::ToggleSets => self.prefs.show_sets = !self.prefs.show_sets,
             MenuAction::ToggleInspector => {
@@ -615,18 +637,6 @@ impl OlioApp {
         self.set_status(message, false);
     }
 
-    fn ask_remove_tile(&mut self, id: TileId) {
-        let Some((_, tile)) = self.library.tile(id) else {
-            return;
-        };
-        self.confirm = Some(Confirm {
-            title: format!("Remove “{}”?", tile.title),
-            body: "The tile leaves this set. The sound file stays in the library.".to_owned(),
-            verb: "Remove",
-            pending: Pending::RemoveTile(id),
-        });
-    }
-
     fn ask_remove_set(&mut self, id: SetId) {
         if self.library.sets.len() <= 1 {
             return;
@@ -663,15 +673,122 @@ impl OlioApp {
 
     // ----- library edits --------------------------------------------------
 
+    /// Removes a tile at once; Undo puts it back.
     fn remove_tile(&mut self, id: TileId) {
-        self.stop_tile(id);
-        for set in &mut self.library.sets {
-            set.remove_tile(id);
+        if let Some(removed) = self.take_tile(id) {
+            self.set_undo_status(removed.removed_message());
+            self.history.record(removed);
         }
+    }
+
+    /// Takes a tile off its set, for removing or redoing a removal.
+    fn take_tile(&mut self, id: TileId) -> Option<Removed> {
+        let set = self.library.tile(id)?.0.id;
+        self.stop_tile(id);
+        let tile = self.library.set_mut(set)?.remove_tile(id)?;
         if self.selected == Some(id) {
             self.selected = None;
         }
         self.changed();
+        Some(Removed::Tile {
+            set,
+            tile: Box::new(tile),
+        })
+    }
+
+    /// Takes a set out of the library (never the last one).
+    fn take_set(&mut self, id: SetId) -> Option<Removed> {
+        if self.library.sets.len() <= 1 {
+            return None;
+        }
+        let index = self.library.sets.iter().position(|set| set.id == id)?;
+        let tiles: Vec<TileId> = self.library.sets[index]
+            .tiles
+            .iter()
+            .map(|tile| tile.id)
+            .collect();
+        for tile in tiles {
+            self.stop_tile(tile);
+        }
+        let set = self.library.remove_set(id)?;
+        if self.current == id {
+            self.current = self.library.sets[index.min(self.library.sets.len() - 1)].id;
+            self.selected = None;
+        }
+        self.changed();
+        Some(Removed::Set { index, set })
+    }
+
+    /// Puts back what a removal took, and returns a record of it as it is
+    /// now, for redoing. Gives it back if there is no room.
+    fn put_back(&mut self, removed: Removed) -> Result<Removed, Removed> {
+        match removed {
+            Removed::Tile { set, tile } => {
+                let home = if self.library.set(set).is_some() {
+                    set
+                } else {
+                    self.current
+                };
+                let record = tile.clone();
+                let Some(target) = self.library.set_mut(home) else {
+                    return Err(Removed::Tile { set, tile });
+                };
+                let Some(slot) = target.put_back(&tile) else {
+                    self.set_status("There is no free slot to put the tile back in", true);
+                    return Err(Removed::Tile { set, tile });
+                };
+                let mut record = record;
+                record.slot = slot;
+                self.execute(Command::SelectSet(home));
+                self.selected = Some(record.id);
+                self.reveal_selected = true;
+                self.changed();
+                Ok(Removed::Tile {
+                    set: home,
+                    tile: record,
+                })
+            }
+            Removed::Set { index, set } => {
+                let id = set.id;
+                let index = index.min(self.library.sets.len());
+                let record = set.clone();
+                self.library.sets.insert(index, set);
+                self.execute(Command::SelectSet(id));
+                self.changed();
+                Ok(Removed::Set { index, set: record })
+            }
+        }
+    }
+
+    fn undo(&mut self) {
+        let Some(removed) = self.history.take_undo() else {
+            return;
+        };
+        match self.put_back(removed) {
+            Ok(restored) => {
+                self.set_status(restored.put_back_message(), false);
+                // Redo removes it again.
+                self.history.push_redo(restored);
+            }
+            Err(removed) => self.history.push_undo(removed),
+        }
+    }
+
+    fn redo(&mut self) {
+        let Some(removed) = self.history.take_redo() else {
+            return;
+        };
+        let taken = match &removed {
+            Removed::Tile { tile, .. } => self.take_tile(tile.id),
+            Removed::Set { set, .. } => self.take_set(set.id),
+        };
+        match taken {
+            Some(taken) => {
+                self.set_undo_status(taken.removed_message());
+                self.history.push_undo(taken);
+            }
+            None => self.history.push_redo(removed),
+        }
     }
 
     fn open_emoji_picker(&mut self, id: TileId) {
@@ -745,25 +862,12 @@ impl OlioApp {
         }
     }
 
+    /// Removes a set (after the confirmation); Undo puts it back.
     fn remove_set(&mut self, id: SetId) {
-        if self.library.sets.len() <= 1 {
-            return;
+        if let Some(removed) = self.take_set(id) {
+            self.set_undo_status(removed.removed_message());
+            self.history.record(removed);
         }
-        let Some(index) = self.library.sets.iter().position(|set| set.id == id) else {
-            return;
-        };
-        let tiles: Vec<TileId> = self.library.sets[index]
-            .tiles
-            .iter()
-            .map(|tile| tile.id)
-            .collect();
-        for tile in tiles {
-            self.stop_tile(tile);
-        }
-        self.library.remove_set(id);
-        self.current = self.library.sets[index.min(self.library.sets.len() - 1)].id;
-        self.selected = None;
-        self.changed();
     }
 
     fn apply_sidebar(&mut self, action: SidebarAction) {
@@ -800,7 +904,6 @@ impl OlioApp {
 
     fn resolve(&mut self, pending: Pending) {
         match pending {
-            Pending::RemoveTile(id) => self.remove_tile(id),
             Pending::RemoveSet(id) => self.remove_set(id),
         }
     }
@@ -1299,6 +1402,22 @@ impl OlioApp {
                         .filter(|status| status.remaining().is_some())
                         .map(|status| (status.text.clone(), status.error))
                 };
+                let undoable = self
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.undo && status.remaining().is_some())
+                    && self.history.next_undo().is_some();
+                if undoable
+                    && ui
+                        .small_button("Undo")
+                        .on_hover_text(format!(
+                            "Put it back ({})",
+                            menu::shortcut_text(&ctx, MenuAction::Undo)
+                        ))
+                        .clicked()
+                {
+                    actions.push(MenuAction::Undo);
+                }
                 if let Some((text, error)) = status {
                     let mut text = RichText::new(text);
                     if error {
@@ -1361,6 +1480,8 @@ impl eframe::App for OlioApp {
                     .and_then(|id| self.library.tile(id))
                     .is_some_and(|(_, tile)| self.prefs.polish.applies_to(tile)),
                 set_has_tiles: !self.current_set().tiles.is_empty(),
+                undo: self.history.next_undo().map(Removed::describe),
+                redo: self.history.next_redo().map(Removed::describe),
                 set_removable: self.library.sets.len() > 1,
                 playing: !self.playing.is_empty(),
             };
@@ -1413,6 +1534,7 @@ impl eframe::App for OlioApp {
                         focus_title,
                         polish: self.prefs.polish,
                         images: &self.images,
+                        spectrograms: self.prefs.show_spectrograms,
                         level: tile.and_then(|tile| self.tile_meters.get(&tile.id).copied()),
                         now: self.meter_time,
                     };
@@ -1442,6 +1564,7 @@ impl eframe::App for OlioApp {
                     polish: self.prefs.polish,
                     style: self.prefs.tile_style,
                     images: &self.images,
+                    spectrograms: self.prefs.show_spectrograms,
                     levels: &self.tile_meters,
                     now: self.meter_time,
                     files_hovering,
@@ -1467,7 +1590,7 @@ impl eframe::App for OlioApp {
             self.execute(command);
         }
         for id in grid.remove {
-            self.ask_remove_tile(id);
+            self.remove_tile(id);
         }
         for (id, color) in grid.recolor {
             self.recolor_tile(id, color);
@@ -1491,7 +1614,7 @@ impl eframe::App for OlioApp {
                 InspectorAction::Command(command) => self.execute(command),
                 InspectorAction::Rename(id, title) => self.rename_tile(id, title),
                 InspectorAction::Recolor(id, color) => self.recolor_tile(id, color),
-                InspectorAction::Remove(id) => self.ask_remove_tile(id),
+                InspectorAction::Remove(id) => self.remove_tile(id),
                 InspectorAction::Polish(id) => self.polish_tile(id),
                 InspectorAction::ChooseEmoji(id) => self.open_emoji_picker(id),
             }

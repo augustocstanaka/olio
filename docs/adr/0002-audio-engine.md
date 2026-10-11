@@ -25,7 +25,9 @@ voice costs nothing but a queue push. Voices resample on the fly
 (Catmull-Rom) when a clip's rate differs from the device's.
 
 Per-tile shaping happens in the mixer, not in the file: the region (from
-trim silence), fade in, fade out, gain ramps (5 ms minimum, so stops never
+trim silence), the normalizing gain (worked out once per clip on the
+decoder thread and passed as the voice's gain), fade in, fade out, gain
+ramps (5 ms minimum, so stops never
 click), and a send to one shared stereo reverb (Freeverb design) whose
 output is mixed in. Farrago 2 moved fades into its editor as destructive
 edits; we keep them as settings so they can change at any time without

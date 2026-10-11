@@ -130,8 +130,32 @@ fn new_tiles_trim_silence_and_have_no_fades_or_reverb() {
     let id = set.place(sound("a"), None).unwrap();
     let tile = set.tile(id).unwrap();
     assert!(tile.trim_silence);
+    assert!(tile.normalize, "new tiles normalize");
     assert_eq!(
         (tile.fade_in_seconds, tile.fade_out_seconds, tile.reverb),
         (0.0, 0.0, 0.0)
     );
+}
+
+#[test]
+fn a_removed_tile_goes_back_to_its_slot_or_the_first_free_one() {
+    let mut set = Set::new("Test");
+    let id = set.place(sound("a"), Some(Slot::new(1, 2))).unwrap();
+    let tile = set.remove_tile(id).unwrap();
+    assert_eq!(set.put_back(&tile), Some(Slot::new(1, 2)));
+    let back = set.remove_tile(id).unwrap();
+
+    // Its slot was taken meanwhile: the first free one instead.
+    set.place(sound("b"), Some(Slot::new(1, 2))).unwrap();
+    assert_eq!(set.put_back(&back), Some(Slot::new(0, 0)));
+    assert_eq!(set.tile(id).unwrap().slot, Slot::new(0, 0));
+}
+
+#[test]
+fn an_old_library_without_normalize_turns_it_on() {
+    let json = r#"{ "id": "8d6f1f3a-6b7e-4a43-9a51-3f7a2b0c9d11", "slot": { "row": 0, "column": 0 },
+        "title": "a", "sound": { "hash": "x", "extension": "wav", "original_name": "a.wav" },
+        "color": "purple" }"#;
+    let tile: olio_library::Tile = serde_json::from_str(json).unwrap();
+    assert!(tile.normalize && tile.trim_silence);
 }

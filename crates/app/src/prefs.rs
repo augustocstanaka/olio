@@ -147,6 +147,8 @@ fn seconds(value: f32) -> String {
 pub struct Preferences {
     pub theme: Theme,
     pub tile_style: TileStyle,
+    /// Draw a spectrogram under each tile's waveform.
+    pub show_spectrograms: bool,
     pub polish: Polish,
     /// Master volume, 0 to 1.
     pub volume: f32,
@@ -163,6 +165,7 @@ impl Default for Preferences {
         Self {
             theme: Theme::System,
             tile_style: TileStyle::Flat,
+            show_spectrograms: true,
             polish: Polish::default(),
             volume: 1.0,
             muted: false,
@@ -249,5 +252,6 @@ mod tests {
         assert!(prefs.show_sets);
         assert_eq!(prefs.polish, Polish::default());
         assert_eq!(prefs.tile_style, TileStyle::Flat);
+        assert!(prefs.show_spectrograms);
     }
 }

@@ -26,6 +26,7 @@ mod palette;
 mod polish;
 pub mod prefs;
 mod sidebar;
+mod undo;
 
 use std::path::PathBuf;
 

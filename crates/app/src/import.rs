@@ -321,6 +321,9 @@ impl<'a> Importer<'a> {
             if let Some(trim) = tile.trim_silence {
                 placed.trim_silence = trim;
             }
+            if let Some(normalize) = tile.normalize {
+                placed.normalize = normalize;
+            }
             placed.fade_in_seconds = tile.fade_in.unwrap_or(0.0).clamp(0.0, MAX_FADE_SECONDS);
             placed.fade_out_seconds = tile.fade_out.unwrap_or(0.0).clamp(0.0, MAX_FADE_SECONDS);
             placed.reverb = tile.reverb.unwrap_or(0.0).clamp(0.0, 1.0);
@@ -474,6 +477,7 @@ mod tests {
               "color": "blue",
               "loop": true,
               "trim_silence": false,
+              "normalize": false,
               "fade_in": 0.5,
               "fade_out": 2,
               "reverb": 0.25,
@@ -503,7 +507,14 @@ mod tests {
         let theme = show.tile_at(Slot::new(1, 0)).expect("Q is row 1, column 0");
         assert_eq!(theme.title, "Main Theme");
         assert_eq!(theme.color, TileColor::Blue);
-        assert!(theme.looping && !theme.trim_silence);
+        assert!(theme.looping && !theme.trim_silence && !theme.normalize);
+        assert!(
+            show.tiles
+                .iter()
+                .filter(|tile| tile.title != "Main Theme")
+                .all(|tile| tile.normalize),
+            "normalize is on unless a board turns it off"
+        );
         assert_eq!(
             (theme.fade_in_seconds, theme.fade_out_seconds, theme.reverb),
             (0.5, 2.0, 0.25)

@@ -96,6 +96,8 @@ pub struct TileSpec {
     #[serde(rename = "loop")]
     pub looping: Option<bool>,
     pub trim_silence: Option<bool>,
+    /// Play at the common loudness (default true).
+    pub normalize: Option<bool>,
     /// Seconds.
     pub fade_in: Option<f32>,
     /// Seconds.

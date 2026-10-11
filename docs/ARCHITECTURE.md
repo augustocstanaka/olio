@@ -35,7 +35,8 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    `act(MenuAction)`, and saves the library half a second after the last
    edit. Preferences (`prefs.rs`) are saved by eframe on exit.
 2. **The decoder thread** (`clips.rs`) decodes sounds of the front set into
-   `Clip`s, computes their peaks and audible region, and wakes the UI.
+   `Clip`s, computes their peaks, audible region, loudness (for
+   Normalize) and spectrogram (`spectrum.rs`), and wakes the UI.
 3. **The audio thread** belongs to the output device (cpal). It calls
    `Mixer::render` for every buffer.
 

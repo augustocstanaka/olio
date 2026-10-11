@@ -3,12 +3,11 @@
 //! dialog so it looks the same on both platforms and can be driven by tests.
 
 use egui::{Align, Button, Color32, Id, Key, Layout, Modifiers, RichText};
-use olio_library::{SetId, TileId};
+use olio_library::SetId;
 
 use crate::palette;
 
 pub enum Pending {
-    RemoveTile(TileId),
     RemoveSet(SetId),
 }
 

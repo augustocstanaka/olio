@@ -190,6 +190,25 @@ impl Set {
         Some(id)
     }
 
+    /// `slot` if it is free, else the earliest free slot; `None` when the
+    /// set is full.
+    pub fn free_slot_from(&self, slot: Slot) -> Option<Slot> {
+        Some(slot)
+            .filter(|&slot| self.is_free(slot))
+            .or_else(|| self.first_free_slot())
+    }
+
+    /// Puts a whole tile back, as when a removal is undone: in its own slot
+    /// if that is free, else the earliest free slot. `None` (and the tile
+    /// is not added) when the set is full.
+    pub fn put_back(&mut self, tile: &Tile) -> Option<Slot> {
+        let slot = self.free_slot_from(tile.slot)?;
+        let mut tile = tile.clone();
+        tile.slot = slot;
+        self.tiles.push(tile);
+        Some(slot)
+    }
+
     pub fn remove_tile(&mut self, id: TileId) -> Option<Tile> {
         let index = self.tiles.iter().position(|tile| tile.id == id)?;
         Some(self.tiles.remove(index))
@@ -237,6 +256,10 @@ pub struct Tile {
     /// Skip silence at the start and end of the sound.
     #[serde(default = "yes")]
     pub trim_silence: bool,
+    /// Play the sound at a common loudness, so quiet and loud recordings
+    /// sound alike. Applied as the voice's gain; the file is unchanged.
+    #[serde(default = "yes")]
+    pub normalize: bool,
     /// Rise from silence over this many seconds when starting.
     #[serde(default)]
     pub fade_in_seconds: f32,
@@ -282,6 +305,7 @@ impl Tile {
             color: TileColor::for_column(slot.column),
             looping: false,
             trim_silence: true,
+            normalize: true,
             fade_in_seconds: 0.0,
             fade_out_seconds: 0.0,
             reverb: 0.0,

@@ -62,6 +62,15 @@ On a generation bump, re-check every line below and update the versions.
   `mipmap_mode: Some(Linear)` for pictures drawn smaller than they are.
   In a `Button`, an `Image` is an atom: `Button::new((text, image,
   text))`; the accessible label joins the text atoms with spaces.
+- One texture, any colour: make it white with the data in the alpha
+  channel, then `painter.image(id, rect, uv, tint)` multiplies by the tint
+  (the spectrogram strips). The `uv` rect crops it (a trimmed region).
+- Modals and windows take a few frames to size and place themselves: in
+  tests, step about ten frames after opening one before clicking its
+  buttons, or the click lands where the button was in the sizing pass
+  and counts as a click outside.
+- Shortcut matching ignores extra Shift and Alt: ⌘Z also matches a
+  press of ⇧⌘Z. `menu.rs` checks shortcuts with more modifiers first.
 - Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
   only lays out the visible rows (the emoji picker's 1,900 emoji).
 - Persistence: the `persistence` feature of eframe stores egui's memory

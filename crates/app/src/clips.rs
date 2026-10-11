@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use olio_audio::{Clip, Peaks, decode_file};
+use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
+use olio_audio::{Clip, Peaks, Spectrogram, decode_file};
 
 /// Slices of waveform kept per clip: enough for a tile several hundred
 /// pixels wide.
@@ -19,6 +20,18 @@ const SILENCE_THRESHOLD: f32 = 0.001;
 
 /// Kept either side of the audible part, so soft attacks and tails survive.
 const TRIM_PADDING: Duration = Duration::from_millis(10);
+
+/// The spectrogram's size: columns of time by bands of frequency.
+const SPECTROGRAM_COLUMNS: usize = 256;
+const SPECTROGRAM_BANDS: usize = 24;
+
+/// The loudness Normalize brings every sound to: -18 dBFS RMS.
+const TARGET_RMS: f32 = 0.126;
+/// The loudest a normalized sound may peak: -1 dBFS, so raising a quiet
+/// sound never clips it.
+const PEAK_CEILING: f32 = 0.891;
+/// Quieter than this (-80 dBFS RMS) is silence, left as it is.
+const SILENT_RMS: f32 = 0.0001;
 
 pub enum ClipState {
     Loading,
@@ -33,6 +46,12 @@ pub struct Ready {
     pub loudest: f32,
     /// The frames between the silence at either end.
     pub audible: Range<usize>,
+    pub spectrogram: Spectrogram,
+    /// RMS level of the audible part and of the whole clip, linear.
+    rms_audible: f32,
+    rms_whole: f32,
+    /// The spectrogram as a texture, made the first time it is drawn.
+    spectrogram_texture: OnceLock<TextureHandle>,
 }
 
 impl Ready {
@@ -44,6 +63,40 @@ impl Ready {
             0..self.clip.frames()
         }
     }
+
+    /// The gain Normalize gives: the target loudness over the sound's own,
+    /// lowered if it would push the sound's peak past the ceiling. 1 when
+    /// not normalizing or for silence.
+    pub fn gain(&self, normalize: bool, trim_silence: bool) -> f32 {
+        let rms = if trim_silence {
+            self.rms_audible
+        } else {
+            self.rms_whole
+        };
+        if !normalize || rms < SILENT_RMS || self.loudest <= 0.0 {
+            return 1.0;
+        }
+        (TARGET_RMS / rms).min(PEAK_CEILING / self.loudest)
+    }
+
+    /// The spectrogram as a texture: white, with each cell's level as its
+    /// opacity, so it can be painted in any colour. Low bands at the bottom.
+    pub fn spectrogram_texture(&self, ctx: &egui::Context) -> &TextureHandle {
+        self.spectrogram_texture.get_or_init(|| {
+            let spectrogram = &self.spectrogram;
+            let (width, height) = (spectrogram.columns(), spectrogram.bands());
+            let mut pixels = vec![Color32::TRANSPARENT; width * height];
+            for column in 0..width {
+                for band in 0..height {
+                    let level = spectrogram.cell(column, band);
+                    pixels[(height - 1 - band) * width + column] =
+                        Color32::from_rgba_unmultiplied(255, 255, 255, level);
+                }
+            }
+            let image = ColorImage::new([width, height], pixels);
+            ctx.load_texture("spectrogram", image, TextureOptions::LINEAR)
+        })
+    }
 }
 
 impl Ready {
@@ -53,8 +106,13 @@ impl Ready {
             .slices()
             .iter()
             .fold(0.0f32, |loudest, &(low, high)| loudest.max(-low).max(high));
+        let audible = clip.audible_range(SILENCE_THRESHOLD, TRIM_PADDING);
         Self {
-            audible: clip.audible_range(SILENCE_THRESHOLD, TRIM_PADDING),
+            spectrogram: Spectrogram::of(&clip, SPECTROGRAM_COLUMNS, SPECTROGRAM_BANDS),
+            rms_audible: clip.rms(audible.clone()),
+            rms_whole: clip.rms(0..clip.frames()),
+            spectrogram_texture: OnceLock::new(),
+            audible,
             clip: Arc::new(clip),
             peaks,
             loudest,
@@ -127,5 +185,50 @@ impl Clips {
             };
             self.states.insert(hash, state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tone(level: f32, frames: usize) -> Ready {
+        let samples = (0..frames)
+            .map(|n| level * (n as f32 * 0.05).sin())
+            .collect();
+        Ready::new(Clip::new(48_000, 1, samples))
+    }
+
+    #[test]
+    fn normalize_raises_quiet_sounds_and_lowers_loud_ones() {
+        let quiet = tone(0.05, 48_000);
+        let loud = tone(0.85, 48_000);
+        // A sine's RMS is its peak over the square root of two.
+        let quiet_gain = quiet.gain(true, true);
+        let loud_gain = loud.gain(true, true);
+        assert!(quiet_gain > 1.0 && loud_gain < 1.0);
+        let quiet_rms = 0.05 / 2f32.sqrt() * quiet_gain;
+        let loud_rms = 0.85 / 2f32.sqrt() * loud_gain;
+        assert!(
+            (quiet_rms - loud_rms).abs() < 0.005,
+            "{quiet_rms} vs {loud_rms}"
+        );
+        assert_eq!(quiet.gain(false, true), 1.0);
+    }
+
+    #[test]
+    fn normalize_never_pushes_a_peak_past_the_ceiling() {
+        // Mostly silence with one spike: its RMS is tiny, its peak is not.
+        let mut samples = vec![0.001f32; 48_000];
+        samples[100] = 0.8;
+        let ready = Ready::new(Clip::new(48_000, 1, samples));
+        let gain = ready.gain(true, false);
+        assert!(0.8 * gain <= PEAK_CEILING + 1e-6);
+    }
+
+    #[test]
+    fn silence_is_left_alone() {
+        let ready = Ready::new(Clip::new(48_000, 1, vec![0.0; 4800]));
+        assert_eq!(ready.gain(true, true), 1.0);
     }
 }

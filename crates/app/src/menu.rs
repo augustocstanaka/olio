@@ -29,6 +29,11 @@ pub enum MenuAction {
     EditPolish,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
+    /// Put back the last removed tile or set.
+    Undo,
+    /// Remove it again.
+    Redo,
+    ToggleSpectrograms,
     ToggleSets,
     ToggleInspector,
     Theme(Theme),
@@ -78,6 +83,8 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
         KeyboardShortcut::new(CMD, Key::P),
     ),
     (MenuAction::ChooseEmoji, KeyboardShortcut::new(CMD, Key::E)),
+    (MenuAction::Undo, KeyboardShortcut::new(CMD, Key::Z)),
+    (MenuAction::Redo, KeyboardShortcut::new(CMD_SHIFT, Key::Z)),
     (
         MenuAction::ToggleSets,
         KeyboardShortcut::new(CMD_SHIFT, Key::S),
@@ -137,13 +144,31 @@ pub fn shortcut_text(ctx: &egui::Context, action: MenuAction) -> String {
 pub fn pressed(ctx: &egui::Context) -> Vec<MenuAction> {
     let typing = ctx.text_edit_focused();
     ctx.input_mut(|input| {
-        SHORTCUTS
-            .iter()
+        checking_order()
+            .into_iter()
+            // A text field keeps its own undo and redo.
+            .filter(|(action, _)| {
+                !(typing && matches!(action, MenuAction::Undo | MenuAction::Redo))
+            })
             .filter(|(_, shortcut)| !typing || shortcut.modifiers.command)
             .filter(|(_, shortcut)| input.consume_shortcut(shortcut))
-            .map(|(action, _)| *action)
+            .map(|(action, _)| action)
             .collect()
     })
+}
+
+/// The shortcuts with the most modifiers first. egui lets ⌘Z also match a
+/// press of ⇧⌘Z, so ⇧⌘Z must be checked (and its key press consumed)
+/// before ⌘Z gets the chance.
+fn checking_order() -> Vec<(MenuAction, KeyboardShortcut)> {
+    let mut order = SHORTCUTS.to_vec();
+    order.sort_by_key(|(_, shortcut)| {
+        let modifiers = shortcut.modifiers;
+        std::cmp::Reverse(
+            u8::from(modifiers.shift) + u8::from(modifiers.alt) + u8::from(modifiers.command),
+        )
+    });
+    order
 }
 
 /// What the menus need to know to enable their items.
@@ -153,6 +178,9 @@ pub struct MenuState<'a> {
     /// The selected tile already has the Polish preset.
     pub tile_polished: bool,
     pub set_has_tiles: bool,
+    /// What Undo and Redo would do: "Remove “Applause”".
+    pub undo: Option<String>,
+    pub redo: Option<String>,
     pub set_removable: bool,
     pub playing: bool,
 }
@@ -195,6 +223,30 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 &mut actions,
             );
         });
+        ui.menu_button("Edit", |ui| {
+            let undo = state
+                .undo
+                .as_ref()
+                .map_or_else(|| "Undo".to_owned(), |what| format!("Undo {what}"));
+            item(
+                ui,
+                &undo,
+                MenuAction::Undo,
+                state.undo.is_some(),
+                &mut actions,
+            );
+            let redo = state
+                .redo
+                .as_ref()
+                .map_or_else(|| "Redo".to_owned(), |what| format!("Redo {what}"));
+            item(
+                ui,
+                &redo,
+                MenuAction::Redo,
+                state.redo.is_some(),
+                &mut actions,
+            );
+        });
         ui.menu_button("Tile", |ui| {
             let selected = state.tile_selected;
             item(ui, "Rename", MenuAction::RenameTile, selected, &mut actions);
@@ -226,13 +278,7 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 &mut actions,
             );
             ui.separator();
-            item(
-                ui,
-                "Remove…",
-                MenuAction::RemoveTile,
-                selected,
-                &mut actions,
-            );
+            item(ui, "Remove", MenuAction::RemoveTile, selected, &mut actions);
         });
         ui.menu_button("Playback", |ui| {
             item(
@@ -307,6 +353,13 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 );
             }
             ui.separator();
+            toggle(
+                ui,
+                "Spectrograms",
+                state.prefs.show_spectrograms,
+                MenuAction::ToggleSpectrograms,
+                &mut actions,
+            );
             for style in TileStyle::ALL {
                 toggle(
                     ui,
@@ -429,6 +482,8 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                             MenuAction::ChooseEmoji,
                             "Choose an emoji for the selected tile",
                         ),
+                        (MenuAction::Undo, "Undo the last removal"),
+                        (MenuAction::Redo, "Redo it"),
                         (MenuAction::AddSound, "Add sounds"),
                         (MenuAction::ImportFolder, "Import a folder as a set"),
                         (MenuAction::NewSet, "New set"),
@@ -458,6 +513,14 @@ mod tests {
                 assert_eq!(shortcut.modifiers, first.modifiers, "{action:?}");
             }
         }
+    }
+
+    #[test]
+    fn shortcuts_with_more_modifiers_are_checked_first() {
+        let order = checking_order();
+        let position = |action| order.iter().position(|(a, _)| *a == action).unwrap();
+        assert!(position(MenuAction::Redo) < position(MenuAction::Undo));
+        assert!(position(MenuAction::ImportFolder) < position(MenuAction::AddSound));
     }
 
     #[test]

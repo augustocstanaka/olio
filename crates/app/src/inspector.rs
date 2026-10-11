@@ -33,6 +33,7 @@ pub struct View<'a> {
     pub focus_title: bool,
     pub polish: Polish,
     pub images: &'a EmojiImages,
+    pub spectrograms: bool,
     /// The tile's level meter, while it has one.
     pub level: Option<Meter>,
     pub now: f64,
@@ -150,6 +151,12 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
             if tile.trim_silence && trimmed >= 0.05 {
                 line.push_str(&format!(" · {trimmed:.1} s of silence trimmed"));
             }
+            if tile.normalize {
+                let db = 20.0 * ready.gain(true, tile.trim_silence).log10();
+                if db.abs() >= 0.05 {
+                    line.push_str(&format!(" · normalized {db:+.1} dB"));
+                }
+            }
             line
         }
         Some(ClipState::Failed(message)) => format!("Key {key} · can't play: {message}"),
@@ -158,6 +165,17 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     ui.weak(details);
     ui.add(egui::Label::new(RichText::new(&tile.sound.original_name).weak()).truncate())
         .on_hover_text("The file this sound was imported from");
+    if view.spectrograms
+        && let Some(ClipState::Ready(ready)) = state
+    {
+        ui.add_space(6.0);
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), Sense::hover());
+        let dark = ui.visuals().dark_mode;
+        crate::grid::spectrogram(ui.painter(), rect, ready, None, tile, dark);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Spectrogram"));
+        response.on_hover_text("How the sound's energy spreads over frequency as it plays: low at the bottom, high at the top");
+    }
 
     ui.add_space(10.0);
     let label = if playing { "■ Stop" } else { "▶ Play" };
@@ -189,6 +207,17 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     {
         actions.push(set(TileSetting::TrimSilence(trim)));
     }
+    let mut normalize = tile.normalize;
+    if ui
+        .checkbox(&mut normalize, "Normalize level")
+        .on_hover_text(
+            "Play at the same loudness as other normalized sounds, without clipping. \
+             The file is not changed.",
+        )
+        .changed()
+    {
+        actions.push(set(TileSetting::Normalize(normalize)));
+    }
 
     section(ui, "Fades");
     fill_with_slider(ui);
@@ -216,12 +245,12 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     }
 
     ui.add_space(28.0);
-    let remove = Button::new(RichText::new("Remove Tile…").color(palette::danger()))
+    let remove = Button::new(RichText::new("Remove Tile").color(palette::danger()))
         .stroke(Stroke::new(1.0, palette::danger().gamma_multiply(0.6)))
         .fill(Color32::TRANSPARENT);
     if ui
         .add(remove)
-        .on_hover_text("Take the tile off the board; the sound file stays")
+        .on_hover_text("Take the tile off the board; Undo puts it back")
         .clicked()
     {
         actions.push(InspectorAction::Remove(tile.id));

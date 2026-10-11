@@ -155,7 +155,7 @@ fn selecting_a_tile_shows_its_settings_in_the_inspector() {
     harness.get_by_label("Loop");
     harness.get_by_label("Trim silence");
     harness.get_by_label("Reverb");
-    harness.get_by_label("Remove Tile…");
+    harness.get_by_label("Remove Tile");
 }
 
 #[test]
@@ -226,25 +226,95 @@ fn arrow_keys_move_the_selection_and_return_plays_it() {
 }
 
 #[test]
-fn removing_a_tile_asks_first() {
+fn removing_a_tile_is_immediate_and_undo_puts_it_back() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     harness.get_by_label("Big Game").click();
     harness.run_steps(2);
     harness.key_press(egui::Key::Backspace);
     harness.run_steps(2);
-    // Cancelled: the tile stays.
-    harness.get_by_label("Cancel").click();
-    harness.run_steps(2);
-    harness.get_by_label("Big Game");
-    assert_eq!(harness.query_all_by_label("Cancel").count(), 0);
+    assert_eq!(harness.query_all_by_label("Big Game").count(), 0);
+    harness.get_by_label("Removed “Big Game”");
 
-    harness.key_press(egui::Key::Delete);
+    // ⌘Z (Ctrl+Z) puts it back in its slot with its settings, selected.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     harness.run_steps(2);
-    harness.get_by_label("Remove").click();
+    let tile = harness
+        .state()
+        .selected_tile()
+        .expect("the tile is back and selected");
+    assert_eq!(tile.title, "Big Game");
+    assert_eq!((tile.slot.row, tile.slot.column), (0, 1));
+    assert_eq!((tile.reverb, tile.emoji.as_str()), (0.4, "🏆"));
+
+    // Redo removes it again; the status bar's Undo button brings it back.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
     harness.run_steps(2);
     assert_eq!(harness.query_all_by_label("Big Game").count(), 0);
-    assert_eq!(harness.state().selected_title(), None);
+    harness.get_by_label("Undo").click();
+    harness.run_steps(2);
+    harness.get_by_label("Big Game");
+}
+
+#[test]
+fn a_removed_set_comes_back_with_its_tiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("File").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Remove Set…").click();
+    // The dialog takes a few frames to size and place itself; until then
+    // its buttons are not where the accessibility tree says.
+    harness.run_steps(10);
+    harness.get_by_label("Remove").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "My Sounds");
+    assert_eq!(harness.query_all_by_label("Applause").count(), 0);
+
+    harness.get_by_label("Edit").click();
+    harness.run_steps(2);
+    harness
+        .get_by_label_contains("Undo Remove Set “Show”")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "Show");
+    for title in TITLES {
+        harness.get_by_label(title);
+    }
+    // Back in its place in the sidebar, after My Sounds.
+    harness.get_by_label("Put back the set “Show”");
+}
+
+#[test]
+fn normalize_is_on_by_default_and_can_be_turned_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Pensive").click();
+    harness.run_steps(2);
+    assert!(harness.state().selected_tile().unwrap().normalize);
+    harness.get_by_label_contains("normalized");
+    harness.get_by_label("Normalize level").click();
+    harness.run_steps(2);
+    assert!(!harness.state().selected_tile().unwrap().normalize);
+    assert_eq!(harness.query_all_by_label_contains("normalized").count(), 0);
+}
+
+#[test]
+fn spectrograms_show_and_can_be_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Tense").click();
+    harness.run_steps(2);
+    harness.get_by_label("Spectrogram");
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("✔ Spectrograms").click();
+    harness.run_steps(2);
+    assert!(!harness.state().preferences().show_spectrograms);
+    assert_eq!(harness.query_all_by_label("Spectrogram").count(), 0);
 }
 
 #[test]

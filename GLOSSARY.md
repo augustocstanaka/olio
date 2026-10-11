@@ -68,6 +68,22 @@ _Avoid_: channel, track, instance
 The frames of a clip a voice plays and loops over.
 _Avoid_: selection (reserved for the editor), range
 
+**Normalize**:
+A tile setting, on by default, that plays the sound at a common loudness
+(-18 dBFS RMS of what plays) with its peak kept under -1 dBFS. A gain on
+the voice; the file is unchanged.
+_Avoid_: compress, level (alone), auto-gain
+
+**Spectrogram**:
+The strip under a tile's waveform showing how the sound's energy spreads
+over frequency as it plays, low at the bottom.
+_Avoid_: spectrum (one moment, not over time), EQ
+
+**Undo**:
+Putting back the last removed tile or set, exactly as it was (⌘Z); Redo
+removes it again. Only removals are recorded.
+_Avoid_: restore, trash
+
 **Trim silence**:
 A tile setting that makes its region the audible part of the clip, skipping
 silence (below -60 dBFS) at the start and end.

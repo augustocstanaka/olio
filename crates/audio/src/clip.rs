@@ -103,6 +103,31 @@ impl Clip {
         first.saturating_sub(pad)..(last + 1 + pad).min(self.frames())
     }
 
+    /// The root-mean-square level of the frames in `range` across all
+    /// channels, linear: about how loud they sound. 0 for an empty range.
+    pub fn rms(&self, range: Range<usize>) -> f32 {
+        let samples = self.samples_in(range);
+        if samples.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = samples.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+        (sum / samples.len() as f64).sqrt() as f32
+    }
+
+    /// The largest absolute sample of the frames in `range`.
+    pub fn peak(&self, range: Range<usize>) -> f32 {
+        self.samples_in(range)
+            .iter()
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()))
+    }
+
+    fn samples_in(&self, range: Range<usize>) -> &[f32] {
+        let channels = usize::from(self.channels);
+        let end = range.end.min(self.frames());
+        let start = range.start.min(end);
+        &self.samples[start * channels..end * channels]
+    }
+
     /// Writes the clip as a WAV file.
     pub fn write_wav(&self, path: &Path, format: WavFormat) -> io::Result<()> {
         let (tag, bytes): (u16, u16) = match format {

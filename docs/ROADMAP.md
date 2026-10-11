@@ -34,6 +34,12 @@ are intentions, reordered as real use dictates.
   playing.
 - **Polish**: one click (⌘P) for a 1 s fade in, 1 s fade out and 30 %
   reverb, toggled; Polish All Tiles in Set; an adjustable Polish Preset.
+- **Undo** for removing tiles and sets (⌘Z, ⇧⌘Z, an Undo button in the
+  status bar); tiles are removed without a confirmation.
+- **Normalize** on by default: every sound at -18 dBFS RMS, peaks under
+  -1 dBFS, as a voice gain.
+- **Spectrograms** under each waveform and in the inspector, in the
+  tile's colour.
 - **Level meters**: the output in the toolbar (stereo, with a clip lamp),
   every playing tile, and the selected tile in the inspector.
 - **Emoji on tiles**: colour Twemoji, a picker with search and groups,
@@ -53,7 +59,6 @@ are intentions, reordered as real use dictates.
 - A peak limiter on the output instead of the hard clip.
 - Tile context menu: duplicate, play counts and reset; drag tiles between
   slots and to other sets (copy, Cmd to move).
-- Undo for removing tiles and sets.
 - Peaks cached on disk so large sets draw before decoding; decoding of all
   sets in the background; garbage collection of sounds no tile uses.
 

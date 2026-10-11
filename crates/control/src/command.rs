@@ -30,6 +30,8 @@ pub enum Command {
 pub enum TileSetting {
     Looping(bool),
     TrimSilence(bool),
+    /// Play at the common loudness.
+    Normalize(bool),
     /// Seconds.
     FadeIn(f32),
     /// Seconds.

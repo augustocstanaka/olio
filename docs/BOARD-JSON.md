@@ -64,6 +64,7 @@ A tile is either a path, or an object with a `file` and any of these:
 | `color` | `purple`, `pink`, `red`, `orange`, `yellow`, `green`, `teal`, `blue` or `gray`. | by column |
 | `loop` | Play again from the start until stopped. | `false` |
 | `trim_silence` | Skip silence at the start and end. | `true` |
+| `normalize` | Play at a common loudness, so quiet and loud recordings sound alike (the file is not changed). | `true` |
 | `fade_in` | Seconds to rise from silence, 0 to 30. | `0` |
 | `fade_out` | Seconds to sink to silence before the end and when stopped, 0 to 30. | `0` |
 | `reverb` | How much reverb, 0 (none) to 1. | `0` |
@@ -98,7 +99,7 @@ field name, a colour it does not know, or a value out of range stops the
 import with a message naming the line, the set or the file:
 
 ```text
-problem: show.json: unknown field `loops`, expected one of `file`, `title`, `key`, `color`, `loop`, `trim_silence`, `fade_in`, `fade_out`, `reverb`, `emoji` at line 6 column 41
+problem: show.json: unknown field `loops`, expected one of `file`, `title`, `key`, `color`, `loop`, `trim_silence`, `normalize`, `fade_in`, `fade_out`, `reverb`, `emoji` at line 6 column 41
 ```
 
 A missing sound file or a key that is not on the grid is reported, and the

@@ -38,13 +38,21 @@ Milestone 0, the playable skeleton, is done. Olio can:
   does a whole set, handy after importing a folder. Change what Polish
   gives in Playback ▸ Polish Preset.
 - **Stay in control.** A master volume and mute in the toolbar, a bubble
-  for every playing sound, Fade All and Stop All. Removing a tile or a set
-  asks first. Menus list every command with its shortcut (Help ▸ Keyboard
+  for every playing sound, Fade All and Stop All. Removing a tile happens
+  at once and ⌘Z (Ctrl+Z) or the Undo button in the status bar puts it
+  back; removing a set asks first and can be undone too. Menus list every
+  command with its shortcut (Help ▸ Keyboard
   Shortcuts has them all), written the way the platform writes them.
 - **Shape each sound.** The inspector sets a tile's name, colour, loop, fade
   in, fade out (also used when you stop it) and reverb. Silence at the
-  start and end of a sound is trimmed automatically. None of this changes
-  the audio file.
+  start and end of a sound is trimmed automatically, and every sound is
+  normalized: played at the same loudness (-18 dBFS RMS), never louder
+  than -1 dBFS at its peak, so a quiet recording and a loud one sit
+  together. None of this changes the audio file.
+- **See each sound.** Every tile shows its waveform and, under it, a small
+  spectrogram in the tile's colour: low frequencies at the bottom, high at
+  the top, so a kick, a siren and applause look as different as they
+  sound. View ▸ Spectrograms turns them off.
 - **Import in bulk.** Drop or pick files, whole folders (each becomes a set,
   in alphabetical order), or a board written in JSON. Video files (MP4,
   MOV, M4V, MKV) are imported as their audio track.

@@ -9,7 +9,8 @@ and UI text.
 
 - `crates/audio` (`olio-audio`): decoding (`clip.rs`), waveform peaks,
   the real-time `mixer.rs` (voices, fades, regions, reverb send), the
-  `reverb.rs` effect, and `engine.rs` (the app's handle on the mixer plus
+  `reverb.rs` effect, `spectrum.rs` (FFT and spectrograms), and
+  `engine.rs` (the app's handle on the mixer plus
   the cpal output stream). No UI or library dependency.
 - `crates/library` (`olio-library`): `model.rs` (Library, Set, Tile,
   Sound, Slot), `store.rs` (the library directory, imports, lock file),
@@ -22,7 +23,8 @@ and UI text.
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
   `polish.rs` the Polish Preset window, `meter.rs` level meters,
-  `emoji.rs` Twemoji pictures and the emoji picker,
+  `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
+  redo of removals,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless
