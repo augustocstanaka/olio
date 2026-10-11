@@ -131,7 +131,18 @@ A request that concerns only the window (show a panel, open a dialog,
 move the selection), as opposed to a command. Listed in the menu bar.
 _Avoid_: command (reserved for what control surfaces send)
 
+**Polish**:
+The preset of fade in, fade out and reverb a tile gets in one click
+(1 s, 1 s, 30 % unless changed); clicking again takes it off.
+_Avoid_: preset (alone), effect chain, enhance
+
+**Tile style**:
+How tiles are drawn: Flat (outlined cards) or Soft (raised buttons that
+press in while they play).
+_Avoid_: theme (that is light or dark), skin
+
 **Preferences**:
 Window settings kept beside the library in `preferences.ron`: theme,
-master volume, which panels show, single-click playback.
+master volume, which panels show, single-click playback, tile style and
+the Polish preset.
 _Avoid_: settings (reserved for the planned Settings window), config

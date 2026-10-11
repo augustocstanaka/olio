@@ -32,6 +32,11 @@ are intentions, reordered as real use dictates.
   choice (system, light, dark); window size, panel widths and
   preferences remembered per library; tiles show the time left while
   playing.
+- **Polish**: one click (⌘P) for a 1 s fade in, 1 s fade out and 30 %
+  reverb, toggled; Polish All Tiles in Set; an adjustable Polish Preset.
+- **Soft tiles** (View menu): raised tiles that press in while playing,
+  a restrained take on neumorphism that keeps contrast in both themes;
+  every tile dips briefly when it starts (the trigger bounce).
 
 ## M1 - Core playback
 
@@ -45,7 +50,7 @@ are intentions, reordered as real use dictates.
   the toolbar and inspector.
 - Tile context menu: duplicate, play counts and reset; drag tiles between
   slots and to other sets (copy, Cmd to move).
-- Emoji on tiles (picker with search), the trigger bounce.
+- Emoji on tiles (picker with search).
 - Undo for removing tiles and sets.
 - Peaks cached on disk so large sets draw before decoding; decoding of all
   sets in the background; garbage collection of sounds no tile uses.

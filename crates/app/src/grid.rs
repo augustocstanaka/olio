@@ -4,19 +4,26 @@ use std::collections::HashMap;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, Color32, FontId, Id, Painter, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
-    Vec2, WidgetInfo, WidgetType,
+    Align2, Color32, FontId, Id, Painter, Pos2, Rect, RichText, Sense, Shadow, Stroke, StrokeKind,
+    Ui, Vec2, WidgetInfo, WidgetType,
 };
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{Set, Slot, Tile, TileId};
 
 use crate::clips::{ClipState, Clips, Ready};
+use crate::prefs::{Polish, TileStyle};
 use crate::{format, palette};
 
 const GAP: f32 = 12.0;
 const MIN_TILE: Vec2 = Vec2::new(120.0, 96.0);
 const MAX_TILE_HEIGHT: f32 = 170.0;
 const ROUNDING: u8 = 10;
+/// Room around a Soft grid, so the shadows of the outer tiles show.
+const SOFT_INSET: f32 = 10.0;
+/// How long a tile dips when it starts playing, in seconds.
+const BOUNCE: f64 = 0.16;
+/// How far it dips: the share of its size it loses at the bottom.
+const BOUNCE_DEPTH: f32 = 0.035;
 
 /// How far a playing tile has got.
 #[derive(Clone, Copy, Debug)]
@@ -37,6 +44,9 @@ pub struct GridView<'a> {
     /// A single click plays a tile; otherwise it only selects it and a
     /// double-click plays it.
     pub click_plays: bool,
+    /// The Polish preset, to label the context menu item.
+    pub polish: Polish,
+    pub style: TileStyle,
     /// Files are being dragged over the window.
     pub files_hovering: bool,
 }
@@ -49,6 +59,8 @@ pub struct GridOutput {
     /// A tile whose title should be edited.
     pub rename: Option<TileId>,
     pub recolor: Vec<(TileId, olio_library::TileColor)>,
+    /// Tiles to polish, or unpolish if they already are.
+    pub polish: Vec<TileId>,
     /// `Some` when the selection changed: the tile clicked, or `None` for
     /// a click on an empty slot.
     pub select: Option<Option<TileId>>,
@@ -106,12 +118,21 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
     let mut output = GridOutput::default();
     let columns = view.set.columns.max(1);
     let rows = view.set.visible_rows();
-    let mut layout = GridLayout::new(ui.available_size(), columns, rows);
+    let inset = match view.style {
+        TileStyle::Flat => 0.0,
+        TileStyle::Soft => SOFT_INSET,
+    };
+    let mut layout = GridLayout::new(
+        ui.available_size() - Vec2::splat(2.0 * inset),
+        columns,
+        rows,
+    );
     egui::ScrollArea::both()
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            let (grid_rect, _) = ui.allocate_exact_size(layout.size(), Sense::hover());
-            layout.origin = grid_rect.min;
+            let size = layout.size() + Vec2::splat(2.0 * inset);
+            let (grid_rect, _) = ui.allocate_exact_size(size, Sense::hover());
+            layout.origin = grid_rect.min + Vec2::splat(inset);
             let dark = ui.visuals().dark_mode;
             let pointer = ui.ctx().pointer_latest_pos();
             for row in 0..rows {
@@ -127,7 +148,7 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
                             if response.clicked() {
                                 output.select = Some(None);
                             }
-                            empty_slot(ui, rect, slot, view.files_hovering, targeted);
+                            empty_slot(ui, rect, slot, view, targeted);
                         }
                     }
                 }
@@ -192,6 +213,15 @@ fn tile_ui(
             output.rename = Some(tile.id);
             ui.close();
         }
+        let polish = if view.polish.applies_to(tile) {
+            "Remove Polish"
+        } else {
+            "✨ Polish"
+        };
+        if ui.button(polish).clicked() {
+            output.polish.push(tile.id);
+            ui.close();
+        }
         ui.separator();
         let mut looping = tile.looping;
         if ui.checkbox(&mut looping, "Loop").changed() {
@@ -233,6 +263,8 @@ fn tile_ui(
         selected: view.selected == Some(tile.id),
         hovered: response.hovered(),
         dark,
+        style: view.style,
+        scale: bounce(ui, tile.id, progress.is_some()),
     };
     paint_tile(ui.painter(), rect, tile, state, progress, look);
 }
@@ -243,6 +275,33 @@ struct Look {
     selected: bool,
     hovered: bool,
     dark: bool,
+    style: TileStyle,
+    /// 1 at rest; a little less while the tile dips as it starts.
+    scale: f32,
+}
+
+/// The tile's size this frame: a short dip when it starts playing, like a
+/// button pressed. Remembers in egui's memory when each tile started.
+fn bounce(ui: &Ui, tile: TileId, playing: bool) -> f32 {
+    let ctx = ui.ctx();
+    let id = Id::new(("bounce", tile));
+    let now = ctx.input(|input| input.time);
+    let started = ctx.data_mut(|data| {
+        let was: Option<(bool, f64)> = data.get_temp(id);
+        let started = match was {
+            Some((true, at)) if playing => at,
+            _ if playing => now,
+            _ => f64::NEG_INFINITY,
+        };
+        data.insert_temp(id, (playing, started));
+        started
+    });
+    let t = now - started;
+    if !(0.0..BOUNCE).contains(&t) {
+        return 1.0;
+    }
+    ctx.request_repaint();
+    1.0 - BOUNCE_DEPTH * (std::f64::consts::PI * t / BOUNCE).sin() as f32
 }
 
 fn paint_tile(
@@ -254,15 +313,25 @@ fn paint_tile(
     look: Look,
 ) {
     let dark = look.dark;
+    let rect = Rect::from_center_size(rect.center(), rect.size() * look.scale);
     let strong = palette::strong(tile.color, dark);
+    let resting = match look.style {
+        TileStyle::Flat => 90,
+        TileStyle::Soft => 55,
+    };
     let border = if look.selected {
         Stroke::new(3.0, strong)
     } else if look.hovered || progress.is_some() {
         Stroke::new(1.5, palette::tint(tile.color, dark, 190))
     } else {
-        Stroke::new(1.0, palette::tint(tile.color, dark, 90))
+        Stroke::new(1.0, palette::tint(tile.color, dark, resting))
     };
-    painter.rect_filled(rect, ROUNDING, palette::tile_background(dark));
+    match look.style {
+        TileStyle::Flat => {
+            painter.rect_filled(rect, ROUNDING, palette::tile_background(dark));
+        }
+        TileStyle::Soft => soft_background(painter, rect, progress.is_some(), dark),
+    }
     if progress.is_some() {
         painter.rect_filled(rect, ROUNDING, palette::tint(tile.color, dark, 28));
     }
@@ -324,7 +393,7 @@ fn paint_tile(
         }
     }
     if let Some(key) = TileKey::for_slot(tile.slot) {
-        key_badge(painter, inner.center_bottom(), &key.label(), tile, dark);
+        key_badge(painter, inner.center_bottom(), &key.label(), tile, look);
     }
 
     // The waveform fills the space between.
@@ -414,18 +483,58 @@ fn waveform(
     }
 }
 
-fn key_badge(painter: &Painter, bottom_center: Pos2, label: &str, tile: &Tile, dark: bool) {
+/// A raised tile on the Soft canvas, or a pressed one: dark at the rim
+/// where the inner shadow falls, lit towards the bottom right.
+fn soft_background(painter: &Painter, rect: Rect, pressed: bool, dark: bool) {
+    let soft = palette::soft(dark);
+    if pressed {
+        painter.rect_filled(rect, ROUNDING, soft.pressed_rim);
+        let lit = Shadow {
+            offset: [2, 2],
+            blur: 10,
+            spread: 0,
+            color: soft.pressed_fill,
+        };
+        painter
+            .with_clip_rect(rect)
+            .add(lit.as_shape(rect.shrink(6.0), ROUNDING - 4));
+    } else {
+        painter.add(soft.light_shadow.as_shape(rect, ROUNDING));
+        painter.add(soft.dark_shadow.as_shape(rect, ROUNDING));
+        painter.rect_filled(rect, ROUNDING, soft.raised);
+    }
+}
+
+fn key_badge(painter: &Painter, bottom_center: Pos2, label: &str, tile: &Tile, look: Look) {
+    let dark = look.dark;
     let strong = palette::strong(tile.color, dark);
     let galley = painter.layout_no_wrap(label.to_owned(), FontId::proportional(13.0), strong);
     let size = Vec2::new((galley.size().x + 22.0).max(38.0), 20.0);
     let rect = Rect::from_center_size(bottom_center - Vec2::new(0.0, size.y / 2.0 - 1.0), size);
+    if look.style == TileStyle::Soft {
+        // A small well the key sits in.
+        let soft = palette::soft(dark);
+        painter.rect_filled(rect, 10, soft.pressed_rim);
+        let lit = Shadow {
+            offset: [1, 1],
+            blur: 4,
+            spread: 0,
+            color: soft.pressed_fill,
+        };
+        painter.add(lit.as_shape(rect.shrink(2.0), 8));
+    }
     painter.rect_filled(rect, 10, palette::tint(tile.color, dark, 45));
     painter.galley(rect.center() - galley.size() / 2.0, galley, strong);
 }
 
-fn empty_slot(ui: &Ui, rect: Rect, slot: Slot, files_hovering: bool, targeted: bool) {
+fn empty_slot(ui: &Ui, rect: Rect, slot: Slot, view: &GridView, targeted: bool) {
+    let files_hovering = view.files_hovering;
     let visuals = ui.visuals();
     let weak = visuals.weak_text_color();
+    if view.style == TileStyle::Soft && !files_hovering {
+        ui.painter()
+            .rect_filled(rect, ROUNDING, palette::soft(visuals.dark_mode).well);
+    }
     let (fill, stroke) = match (files_hovering, targeted) {
         (true, true) => (
             visuals.selection.bg_fill.gamma_multiply(0.35),

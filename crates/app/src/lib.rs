@@ -21,6 +21,7 @@ mod inspector;
 mod keys;
 mod menu;
 mod palette;
+mod polish;
 pub mod prefs;
 mod sidebar;
 

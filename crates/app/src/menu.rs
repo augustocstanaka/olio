@@ -8,7 +8,7 @@
 
 use egui::{Button, Key, KeyboardShortcut, Modifiers, Ui};
 
-use crate::prefs::{Preferences, Theme};
+use crate::prefs::{Preferences, Theme, TileStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuAction {
@@ -21,9 +21,16 @@ pub enum MenuAction {
     RemoveSet,
     RenameTile,
     RemoveTile,
+    /// Apply the Polish preset to the selected tile, or remove it.
+    PolishSelected,
+    /// Apply the Polish preset to every tile of the front set.
+    PolishSet,
+    /// Open the window that edits the Polish preset.
+    EditPolish,
     ToggleSets,
     ToggleInspector,
     Theme(Theme),
+    TileStyle(TileStyle),
     PlaySelected,
     StopAll,
     FadeAll,
@@ -63,6 +70,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::RemoveTile,
         KeyboardShortcut::new(NONE, Key::Delete),
+    ),
+    (
+        MenuAction::PolishSelected,
+        KeyboardShortcut::new(CMD, Key::P),
     ),
     (
         MenuAction::ToggleSets,
@@ -136,6 +147,9 @@ pub fn pressed(ctx: &egui::Context) -> Vec<MenuAction> {
 pub struct MenuState<'a> {
     pub prefs: &'a Preferences,
     pub tile_selected: bool,
+    /// The selected tile already has the Polish preset.
+    pub tile_polished: bool,
+    pub set_has_tiles: bool,
     pub set_removable: bool,
     pub playing: bool,
 }
@@ -181,6 +195,27 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
         ui.menu_button("Tile", |ui| {
             let selected = state.tile_selected;
             item(ui, "Rename", MenuAction::RenameTile, selected, &mut actions);
+            ui.separator();
+            let polish = if state.tile_polished {
+                "Remove Polish"
+            } else {
+                "Polish"
+            };
+            item(
+                ui,
+                polish,
+                MenuAction::PolishSelected,
+                selected,
+                &mut actions,
+            );
+            item(
+                ui,
+                "Polish All Tiles in Set",
+                MenuAction::PolishSet,
+                state.set_has_tiles,
+                &mut actions,
+            );
+            ui.separator();
             item(
                 ui,
                 "Remove…",
@@ -210,6 +245,14 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 "Stop All",
                 MenuAction::StopAll,
                 state.playing,
+                &mut actions,
+            );
+            ui.separator();
+            item(
+                ui,
+                "Polish Preset…",
+                MenuAction::EditPolish,
+                true,
                 &mut actions,
             );
             ui.separator();
@@ -250,6 +293,16 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                     theme.name(),
                     state.prefs.theme == theme,
                     MenuAction::Theme(theme),
+                    &mut actions,
+                );
+            }
+            ui.separator();
+            for style in TileStyle::ALL {
+                toggle(
+                    ui,
+                    style.name(),
+                    state.prefs.tile_style == style,
+                    MenuAction::TileStyle(style),
                     &mut actions,
                 );
             }
@@ -358,6 +411,10 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                             "Select the tile to the right",
                         ),
                         (MenuAction::RemoveTile, "Remove the selected tile"),
+                        (
+                            MenuAction::PolishSelected,
+                            "Polish the selected tile, or unpolish it",
+                        ),
                         (MenuAction::AddSound, "Add sounds"),
                         (MenuAction::ImportFolder, "Import a folder as a set"),
                         (MenuAction::NewSet, "New set"),

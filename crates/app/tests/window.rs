@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use olio_app::import::Importer;
+use olio_app::prefs::TileStyle;
 use olio_app::{OlioApp, Options};
 use olio_audio::{Clip, WavFormat};
 use olio_library::Store;
@@ -280,6 +281,84 @@ fn the_view_menu_hides_the_inspector_and_a_shortcut_shows_it_again() {
 }
 
 #[test]
+fn polish_toggles_the_fades_and_reverb_in_one_click() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Applause").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("✨ Polish").click();
+    harness.run_steps(2);
+    let tile = harness.state().selected_tile().unwrap();
+    assert_eq!(
+        (tile.fade_in_seconds, tile.fade_out_seconds, tile.reverb),
+        (1.0, 1.0, 0.3)
+    );
+    harness.get_by_label_contains("✔ Polished");
+
+    // The shortcut takes it off again.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
+    harness.run_steps(2);
+    let tile = harness.state().selected_tile().unwrap();
+    assert_eq!(
+        (tile.fade_in_seconds, tile.fade_out_seconds, tile.reverb),
+        (0.0, 0.0, 0.0)
+    );
+    harness.get_by_label_contains("✨ Polish");
+}
+
+#[test]
+fn polish_all_polishes_every_tile_of_the_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let polish_all = |harness: &mut Harness<'static, OlioApp>| {
+        harness.get_by_label("Tile").click();
+        harness.run_steps(2);
+        harness
+            .get_by_label_contains("Polish All Tiles in Set")
+            .click();
+        harness.run_steps(2);
+    };
+    polish_all(&mut harness);
+    harness.get_by_label("Polished 6 tiles");
+    polish_all(&mut harness);
+    harness.get_by_label("Every tile in this set is already polished");
+
+    // A polished tile shows it.
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("✔ Polished");
+}
+
+#[test]
+fn the_polish_preset_opens_from_the_playback_menu() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    assert_eq!(harness.state().preferences().polish.reverb, 0.3);
+    harness.get_by_label("Playback").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Polish Preset…").click();
+    harness.run_steps(2);
+    harness.get_by_label("Polish Preset");
+    harness.get_by_label_contains("Reset to 1 s in · 1 s out · 30 % reverb");
+}
+
+#[test]
+fn the_view_menu_switches_to_soft_tiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    assert_eq!(harness.state().preferences().tile_style, TileStyle::Flat);
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Soft Tiles").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().preferences().tile_style, TileStyle::Soft);
+    // Tiles still play in the new style.
+    harness.key_press(egui::Key::Num1);
+    harness.run_steps(2);
+    assert_eq!(harness.state().playing_titles(), ["Applause"]);
+}
+
+#[test]
 fn render_the_window_to_a_png() {
     if std::env::var_os("OLIO_RENDER").is_none() {
         eprintln!("skipped: set OLIO_RENDER=1 to render the window");
@@ -287,17 +366,26 @@ fn render_the_window_to_a_png() {
     }
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    for (theme, name) in [
-        (egui::Theme::Dark, "window.png"),
-        (egui::Theme::Light, "window-light.png"),
+    for (theme, soft, name) in [
+        (egui::Theme::Dark, false, "window.png"),
+        (egui::Theme::Light, false, "window-light.png"),
+        (egui::Theme::Dark, true, "window-soft.png"),
+        (egui::Theme::Light, true, "window-soft-light.png"),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = window(library(dir.path()), true);
         harness.ctx.set_theme(theme);
+        if soft {
+            harness.get_by_label("View").click();
+            harness.run_steps(2);
+            harness.get_by_label_contains("Soft Tiles").click();
+            harness.run_steps(2);
+        }
         harness.get_by_label("Pensive").click();
         harness.key_press(egui::Key::Num2);
         harness.key_press(egui::Key::Q);
-        harness.run_steps(4);
+        // Long enough for the start dip to finish.
+        harness.run_steps(20);
         let image = harness.render().expect("a GPU adapter to render with");
         let path = out.join(name);
         image.save(&path).unwrap();

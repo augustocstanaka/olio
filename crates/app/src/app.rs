@@ -16,7 +16,9 @@ use egui::{
 };
 use olio_audio::{Engine, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
-use olio_library::{Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, TileColor, TileId};
+use olio_library::{
+    Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, Tile, TileColor, TileId,
+};
 
 use crate::Options;
 use crate::clips::{ClipState, Clips};
@@ -25,9 +27,9 @@ use crate::grid::{self, GridLayout, GridView, Progress};
 use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
-use crate::prefs::Preferences;
+use crate::prefs::{Polish, Preferences, TileStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
-use crate::{keys, palette};
+use crate::{keys, palette, polish};
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
@@ -122,6 +124,7 @@ pub struct OlioApp {
     focus_title: bool,
     confirm: Option<Confirm>,
     show_shortcuts: bool,
+    show_polish: bool,
     grid_layout: Option<GridLayout>,
     screenshot: Option<ScreenshotJob>,
 }
@@ -185,6 +188,7 @@ impl OlioApp {
             focus_title: false,
             confirm: None,
             show_shortcuts: false,
+            show_polish: false,
             grid_layout: None,
             screenshot: options.screenshot.map(|path| ScreenshotJob {
                 path,
@@ -238,6 +242,13 @@ impl OlioApp {
 
     pub fn preferences(&self) -> &Preferences {
         &self.prefs
+    }
+
+    /// The selected tile, as it is now.
+    pub fn selected_tile(&self) -> Option<Tile> {
+        self.selected
+            .and_then(|id| self.library.tile(id))
+            .map(|(_, tile)| tile.clone())
     }
 
     fn current_set(&self) -> &Set {
@@ -416,6 +427,7 @@ impl OlioApp {
             MenuAction::ToggleInspector => {
                 self.prefs.show_inspector = !self.prefs.show_inspector;
             }
+            MenuAction::TileStyle(style) => self.prefs.tile_style = style,
             MenuAction::Theme(theme) => {
                 self.prefs.theme = theme;
                 ctx.set_theme(theme.preference());
@@ -435,6 +447,13 @@ impl OlioApp {
             MenuAction::ToggleClickPlays => self.prefs.click_plays = !self.prefs.click_plays,
             MenuAction::Move(direction) => self.move_selection(direction),
             MenuAction::ShowShortcuts => self.show_shortcuts = true,
+            MenuAction::PolishSelected => {
+                if let Some(id) = self.selected {
+                    self.polish_tile(id);
+                }
+            }
+            MenuAction::PolishSet => self.polish_set(),
+            MenuAction::EditPolish => self.show_polish = true,
             MenuAction::OpenWebsite => ctx.open_url(egui::OpenUrl::new_tab(WEBSITE)),
         }
     }
@@ -484,6 +503,44 @@ impl OlioApp {
             self.selected = Some(id);
             self.reveal_selected = true;
         }
+    }
+
+    /// Gives a tile the Polish preset, or takes it off if the tile has it.
+    fn polish_tile(&mut self, id: TileId) {
+        let Some((_, tile)) = self.library.tile(id) else {
+            return;
+        };
+        let polish = if self.prefs.polish.applies_to(tile) {
+            Polish::OFF
+        } else {
+            self.prefs.polish
+        };
+        for setting in polish.settings() {
+            self.execute(Command::SetTile(id, setting));
+        }
+    }
+
+    /// Gives every tile of the front set the Polish preset.
+    fn polish_set(&mut self) {
+        let polish = self.prefs.polish;
+        let tiles: Vec<TileId> = self
+            .current_set()
+            .tiles
+            .iter()
+            .filter(|tile| !polish.applies_to(tile))
+            .map(|tile| tile.id)
+            .collect();
+        for &id in &tiles {
+            for setting in polish.settings() {
+                self.execute(Command::SetTile(id, setting));
+            }
+        }
+        let message = match tiles.len() {
+            0 => "Every tile in this set is already polished".to_owned(),
+            1 => "Polished 1 tile".to_owned(),
+            n => format!("Polished {n} tiles"),
+        };
+        self.set_status(message, false);
     }
 
     fn ask_remove_tile(&mut self, id: TileId) {
@@ -607,6 +664,10 @@ impl OlioApp {
                 self.changed();
             }
             SidebarAction::RemoveSet(id) => self.ask_remove_set(id),
+            SidebarAction::Polish(id) => {
+                self.execute(Command::SelectSet(id));
+                self.polish_set();
+            }
         }
     }
 
@@ -1125,6 +1186,11 @@ impl eframe::App for OlioApp {
             let state = MenuState {
                 prefs: &self.prefs,
                 tile_selected: self.selected.is_some(),
+                tile_polished: self
+                    .selected
+                    .and_then(|id| self.library.tile(id))
+                    .is_some_and(|(_, tile)| self.prefs.polish.applies_to(tile)),
+                set_has_tiles: !self.current_set().tiles.is_empty(),
                 set_removable: self.library.sets.len() > 1,
                 playing: !self.playing.is_empty(),
             };
@@ -1175,6 +1241,7 @@ impl eframe::App for OlioApp {
                         state,
                         playing,
                         focus_title,
+                        polish: self.prefs.polish,
                     };
                     inspector::show(ui, &view, &mut self.title_draft)
                 })
@@ -1185,7 +1252,12 @@ impl eframe::App for OlioApp {
 
         let progress = self.progress();
         let reveal_selected = std::mem::take(&mut self.reveal_selected);
+        let mut canvas = egui::Frame::central_panel(ui.style());
+        if self.prefs.tile_style == TileStyle::Soft {
+            canvas = canvas.fill(palette::soft(ui.visuals().dark_mode).canvas);
+        }
         let grid = egui::CentralPanel::default()
+            .frame(canvas)
             .show(ui, |ui| {
                 let view = GridView {
                     set: self.current_set(),
@@ -1194,6 +1266,8 @@ impl eframe::App for OlioApp {
                     selected: self.selected,
                     reveal_selected,
                     click_plays: self.prefs.click_plays,
+                    polish: self.prefs.polish,
+                    style: self.prefs.tile_style,
                     files_hovering,
                 };
                 grid::show(ui, &view)
@@ -1208,6 +1282,9 @@ impl eframe::App for OlioApp {
         if self.show_shortcuts {
             menu::shortcuts_window(&ctx, &mut self.show_shortcuts);
         }
+        if self.show_polish {
+            polish::window(&ctx, &mut self.show_polish, &mut self.prefs.polish);
+        }
 
         let acted = !commands.is_empty() || !actions.is_empty();
         for command in commands {
@@ -1218,6 +1295,9 @@ impl eframe::App for OlioApp {
         }
         for (id, color) in grid.recolor {
             self.recolor_tile(id, color);
+        }
+        for id in grid.polish {
+            self.polish_tile(id);
         }
         if let Some(id) = grid.rename {
             self.selected = Some(id);
@@ -1232,6 +1312,7 @@ impl eframe::App for OlioApp {
                 InspectorAction::Rename(id, title) => self.rename_tile(id, title),
                 InspectorAction::Recolor(id, color) => self.recolor_tile(id, color),
                 InspectorAction::Remove(id) => self.ask_remove_tile(id),
+                InspectorAction::Polish(id) => self.polish_tile(id),
             }
         }
         for action in actions {

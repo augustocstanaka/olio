@@ -9,7 +9,10 @@ app.
 ![Olio's main window: sets on the left, a grid of tiles, the inspector on the right](docs/images/window.png)
 
 The window follows the system theme; there is a [light version](docs/images/window-light.png)
-too, or pick one in the View menu.
+too, or pick one in the View menu. View ▸ Soft Tiles draws tiles as
+raised buttons that press in while they play:
+
+![Soft tiles: raised at rest, pressed in while playing](docs/images/window-soft-light.png)
 
 > *Olio* is a medley, the same meaning as *farrago*.
 
@@ -22,6 +25,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
   Option (Alt) for four more rows. Press a key or double-click a tile to
   play it, press again to stop. Hold Esc to stop everything, `-` to fade
   everything out. The arrow keys move the selection and Return plays it.
+- **Polish in one click.** ✨ Polish in the inspector (⌘P / Ctrl+P, or
+  right-click a tile) gives a tile a 1 s fade in, a 1 s fade out and
+  30 % reverb; click again to take it off. Tile ▸ Polish All Tiles in Set
+  does a whole set, handy after importing a folder. Change what Polish
+  gives in Playback ▸ Polish Preset.
 - **Stay in control.** A master volume and mute in the toolbar, a bubble
   for every playing sound, Fade All and Stop All. Removing a tile or a set
   asks first. Menus list every command with its shortcut (Help ▸ Keyboard
@@ -78,7 +86,8 @@ the `OLIO_LIBRARY` environment variable.
   contents, so moving or deleting the originals breaks nothing and a sound
   used twice is stored once.
 - `preferences.ron` remembers the window's size and position, the panel
-  widths, the theme, the master volume and which panels are shown.
+  widths, the theme and tile style, the master volume, the Polish preset
+  and which panels are shown.
 
 ## Development
 
@@ -94,8 +103,9 @@ Windows. Enable the pre-commit hook once per clone with
 `git config core.hooksPath .githooks`.
 
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-offscreen in both themes to `target/screenshots/window.png` and
-`window-light.png`.
+offscreen in both themes and both tile styles to `target/screenshots/`
+(`window.png`, `window-light.png`, `window-soft.png`,
+`window-soft-light.png`).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

@@ -6,6 +6,8 @@ use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
 
 use crate::clips::ClipState;
+use crate::menu::{self, MenuAction};
+use crate::prefs::Polish;
 use crate::{format, palette};
 
 pub enum InspectorAction {
@@ -14,6 +16,8 @@ pub enum InspectorAction {
     Recolor(TileId, TileColor),
     /// Asks to remove the tile; the app confirms first.
     Remove(TileId),
+    /// Apply the Polish preset, or remove it if the tile has it.
+    Polish(TileId),
 }
 
 pub struct View<'a> {
@@ -23,6 +27,7 @@ pub struct View<'a> {
     pub playing: bool,
     /// Put the cursor in the title field.
     pub focus_title: bool,
+    pub polish: Polish,
 }
 
 pub fn show(
@@ -38,7 +43,7 @@ pub fn show(
             match view.tile {
                 Some(tile) => {
                     title_field(ui, tile, view.focus_title, title_draft, &mut actions);
-                    tile_settings(ui, tile, view.state, view.playing, &mut actions);
+                    tile_settings(ui, tile, view, &mut actions);
                 }
                 None => set_summary(ui, view.set),
             }
@@ -106,13 +111,8 @@ fn set_summary(ui: &mut Ui, set: &Set) {
     ui.weak("Press a tile's key or double-click it to play it. The arrow keys move the selection and Return plays it. Hold Esc to stop everything.");
 }
 
-fn tile_settings(
-    ui: &mut Ui,
-    tile: &Tile,
-    state: Option<&ClipState>,
-    playing: bool,
-    actions: &mut Vec<InspectorAction>,
-) {
+fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<InspectorAction>) {
+    let (state, playing) = (view.state, view.playing);
     let set = |setting| InspectorAction::Command(Command::SetTile(tile.id, setting));
 
     // Colour.
@@ -156,6 +156,8 @@ fn tile_settings(
     if ui.add(button).clicked() {
         actions.push(InspectorAction::Command(Command::ToggleTile(tile.id)));
     }
+    ui.add_space(4.0);
+    polish_button(ui, tile, view.polish, actions);
 
     section(ui, "Playback");
     let mut looping = tile.looping;
@@ -213,7 +215,34 @@ fn tile_settings(
     }
 }
 
-fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
+/// One click for the Polish preset's fades and reverb; a second click
+/// takes them off again.
+fn polish_button(ui: &mut Ui, tile: &Tile, polish: Polish, actions: &mut Vec<InspectorAction>) {
+    let polished = polish.applies_to(tile);
+    let label = if polished {
+        "✔ Polished"
+    } else {
+        "✨ Polish"
+    };
+    let shortcut = menu::shortcut_text(ui.ctx(), MenuAction::PolishSelected);
+    let button = Button::new(label)
+        .shortcut_text(shortcut)
+        .selected(polished)
+        .min_size(Vec2::new(ui.available_width(), 32.0));
+    let hint = if polished {
+        "Click to take the fades and reverb off again.".to_owned()
+    } else {
+        format!("Fade and reverb in one click: {}.", polish.describe())
+    };
+    let response = ui.add(button).on_hover_text(format!(
+        "{hint}\nChange the preset in Playback ▸ Polish Preset…"
+    ));
+    if response.clicked() {
+        actions.push(InspectorAction::Polish(tile.id));
+    }
+}
+
+pub fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
     egui::Slider::new(seconds, 0.0..=MAX_FADE_SECONDS)
         .logarithmic(true)
         .smallest_positive(0.05)

@@ -5,6 +5,8 @@
 //! library, so a scratch library opened with `--library` has its own.
 
 use egui::ThemePreference;
+use olio_control::TileSetting;
+use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,10 +37,117 @@ impl Theme {
     }
 }
 
+/// How tiles are drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TileStyle {
+    /// Flat cards with a coloured outline.
+    #[default]
+    Flat,
+    /// Raised, softly lit buttons that press in while they play.
+    Soft,
+}
+
+impl TileStyle {
+    pub const ALL: [Self; 2] = [Self::Flat, Self::Soft];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Flat => "Flat Tiles",
+            Self::Soft => "Soft Tiles",
+        }
+    }
+}
+
+/// What one click of Polish gives a tile: a fade in, a fade out and some
+/// reverb. Adjustable in Playback ▸ Polish Preset.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Polish {
+    pub fade_in_seconds: f32,
+    pub fade_out_seconds: f32,
+    /// 0 (dry) to 1.
+    pub reverb: f32,
+}
+
+impl Default for Polish {
+    fn default() -> Self {
+        Self {
+            fade_in_seconds: 1.0,
+            fade_out_seconds: 1.0,
+            reverb: 0.3,
+        }
+    }
+}
+
+impl Polish {
+    /// No fades, no reverb: what removing the polish sets.
+    pub const OFF: Self = Self {
+        fade_in_seconds: 0.0,
+        fade_out_seconds: 0.0,
+        reverb: 0.0,
+    };
+
+    /// True if the tile already has these values (within what a slider
+    /// shows).
+    pub fn applies_to(&self, tile: &Tile) -> bool {
+        let close = |a: f32, b: f32| (a - b).abs() < 0.005;
+        close(tile.fade_in_seconds, self.fade_in_seconds)
+            && close(tile.fade_out_seconds, self.fade_out_seconds)
+            && close(tile.reverb, self.reverb)
+    }
+
+    /// The three tile settings, to apply through `Command::SetTile`.
+    pub fn settings(self) -> [TileSetting; 3] {
+        [
+            TileSetting::FadeIn(self.fade_in_seconds),
+            TileSetting::FadeOut(self.fade_out_seconds),
+            TileSetting::Reverb(self.reverb),
+        ]
+    }
+
+    /// "1 s in · 1 s out · 30 % reverb", for tooltips and buttons.
+    pub fn describe(&self) -> String {
+        format!(
+            "{} in · {} out · {:.0} % reverb",
+            seconds(self.fade_in_seconds),
+            seconds(self.fade_out_seconds),
+            self.reverb * 100.0
+        )
+    }
+
+    fn clamped(self) -> Self {
+        let fade = |value: f32| {
+            if value.is_finite() {
+                value.clamp(0.0, MAX_FADE_SECONDS)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            fade_in_seconds: fade(self.fade_in_seconds),
+            fade_out_seconds: fade(self.fade_out_seconds),
+            reverb: if self.reverb.is_finite() {
+                self.reverb.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+/// "1 s", "0.5 s", "2.25 s".
+fn seconds(value: f32) -> String {
+    let text = format!("{value:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text} s")
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     pub theme: Theme,
+    pub tile_style: TileStyle,
+    pub polish: Polish,
     /// Master volume, 0 to 1.
     pub volume: f32,
     pub muted: bool,
@@ -53,6 +162,8 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: Theme::System,
+            tile_style: TileStyle::Flat,
+            polish: Polish::default(),
             volume: 1.0,
             muted: false,
             show_sets: true,
@@ -74,6 +185,7 @@ impl Preferences {
         } else {
             1.0
         };
+        prefs.polish = prefs.polish.clamped();
         prefs
     }
 
@@ -107,10 +219,35 @@ mod tests {
     }
 
     #[test]
+    fn polish_knows_whether_a_tile_has_it() {
+        use olio_library::{Slot, Sound};
+        let polish = Polish::default();
+        assert_eq!(polish.describe(), "1 s in · 1 s out · 30 % reverb");
+        let sound = Sound {
+            hash: "abc".to_owned(),
+            extension: "wav".to_owned(),
+            original_name: "a.wav".to_owned(),
+        };
+        let mut tile = Tile::new(sound, Slot::new(0, 0));
+        assert!(!polish.applies_to(&tile));
+        tile.fade_in_seconds = 1.0;
+        tile.fade_out_seconds = 1.0;
+        tile.reverb = 0.3;
+        assert!(polish.applies_to(&tile));
+        tile.reverb = 0.35;
+        assert!(!polish.applies_to(&tile));
+        assert_eq!(Polish::OFF.settings()[2], TileSetting::Reverb(0.0));
+        assert_eq!(seconds(0.5), "0.5 s");
+        assert_eq!(seconds(2.25), "2.25 s");
+    }
+
+    #[test]
     fn old_preferences_fill_in_new_fields() {
         let prefs: Preferences = serde_json::from_str(r#"{"theme":"Dark"}"#).unwrap();
         assert_eq!(prefs.theme, Theme::Dark);
         assert_eq!(prefs.volume, 1.0);
         assert!(prefs.show_sets);
+        assert_eq!(prefs.polish, Polish::default());
+        assert_eq!(prefs.tile_style, TileStyle::Flat);
     }
 }

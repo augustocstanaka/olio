@@ -18,6 +18,8 @@ pub enum SidebarAction {
     CancelRename,
     NewSet,
     RemoveSet(SetId),
+    /// Give every tile of the set the Polish preset.
+    Polish(SetId),
 }
 
 /// A set name being edited in place.
@@ -176,6 +178,15 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
             actions.push(SidebarAction::StartRename(row.set.id));
             ui.close();
         }
+        let polishable = !row.set.tiles.is_empty();
+        if ui
+            .add_enabled(polishable, egui::Button::new("✨ Polish All Tiles"))
+            .clicked()
+        {
+            actions.push(SidebarAction::Polish(row.set.id));
+            ui.close();
+        }
+        ui.separator();
         if ui.button("Remove Set…").clicked() {
             actions.push(SidebarAction::RemoveSet(row.set.id));
             ui.close();

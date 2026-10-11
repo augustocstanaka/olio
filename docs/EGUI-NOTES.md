@@ -46,6 +46,16 @@ On a generation bump, re-check every line below and update the versions.
 - `egui::Modal` draws in an `Area` with a backdrop; `should_close()`
   consumes Escape, so check your own keys (Return) after it. Buttons in a
   modal are found by label like any other.
+- Shadows: `egui::Shadow { offset, blur, spread, color }.as_shape(rect,
+  radius)` gives a blurred rectangle; the blur reaches half its width on
+  each side of the (offset) rect. egui has no inner shadow: the Soft
+  pressed tile paints a dark rim colour, then a blurred lighter shape
+  shrunk and offset inside it, through `painter.with_clip_rect(rect)`.
+  Shadows reach past their tile, so a Soft grid is inset to leave room.
+- Per-widget animation state that egui does not keep (when a tile
+  started, for the dip) lives in `ctx.data_mut(|d| d.insert_temp(id, ..))`
+  and is read back with `get_temp`; time comes from `input.time`, which
+  kittest advances by `step_dt`, so animations are deterministic in tests.
 - Persistence: the `persistence` feature of eframe stores egui's memory
   (panel widths), the window geometry and whatever `App::save` writes
   with `eframe::set_value`. `persistence_path` names the file; it must be
