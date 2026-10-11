@@ -79,7 +79,9 @@ On a generation bump, re-check every line below and update the versions.
   from the `PointerButton { pressed: false }` event: kittest's `drop_at`
   removes the pointer in the same frame. A ghost goes on an
   `Order::Tooltip` layer painter; `painter.multiply_opacity` fades a copy
-  of the painter, not the original.
+  of the painter, not the original. While something is dragged, other
+  widgets' `hovered()` is false: use `contains_pointer()` for drop
+  targets (the sidebar's set rows).
 - Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
   only lays out the visible rows (the emoji picker's 1,900 emoji).
 - Persistence: the `persistence` feature of eframe stores egui's memory

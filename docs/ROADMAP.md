@@ -35,7 +35,8 @@ are intentions, reordered as real use dictates.
 - **Polish**: one click (⌘P) for a 1 s fade in, 1 s fade out and 30 %
   reverb, toggled; Polish All Tiles in Set; an adjustable Polish Preset.
 - **Arranging**: drag tiles between slots (onto a tile swaps, with a
-  preview; Option/Ctrl drops a copy), Duplicate (⌘D), Shift+arrows to
+  preview; Option/Ctrl drops a copy) and onto sets in the sidebar (moved
+  there in the same slot if free, or copied), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
 - **Undo** for removing tiles and sets (⌘Z, ⇧⌘Z, an Undo button in the
   status bar); tiles are removed without a confirmation.
@@ -60,7 +61,7 @@ are intentions, reordered as real use dictates.
 - Pause All (Space); Shift+Ctrl solo, Shift+Ctrl+Cmd fade-and-solo.
 - Selection: Cmd-click and drag selection of several tiles.
 - A peak limiter on the output instead of the hard clip.
-- Play counts and reset; drag tiles to other sets (copy, Cmd to move).
+- Play counts and reset.
 - Peaks cached on disk so large sets draw before decoding; decoding of all
   sets in the background; garbage collection of sounds no tile uses.
 

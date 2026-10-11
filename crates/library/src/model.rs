@@ -91,6 +91,55 @@ impl Library {
         self.sets.iter_mut().find_map(|set| set.tile_mut(id))
     }
 
+    /// Moves a tile to another set, into `preferred` there if it is free
+    /// (by default its own slot, so it keeps its key), else the earliest
+    /// free slot. Returns the set and slot it left and the slot it took;
+    /// `None` if the tile or set is unknown, the tile is already in that
+    /// set, or the set is full.
+    pub fn move_tile_to_set(
+        &mut self,
+        id: TileId,
+        to: SetId,
+        preferred: Option<Slot>,
+    ) -> Option<(SetId, Slot, Slot)> {
+        let (from, tile) = self.tile(id)?;
+        let (from, from_slot) = (from.id, tile.slot);
+        if from == to {
+            return None;
+        }
+        let slot = self
+            .set(to)?
+            .free_slot_from(preferred.unwrap_or(from_slot))?;
+        let mut tile = self.set_mut(from)?.remove_tile(id)?;
+        tile.slot = slot;
+        self.set_mut(to)?.tiles.push(tile);
+        Some((from, from_slot, slot))
+    }
+
+    /// Copies a tile, title and all, into another set: into `preferred`
+    /// if it is free (by default the tile's own slot), else the earliest
+    /// free slot. Returns the copy's id; `None` if the tile or set is
+    /// unknown, the tile is in that set already (duplicate it instead), or
+    /// the set is full.
+    pub fn copy_tile_to_set(
+        &mut self,
+        id: TileId,
+        to: SetId,
+        preferred: Option<Slot>,
+    ) -> Option<TileId> {
+        let (from, tile) = self.tile(id)?;
+        if from.id == to {
+            return None;
+        }
+        let mut copy = tile.clone();
+        let target = self.set(to)?;
+        copy.slot = target.free_slot_from(preferred.unwrap_or(copy.slot))?;
+        copy.id = TileId::random();
+        let copy_id = copy.id;
+        self.set_mut(to)?.tiles.push(copy);
+        Some(copy_id)
+    }
+
     /// Appends a new empty set with a name no other set has.
     pub fn add_set(&mut self) -> SetId {
         let set = Set::new(self.unused_set_name());

@@ -97,12 +97,29 @@ pub struct Drop {
 
 /// The modifier that makes a drag drop a copy: Option on macOS, Ctrl
 /// elsewhere, as in each platform's file manager.
-fn copy_modifier(modifiers: egui::Modifiers) -> bool {
+pub fn copy_modifier(modifiers: egui::Modifiers) -> bool {
     if cfg!(target_os = "macos") {
         modifiers.alt
     } else {
         modifiers.ctrl || modifiers.alt
     }
+}
+
+/// The release of the primary button, if it came up this frame: where,
+/// and with which modifiers. Read from the event, since the pointer may
+/// already be gone.
+pub fn release(ui: &Ui) -> Option<(Pos2, egui::Modifiers)> {
+    ui.input(|input| {
+        input.events.iter().find_map(|event| match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            } => Some((*pos, *modifiers)),
+            _ => None,
+        })
+    })
 }
 
 /// Where the grab point sits inside a dragged tile, kept from the start of
@@ -182,19 +199,7 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
             let dragging = egui::DragAndDrop::payload::<TileId>(ui.ctx())
                 .map(|id| *id)
                 .filter(|&id| view.set.tile(id).is_some());
-            // The release, if the button came up this frame: where and with
-            // which modifiers (the pointer may already be gone).
-            let release = ui.input(|input| {
-                input.events.iter().find_map(|event| match event {
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: false,
-                        modifiers,
-                    } => Some((*pos, *modifiers)),
-                    _ => None,
-                })
-            });
+            let release = release(ui);
             let target = dragging
                 .and(release.map(|(pos, _)| pos).or(pointer))
                 .and_then(|pos| layout.slot_at(pos));
@@ -280,7 +285,12 @@ fn drag_feedback(
     let Some(tile) = view.set.tile(id) else {
         return;
     };
-    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    let copying = ui.input(|input| copy_modifier(input.modifiers));
+    ui.ctx().set_cursor_icon(if copying {
+        egui::CursorIcon::Copy
+    } else {
+        egui::CursorIcon::Grabbing
+    });
     let dark = ui.visuals().dark_mode;
     if let Some(slot) = target.filter(|&slot| slot != tile.slot) {
         let rect = layout.rect(slot);
@@ -302,6 +312,12 @@ fn drag_feedback(
     let Some(pointer) = pointer else {
         return;
     };
+    if !ui.clip_rect().contains(pointer) {
+        // Off the grid (over the sets, say): a small label beside the
+        // pointer, so what is under it stays in view.
+        drag_label(ui, view, tile, pointer);
+        return;
+    }
     let offset = ui
         .ctx()
         .data(|data| data.get_temp::<Vec2>(grab_offset_id()))
@@ -350,6 +366,45 @@ struct Lifted<'a> {
     lifted: bool,
     /// The tile it would swap with, previewed in its place.
     swap_in: Option<&'a Tile>,
+}
+
+/// The dragged tile as a small label: its emoji and title.
+fn drag_label(ui: &Ui, view: &GridView, tile: &Tile, pointer: Pos2) {
+    let dark = ui.visuals().dark_mode;
+    let strong = palette::strong(tile.color, dark);
+    let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("olio-drag-ghost"));
+    let painter = ui.ctx().layer_painter(layer);
+    let title = painter.layout_no_wrap(tile.title.clone(), FontId::proportional(14.0), strong);
+    let emoji_room = if tile.emoji.is_empty() { 0.0 } else { 24.0 };
+    let size = Vec2::new(title.size().x + emoji_room + 24.0, 30.0);
+    let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 12.0), size);
+    let shadow = Shadow {
+        offset: [0, 4],
+        blur: 14,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 140 } else { 60 }),
+    };
+    painter.add(shadow.as_shape(rect, 15));
+    painter.rect_filled(rect, 15, palette::tile_background(dark));
+    painter.rect(
+        rect,
+        15,
+        palette::tint(tile.color, dark, 40),
+        Stroke::new(1.5, strong),
+        StrokeKind::Inside,
+    );
+    let mut left = rect.left() + 12.0;
+    if !tile.emoji.is_empty() {
+        let picture =
+            Rect::from_center_size(Pos2::new(left + 9.0, rect.center().y), Vec2::splat(18.0));
+        view.images.paint(&painter, picture, &tile.emoji, strong);
+        left += emoji_room;
+    }
+    painter.galley(
+        Pos2::new(left, rect.center().y - title.size().y / 2.0),
+        title,
+        strong,
+    );
 }
 
 fn tile_ui(

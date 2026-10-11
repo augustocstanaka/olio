@@ -227,3 +227,81 @@ fn free_slots_after_wrap_round_and_run_out() {
     let id = set.tiles[0].id;
     assert_eq!(set.duplicate(id, None), None, "a full set takes no copy");
 }
+
+#[test]
+fn a_tile_moved_to_another_set_keeps_its_key_if_it_can() {
+    let mut library = Library::default();
+    let first = library.sets[0].id;
+    let second = library.add_set();
+    let a = library
+        .set_mut(first)
+        .unwrap()
+        .place(sound("a"), Some(Slot::new(1, 2)))
+        .unwrap();
+
+    assert_eq!(
+        library.move_tile_to_set(a, second, None),
+        Some((first, Slot::new(1, 2), Slot::new(1, 2)))
+    );
+    assert!(library.set(first).unwrap().tile(a).is_none());
+    assert_eq!(library.tile(a).unwrap().0.id, second);
+
+    // Back again, its slot taken meanwhile: the earliest free one.
+    library
+        .set_mut(first)
+        .unwrap()
+        .place(sound("b"), Some(Slot::new(1, 2)))
+        .unwrap();
+    assert_eq!(
+        library.move_tile_to_set(a, first, None),
+        Some((second, Slot::new(1, 2), Slot::new(0, 0)))
+    );
+    // Not into its own set.
+    assert_eq!(library.move_tile_to_set(a, first, None), None);
+}
+
+#[test]
+fn a_tile_copied_to_another_set_keeps_its_title_and_settings() {
+    let mut library = Library::default();
+    let first = library.sets[0].id;
+    let second = library.add_set();
+    let a = library
+        .set_mut(first)
+        .unwrap()
+        .place(sound("a"), None)
+        .unwrap();
+    library.tile_mut(a).unwrap().reverb = 0.5;
+
+    let copy = library.copy_tile_to_set(a, second, None).unwrap();
+    let (set, tile) = library.tile(copy).unwrap();
+    assert_eq!(set.id, second);
+    assert_eq!(
+        (tile.title.as_str(), tile.reverb, tile.slot),
+        ("a", 0.5, Slot::new(0, 0))
+    );
+    assert!(
+        library.set(first).unwrap().tile(a).is_some(),
+        "the original stays"
+    );
+    assert_eq!(library.copy_tile_to_set(a, first, None), None);
+}
+
+#[test]
+fn nothing_moves_into_a_full_set() {
+    let mut library = Library::default();
+    let first = library.sets[0].id;
+    let second = library.add_set();
+    let a = library
+        .set_mut(first)
+        .unwrap()
+        .place(sound("a"), None)
+        .unwrap();
+    let full = library.set_mut(second).unwrap();
+    full.columns = 1;
+    for row in 0..MAX_ROWS {
+        full.place(sound("x"), Some(Slot::new(row, 0))).unwrap();
+    }
+    assert_eq!(library.move_tile_to_set(a, second, None), None);
+    assert_eq!(library.copy_tile_to_set(a, second, None), None);
+    assert!(library.set(first).unwrap().tile(a).is_some());
+}

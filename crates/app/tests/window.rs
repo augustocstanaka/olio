@@ -644,6 +644,70 @@ fn shift_and_an_arrow_moves_the_selected_tile() {
 }
 
 #[test]
+fn a_tile_dropped_on_another_set_moves_there_keeping_its_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, to) = (center(&harness, "Big Game"), center(&harness, "My Sounds"));
+    drag(&mut harness, from, to, egui::Modifiers::NONE);
+    harness.get_by_label("Moved “Big Game” to “My Sounds”");
+    assert_eq!(
+        harness.state().current_set_name(),
+        "Show",
+        "the front set stays"
+    );
+    assert_eq!(harness.query_all_by_label("Big Game").count(), 0);
+
+    harness.get_by_label("My Sounds").click();
+    harness.run_steps(2);
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 1), "still played by 2");
+
+    // Undo takes it home and shows it there.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "Show");
+    assert_eq!(harness.state().selected_title(), Some("Big Game"));
+    assert_eq!(slot_of(&harness), (0, 1));
+}
+
+#[test]
+fn a_tile_dropped_on_another_set_with_the_copy_modifier_is_copied() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, to) = (center(&harness, "Applause"), center(&harness, "My Sounds"));
+    drag(&mut harness, from, to, egui::Modifiers::ALT);
+    harness.get_by_label("Copied “Applause” to “My Sounds”");
+    harness.get_by_label("Applause");
+
+    harness.get_by_label("My Sounds").click();
+    harness.run_steps(2);
+    harness.get_by_label("Applause");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    harness.get_by_label("Removed the copy of “Applause” from “My Sounds”");
+    assert_eq!(harness.query_all_by_label("Applause").count(), 0);
+}
+
+#[test]
+fn a_tile_dropped_on_its_own_set_stays_put() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    // "Show" is also the inspector's heading: take the sidebar's, on the left.
+    let to = harness
+        .query_all_by_label("Show")
+        .map(|node| node.rect().center())
+        .min_by(|a, b| a.x.total_cmp(&b.x))
+        .unwrap();
+    let from = center(&harness, "Big Game");
+    drag(&mut harness, from, to, egui::Modifiers::NONE);
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 1));
+    assert_eq!(harness.query_all_by_label_contains("Moved").count(), 0);
+}
+
+#[test]
 fn render_the_window_to_a_png() {
     if std::env::var_os("OLIO_RENDER").is_none() {
         eprintln!("skipped: set OLIO_RENDER=1 to render the window");
@@ -691,6 +755,20 @@ fn render_the_window_to_a_png() {
     }
     let image = harness.render().expect("a GPU adapter to render with");
     let path = out.join("window-drag.png");
+    image.save(&path).unwrap();
+    println!("rendered {}", path.display());
+
+    // On over the sidebar: My Sounds would take it.
+    let (now, set) = (
+        from + (to - from + egui::vec2(18.0, 14.0)),
+        center(&harness, "My Sounds"),
+    );
+    for step in 1..=10 {
+        harness.hover_at(now + (set - now) * (step as f32 / 10.0));
+        harness.run_steps(1);
+    }
+    let image = harness.render().expect("a GPU adapter to render with");
+    let path = out.join("window-drag-set.png");
     image.save(&path).unwrap();
     println!("rendered {}", path.display());
 }

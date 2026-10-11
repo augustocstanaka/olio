@@ -28,6 +28,16 @@ pub enum Change {
         tile: Box<Tile>,
         source: String,
     },
+    /// A tile moved, or copied, to another set. `tile` is as it is there
+    /// now: the moved tile, or the copy.
+    ToSet {
+        tile: Box<Tile>,
+        from: SetId,
+        from_slot: Slot,
+        to: SetId,
+        to_name: String,
+        copy: bool,
+    },
     /// The tile went from one slot to another, swapping with any tile there.
     Moved {
         set: SetId,
@@ -46,6 +56,15 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Remove Set “{}”", set.name),
             Self::Duplicated { source, .. } => format!("Duplicate “{source}”"),
             Self::Moved { title, .. } => format!("Move “{title}”"),
+            Self::ToSet {
+                tile,
+                to_name,
+                copy,
+                ..
+            } => {
+                let verb = if *copy { "Copy" } else { "Move" };
+                format!("{verb} “{}” to “{to_name}”", tile.title)
+            }
         }
     }
 
@@ -57,6 +76,16 @@ impl Change {
             Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
             // The tile is seen moving; no need to say so.
             Self::Moved { .. } => None,
+            // It leaves the grid, or lands out of sight: say where it went.
+            Self::ToSet {
+                tile,
+                to_name,
+                copy,
+                ..
+            } => {
+                let verb = if *copy { "Copied" } else { "Moved" };
+                Some(format!("{verb} “{}” to “{to_name}”", tile.title))
+            }
         }
     }
 
@@ -67,6 +96,13 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Put back the set “{}”", set.name),
             Self::Duplicated { tile, .. } => format!("Removed the copy “{}”", tile.title),
             Self::Moved { title, .. } => format!("Moved “{title}” back"),
+            Self::ToSet {
+                tile,
+                to_name,
+                copy: true,
+                ..
+            } => format!("Removed the copy of “{}” from “{to_name}”", tile.title),
+            Self::ToSet { tile, .. } => format!("Moved “{}” back", tile.title),
         }
     }
 }

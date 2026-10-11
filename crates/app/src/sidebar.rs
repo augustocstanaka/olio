@@ -4,12 +4,12 @@ use std::collections::HashSet;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, RichText, Sense, Ui,
-    Vec2, WidgetInfo, WidgetType,
+    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, RichText, Sense, Stroke,
+    StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
 };
-use olio_library::{Library, Set, SetId};
+use olio_library::{Library, Set, SetId, TileId};
 
-use crate::keys;
+use crate::{grid, keys};
 
 pub enum SidebarAction {
     Select(SetId),
@@ -20,6 +20,13 @@ pub enum SidebarAction {
     RemoveSet(SetId),
     /// Give every tile of the set the Polish preset.
     Polish(SetId),
+    /// A tile dragged from the grid and dropped on a set: moved there, or
+    /// copied with the copy modifier.
+    DropTile {
+        tile: TileId,
+        set: SetId,
+        copy: bool,
+    },
 }
 
 /// A set name being edited in place.
@@ -47,6 +54,11 @@ pub fn show(
     rename: &mut Option<Rename>,
 ) -> Vec<SidebarAction> {
     let mut actions = Vec::new();
+    // A tile being dragged, and the set it is in: every other set can
+    // take it.
+    let dragged = egui::DragAndDrop::payload::<TileId>(ui.ctx())
+        .map(|id| *id)
+        .and_then(|id| library.tile(id).map(|(set, _)| (id, set.id)));
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -88,6 +100,9 @@ pub fn show(
                             number: index + 1,
                             selected: set.id == current,
                             sounding: sounding.contains(&set.id),
+                            drop: dragged
+                                .filter(|&(_, from)| from != set.id)
+                                .map(|(tile, _)| tile),
                         };
                         match rename.as_mut().filter(|rename| rename.set == set.id) {
                             Some(rename) => rename_row(ui, rename, &mut actions),
@@ -105,6 +120,8 @@ struct Row<'a> {
     number: usize,
     selected: bool,
     sounding: bool,
+    /// The tile being dragged, if it can be dropped on this set.
+    drop: Option<TileId>,
 }
 
 const ROW_HEIGHT: f32 = 28.0;
@@ -120,9 +137,30 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
             &row.set.name,
         )
     });
+    // `hovered` is false while something is dragged; the pointer still
+    // counts as inside.
+    let drop_here = row.drop.is_some() && response.contains_pointer();
+    let copying = ui.input(|input| grid::copy_modifier(input.modifiers));
+    if let (Some(tile), Some((pos, modifiers))) = (row.drop, grid::release(ui))
+        && rect.contains(pos)
+    {
+        actions.push(SidebarAction::DropTile {
+            tile,
+            set: row.set.id,
+            copy: grid::copy_modifier(modifiers),
+        });
+    }
     let visuals = ui.visuals();
     let painter = ui.painter();
-    if row.selected {
+    if drop_here {
+        painter.rect_filled(rect, 6, visuals.selection.bg_fill.gamma_multiply(0.45));
+        painter.rect_stroke(
+            rect,
+            6,
+            Stroke::new(2.0, visuals.selection.stroke.color),
+            StrokeKind::Inside,
+        );
+    } else if row.selected {
         painter.rect_filled(rect, 6, visuals.selection.bg_fill);
     } else if response.hovered() {
         painter.rect_filled(rect, 6, visuals.widgets.hovered.weak_bg_fill);
@@ -134,7 +172,17 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
     };
 
     let mut right = rect.right() - 8.0;
-    if let Some(key) = keys::set_key(row.number) {
+    if drop_here {
+        // Instead of the shortcut, what dropping will do.
+        let drawn = painter.text(
+            Pos2::new(right, rect.center().y),
+            Align2::RIGHT_CENTER,
+            if copying { "copy here" } else { "move here" },
+            FontId::proportional(12.5),
+            visuals.strong_text_color(),
+        );
+        right = drawn.left() - 6.0;
+    } else if let Some(key) = keys::set_key(row.number) {
         let shortcut = ui
             .ctx()
             .format_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key));

@@ -29,7 +29,8 @@ _Avoid_: button, pad, cue, cell
 A position in a set's grid (row, column). Rows 0 to 3 follow the keyboard's
 rows; rows 4 to 7 repeat them with Option (Alt). Dragging a tile to
 another slot moves it (and so changes its key); onto another tile, the
-two swap.
+two swap. Dropped on another set, a tile takes the same slot there if it
+is free.
 _Avoid_: cell, position (alone), index
 
 **Key**:

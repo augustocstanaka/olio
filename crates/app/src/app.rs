@@ -723,6 +723,65 @@ impl OlioApp {
         }
     }
 
+    /// Moves (or copies) a tile to another set, keeping its slot there if
+    /// it is free. The front set stays in front; the status says where the
+    /// tile went.
+    fn transfer_tile(&mut self, id: TileId, to: SetId, copy: bool) {
+        let Some(name) = self.library.set(to).map(|set| set.name.clone()) else {
+            return;
+        };
+        let change = if copy {
+            self.copy_to_set(id, to, None)
+        } else {
+            self.move_to_set(id, to, None)
+        };
+        match change {
+            Some(change) => self.record(change),
+            None => self.set_status(format!("“{name}” has no free slot"), true),
+        }
+    }
+
+    fn move_to_set(&mut self, id: TileId, to: SetId, preferred: Option<Slot>) -> Option<Change> {
+        let to_name = self.library.set(to)?.name.clone();
+        let (from, from_slot, _) = self.library.move_tile_to_set(id, to, preferred)?;
+        if let Some(playing) = self.playing.get_mut(&id) {
+            // It keeps playing; the sidebar's speaker follows it.
+            playing.set = to;
+        }
+        if self.selected == Some(id) {
+            self.selected = None;
+        }
+        self.changed();
+        let tile = Box::new(self.library.tile(id)?.1.clone());
+        Some(Change::ToSet {
+            tile,
+            from,
+            from_slot,
+            to,
+            to_name,
+            copy: false,
+        })
+    }
+
+    fn copy_to_set(&mut self, id: TileId, to: SetId, preferred: Option<Slot>) -> Option<Change> {
+        let to_name = self.library.set(to)?.name.clone();
+        let (from, from_slot) = self
+            .library
+            .tile(id)
+            .map(|(set, tile)| (set.id, tile.slot))?;
+        let copy = self.library.copy_tile_to_set(id, to, preferred)?;
+        self.changed();
+        let tile = Box::new(self.library.tile(copy)?.1.clone());
+        Some(Change::ToSet {
+            tile,
+            from,
+            from_slot,
+            to,
+            to_name,
+            copy: true,
+        })
+    }
+
     /// Moves the selected tile one slot over, swapping with a tile there.
     fn nudge_selected(&mut self, direction: Direction) {
         let Some(id) = self.selected else {
@@ -827,6 +886,52 @@ impl OlioApp {
     /// Makes a change again (redo). Returns the record for undoing it.
     fn apply(&mut self, change: Change) -> Result<Change, Change> {
         match change {
+            Change::ToSet {
+                mut tile,
+                from,
+                from_slot,
+                to,
+                to_name,
+                copy: true,
+            } => {
+                // The copy goes back where it was, if that slot is free.
+                let slot = self.library.set_mut(to).and_then(|set| set.put_back(&tile));
+                if let Some(slot) = slot {
+                    tile.slot = slot;
+                    self.changed();
+                }
+                let change = Change::ToSet {
+                    tile,
+                    from,
+                    from_slot,
+                    to,
+                    to_name,
+                    copy: true,
+                };
+                if slot.is_some() {
+                    Ok(change)
+                } else {
+                    Err(change)
+                }
+            }
+            Change::ToSet {
+                tile,
+                from,
+                from_slot,
+                to,
+                to_name,
+                copy: false,
+            } => {
+                let (id, slot) = (tile.id, tile.slot);
+                self.move_to_set(id, to, Some(slot)).ok_or(Change::ToSet {
+                    tile,
+                    from,
+                    from_slot,
+                    to,
+                    to_name,
+                    copy: false,
+                })
+            }
             Change::RemovedTile { set, tile } => {
                 let id = tile.id;
                 self.take_tile(id).ok_or(Change::RemovedTile { set, tile })
@@ -862,6 +967,48 @@ impl OlioApp {
     /// Undoes a change. Returns the record for redoing it.
     fn revert(&mut self, change: Change) -> Result<Change, Change> {
         match change {
+            Change::ToSet {
+                mut tile,
+                from,
+                from_slot,
+                to,
+                to_name,
+                copy,
+            } => {
+                let id = tile.id;
+                let undone = if copy {
+                    self.stop_tile(id);
+                    let removed = self.library.set_mut(to).and_then(|set| set.remove_tile(id));
+                    removed.map(|_| ())
+                } else {
+                    // Back to its old slot if free; remember where it was, for
+                    // redo.
+                    let back = self.library.move_tile_to_set(id, from, Some(from_slot));
+                    back.map(|(_, slot_there, _)| {
+                        tile.slot = slot_there;
+                        if let Some(playing) = self.playing.get_mut(&id) {
+                            playing.set = from;
+                        }
+                        self.show_moved(from, id);
+                    })
+                };
+                if undone.is_some() {
+                    self.changed();
+                }
+                let change = Change::ToSet {
+                    tile,
+                    from,
+                    from_slot,
+                    to,
+                    to_name,
+                    copy,
+                };
+                if undone.is_some() {
+                    Ok(change)
+                } else {
+                    Err(change)
+                }
+            }
             Change::RemovedTile { set, tile } => match self.insert_tile(set, tile) {
                 Ok((set, tile)) => Ok(Change::RemovedTile { set, tile }),
                 Err(tile) => Err(Change::RemovedTile { set, tile }),
@@ -1055,6 +1202,7 @@ impl OlioApp {
                 self.changed();
             }
             SidebarAction::RemoveSet(id) => self.ask_remove_set(id),
+            SidebarAction::DropTile { tile, set, copy } => self.transfer_tile(tile, set, copy),
             SidebarAction::Polish(id) => {
                 self.execute(Command::SelectSet(id));
                 self.polish_set();
