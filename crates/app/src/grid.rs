@@ -11,6 +11,8 @@ use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{Set, Slot, Tile, TileId};
 
 use crate::clips::{ClipState, Clips, Ready};
+use crate::emoji::EmojiImages;
+use crate::meter::{self, Meter};
 use crate::prefs::{Polish, TileStyle};
 use crate::{format, palette};
 
@@ -18,6 +20,10 @@ const GAP: f32 = 12.0;
 const MIN_TILE: Vec2 = Vec2::new(120.0, 96.0);
 const MAX_TILE_HEIGHT: f32 = 170.0;
 const ROUNDING: u8 = 10;
+/// The emoji beside a tile's title.
+const EMOJI_SIZE: f32 = 22.0;
+/// Room on a tile's right for its level meter.
+const METER_STRIP: f32 = 9.0;
 /// Room around a Soft grid, so the shadows of the outer tiles show.
 const SOFT_INSET: f32 = 10.0;
 /// How long a tile dips when it starts playing, in seconds.
@@ -47,6 +53,11 @@ pub struct GridView<'a> {
     /// The Polish preset, to label the context menu item.
     pub polish: Polish,
     pub style: TileStyle,
+    pub images: &'a EmojiImages,
+    /// Level meters of tiles that are playing or have just stopped.
+    pub levels: &'a HashMap<TileId, Meter>,
+    /// The time the meters were fed, in seconds.
+    pub now: f64,
     /// Files are being dragged over the window.
     pub files_hovering: bool,
 }
@@ -61,6 +72,8 @@ pub struct GridOutput {
     pub recolor: Vec<(TileId, olio_library::TileColor)>,
     /// Tiles to polish, or unpolish if they already are.
     pub polish: Vec<TileId>,
+    /// A tile whose emoji should be chosen.
+    pub choose_emoji: Option<TileId>,
     /// `Some` when the selection changed: the tile clicked, or `None` for
     /// a click on an empty slot.
     pub select: Option<Option<TileId>>,
@@ -213,6 +226,10 @@ fn tile_ui(
             output.rename = Some(tile.id);
             ui.close();
         }
+        if ui.button("Emoji…").clicked() {
+            output.choose_emoji = Some(tile.id);
+            ui.close();
+        }
         let polish = if view.polish.applies_to(tile) {
             "Remove Polish"
         } else {
@@ -265,8 +282,13 @@ fn tile_ui(
         dark,
         style: view.style,
         scale: bounce(ui, tile.id, progress.is_some()),
+        meter: view
+            .levels
+            .get(&tile.id)
+            .filter(|meter| !meter.is_resting(view.now))
+            .copied(),
     };
-    paint_tile(ui.painter(), rect, tile, state, progress, look);
+    paint_tile(ui.painter(), rect, tile, state, progress, look, view.images);
 }
 
 /// How a tile is drawn this frame.
@@ -278,6 +300,8 @@ struct Look {
     style: TileStyle,
     /// 1 at rest; a little less while the tile dips as it starts.
     scale: f32,
+    /// The tile's level, while there is one to show.
+    meter: Option<Meter>,
 }
 
 /// The tile's size this frame: a short dip when it starts playing, like a
@@ -311,6 +335,7 @@ fn paint_tile(
     state: Option<&ClipState>,
     progress: Option<Progress>,
     look: Look,
+    images: &EmojiImages,
 ) {
     let dark = look.dark;
     let rect = Rect::from_center_size(rect.center(), rect.size() * look.scale);
@@ -338,14 +363,34 @@ fn paint_tile(
     painter.rect_stroke(rect, ROUNDING, border, StrokeKind::Inside);
     let inner = rect.shrink2(Vec2::new(10.0, 8.0));
 
-    // Title, and the loop mark beside it.
+    // The emoji, the title beside it, and the loop mark on the right.
     let loop_room = if tile.looping { 22.0 } else { 0.0 };
+    let emoji_room = if tile.emoji.is_empty() {
+        0.0
+    } else {
+        EMOJI_SIZE + 6.0
+    };
     let mut title =
         LayoutJob::simple_singleline(tile.title.clone(), FontId::proportional(15.0), strong);
-    title.wrap = TextWrapping::truncate_at_width((inner.width() - loop_room).max(10.0));
+    title.wrap =
+        TextWrapping::truncate_at_width((inner.width() - loop_room - emoji_room).max(10.0));
     let title = painter.layout_job(title);
+    // The emoji is centred on the title's line, so titles and waveforms
+    // line up across tiles with and without one.
     let title_bottom = inner.top() + title.size().y;
-    painter.galley(inner.left_top(), title, strong);
+    if !tile.emoji.is_empty() {
+        let center = Pos2::new(
+            inner.left() + EMOJI_SIZE / 2.0,
+            inner.top() + title.size().y / 2.0,
+        );
+        let picture = Rect::from_center_size(center, Vec2::splat(EMOJI_SIZE));
+        images.paint(painter, picture, &tile.emoji, strong);
+    }
+    painter.galley(
+        Pos2::new(inner.left() + emoji_room, inner.top()),
+        title,
+        strong,
+    );
     if tile.looping {
         painter.text(
             inner.right_top(),
@@ -396,13 +441,22 @@ fn paint_tile(
         key_badge(painter, inner.center_bottom(), &key.label(), tile, look);
     }
 
-    // The waveform fills the space between.
+    // The waveform fills the space between, leaving a strip on the right
+    // for the level meter, so the waveform keeps its width when playing.
     let wave = Rect::from_min_max(
         Pos2::new(rect.left() + 4.0, title_bottom + 6.0),
-        Pos2::new(rect.right() - 4.0, inner.bottom() - 26.0),
+        Pos2::new(rect.right() - 4.0 - METER_STRIP, inner.bottom() - 26.0),
     );
     if wave.height() < 6.0 {
         return;
+    }
+    if let Some(meter) = &look.meter {
+        let bar = Rect::from_x_y_ranges(
+            wave.right() + 4.0..=wave.right() + METER_STRIP - 2.0,
+            wave.y_range(),
+        );
+        let color = palette::tint(tile.color, dark, 210);
+        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color), dark);
     }
     let note = |text: &str, color: Color32| {
         painter.text(

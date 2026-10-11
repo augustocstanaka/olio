@@ -14,7 +14,7 @@ use egui::{
     Align, CornerRadius, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo,
     WidgetType,
 };
-use olio_audio::{Engine, PlayOptions, VoiceId};
+use olio_audio::{Engine, Mixer, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{
     Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, Tile, TileColor, TileId,
@@ -23,10 +23,12 @@ use olio_library::{
 use crate::Options;
 use crate::clips::{ClipState, Clips};
 use crate::confirm::{self, Confirm, Pending, Reply};
+use crate::emoji::{self, EmojiImages};
 use crate::grid::{self, GridLayout, GridView, Progress};
 use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
+use crate::meter::{self, Meter};
 use crate::prefs::{Polish, Preferences, TileStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::{keys, palette, polish};
@@ -88,6 +90,26 @@ fn open_audio() -> Audio {
     }
 }
 
+/// An output with no device: the window renders the mixer itself, as much
+/// as the clock has moved on each frame, and throws the sound away.
+struct SilentOutput {
+    mixer: Mixer,
+    last: Option<f64>,
+    buffer: Vec<f32>,
+}
+
+impl SilentOutput {
+    const RATE: u32 = 48_000;
+
+    fn render(&mut self, now: f64) {
+        let elapsed = self.last.map_or(0.0, |last| (now - last).clamp(0.0, 1.0));
+        self.last = Some(now);
+        let frames = (elapsed * f64::from(Self::RATE)).round() as usize;
+        self.buffer.resize(frames * 2, 0.0);
+        self.mixer.render(&mut self.buffer, 2);
+    }
+}
+
 /// A pending `--screenshot`: capture the window once it has settled, write
 /// a PNG, and quit.
 struct ScreenshotJob {
@@ -125,6 +147,16 @@ pub struct OlioApp {
     confirm: Option<Confirm>,
     show_shortcuts: bool,
     show_polish: bool,
+    emoji_picker: Option<emoji::Picker>,
+    images: EmojiImages,
+    /// The output's left and right levels.
+    output_meters: [Meter; 2],
+    /// Levels of tiles playing or just stopped.
+    tile_meters: HashMap<TileId, Meter>,
+    /// When the meters were last fed, in egui's seconds.
+    meter_time: f64,
+    /// With `--silent` (tests), the mixer the window renders itself.
+    silent: Option<SilentOutput>,
     grid_layout: Option<GridLayout>,
     screenshot: Option<ScreenshotJob>,
 }
@@ -170,13 +202,11 @@ impl OlioApp {
             prefs,
             selected: None,
             reveal_selected: false,
-            audio: if options.silent {
-                // An engine nobody renders: voices start and are tracked,
-                // but nothing is heard.
-                Audio::Running(Box::new(Engine::offline(48_000).0))
-            } else {
-                open_audio()
+            audio: Audio::Unavailable {
+                reason: String::new(),
+                retry_at: Instant::now(),
             },
+            silent: None,
             clips: Clips::new(cc.egui_ctx.clone()),
             playing: HashMap::new(),
             unsaved_since: None,
@@ -189,6 +219,11 @@ impl OlioApp {
             confirm: None,
             show_shortcuts: false,
             show_polish: false,
+            emoji_picker: None,
+            images: EmojiImages::default(),
+            output_meters: [Meter::default(); 2],
+            tile_meters: HashMap::new(),
+            meter_time: 0.0,
             grid_layout: None,
             screenshot: options.screenshot.map(|path| ScreenshotJob {
                 path,
@@ -196,6 +231,17 @@ impl OlioApp {
                 requested: false,
             }),
         };
+        if options.silent {
+            let (engine, mixer) = Engine::offline(SilentOutput::RATE);
+            app.audio = Audio::Running(Box::new(engine));
+            app.silent = Some(SilentOutput {
+                mixer,
+                last: None,
+                buffer: Vec::new(),
+            });
+        } else {
+            app.audio = open_audio();
+        }
         app.apply_master_gain();
         if let Some(name) = &options.set {
             match app.library.sets.iter().find(|set| &set.name == name) {
@@ -242,6 +288,27 @@ impl OlioApp {
 
     pub fn preferences(&self) -> &Preferences {
         &self.prefs
+    }
+
+    /// The louder of the output meter's two channels, in dBFS.
+    pub fn output_level_db(&self) -> f32 {
+        self.output_meters
+            .iter()
+            .map(Meter::level_db)
+            .fold(f32::NEG_INFINITY, f32::max)
+    }
+
+    /// The level meter of the tile with this title, in dBFS, while it has
+    /// one.
+    pub fn tile_level_db(&self, title: &str) -> Option<f32> {
+        self.tile_meters
+            .iter()
+            .find(|(id, _)| {
+                self.library
+                    .tile(**id)
+                    .is_some_and(|(_, tile)| tile.title == title)
+            })
+            .map(|(_, meter)| meter.level_db())
     }
 
     /// The selected tile, as it is now.
@@ -454,6 +521,11 @@ impl OlioApp {
             }
             MenuAction::PolishSet => self.polish_set(),
             MenuAction::EditPolish => self.show_polish = true,
+            MenuAction::ChooseEmoji => {
+                if let Some(id) = self.selected {
+                    self.open_emoji_picker(id);
+                }
+            }
             MenuAction::OpenWebsite => ctx.open_url(egui::OpenUrl::new_tab(WEBSITE)),
         }
     }
@@ -600,6 +672,61 @@ impl OlioApp {
             self.selected = None;
         }
         self.changed();
+    }
+
+    fn open_emoji_picker(&mut self, id: TileId) {
+        if let Some((_, tile)) = self.library.tile(id) {
+            self.emoji_picker = Some(emoji::Picker::new(id, &tile.title, &tile.emoji));
+        }
+    }
+
+    fn set_emoji(&mut self, id: TileId, emoji: Option<&str>) {
+        let emoji = emoji.unwrap_or_default();
+        if let Some(tile) = self.library.tile_mut(id)
+            && tile.emoji != emoji
+        {
+            tile.emoji = emoji.to_owned();
+            self.changed();
+        }
+    }
+
+    /// Feeds the meters with the levels the mixer has seen since the last
+    /// frame, and keeps redrawing while any of them has something to show.
+    fn update_meters(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        self.meter_time = now;
+        let (outputs, voices): ([f32; 2], Vec<(TileId, f32)>) = match &self.audio {
+            Audio::Running(engine) => (
+                engine.take_output_peaks(),
+                self.playing
+                    .iter()
+                    .map(|(&id, playing)| {
+                        (id, engine.take_voice_peak(playing.voice).unwrap_or(0.0))
+                    })
+                    .collect(),
+            ),
+            Audio::Unavailable { .. } => ([0.0; 2], Vec::new()),
+        };
+        for (meter, peak) in self.output_meters.iter_mut().zip(outputs) {
+            meter.feed(peak, now);
+        }
+        for meter in self.tile_meters.values_mut() {
+            meter.feed(0.0, now);
+        }
+        for (id, peak) in voices {
+            self.tile_meters.entry(id).or_default().feed(peak, now);
+        }
+        let playing = &self.playing;
+        self.tile_meters
+            .retain(|id, meter| playing.contains_key(id) || !meter.is_resting(now));
+        let moving = !self.tile_meters.is_empty()
+            || self
+                .output_meters
+                .iter()
+                .any(|meter| !meter.is_resting(now));
+        if moving {
+            ctx.request_repaint_after(PLAYING_REPAINT);
+        }
     }
 
     fn rename_tile(&mut self, id: TileId, title: String) {
@@ -758,6 +885,9 @@ impl OlioApp {
     // ----- each frame -----------------------------------------------------
 
     fn maintain_audio(&mut self, ctx: &egui::Context) {
+        if let Some(silent) = &mut self.silent {
+            silent.render(ctx.input(|input| input.time));
+        }
         let mut failed = false;
         match &mut self.audio {
             Audio::Running(engine) => {
@@ -1009,22 +1139,53 @@ impl OlioApp {
             if slider.changed() {
                 actions.push(MenuAction::SetVolume(percent / 100.0));
             }
+            ui.add_space(4.0);
+            meter::stereo(
+                ui,
+                &self.output_meters,
+                self.meter_time,
+                egui::vec2(110.0, 14.0),
+            );
             ui.separator();
 
             let dark = ui.visuals().dark_mode;
-            let mut playing: Vec<(&str, TileColor, TileId)> = self
+            let mut playing: Vec<(&str, TileColor, TileId, &str)> = self
                 .playing
                 .keys()
                 .filter_map(|&id| self.library.tile(id))
-                .map(|(_, tile)| (tile.title.as_str(), tile.color, tile.id))
+                .map(|(_, tile)| {
+                    (
+                        tile.title.as_str(),
+                        tile.color,
+                        tile.id,
+                        tile.emoji.as_str(),
+                    )
+                })
                 .collect();
             playing.sort_by(|a, b| a.0.cmp(b.0));
             if playing.is_empty() {
                 ui.weak("Nothing playing");
             }
-            for (title, color, id) in playing {
+            for (title, color, id, emoji) in playing {
                 let text = RichText::new(format!("■ {title}")).color(palette::strong(color, dark));
-                let bubble = egui::Button::new(text).fill(palette::tint(color, dark, 40));
+                let picture = (!emoji.is_empty())
+                    .then(|| self.images.texture(ui.ctx(), emoji))
+                    .flatten()
+                    .map(|texture| {
+                        egui::Image::from_texture(egui::load::SizedTexture::new(
+                            texture,
+                            egui::vec2(16.0, 16.0),
+                        ))
+                    });
+                let bubble = match picture {
+                    Some(picture) => {
+                        let stop = RichText::new("■").color(palette::strong(color, dark));
+                        let title = RichText::new(title).color(palette::strong(color, dark));
+                        egui::Button::new((stop, picture, title))
+                    }
+                    None => egui::Button::new(text),
+                }
+                .fill(palette::tint(color, dark, 40));
                 if ui.add(bubble).on_hover_text("Stop").clicked() {
                     commands.push(Command::StopTile(id));
                 }
@@ -1156,6 +1317,7 @@ impl eframe::App for OlioApp {
         self.drive_screenshot(&ctx);
         self.clips.poll();
         self.maintain_audio(&ctx);
+        self.update_meters(&ctx);
         self.request_clips();
         if self
             .selected
@@ -1172,9 +1334,17 @@ impl eframe::App for OlioApp {
                 Reply::Confirmed => self.resolve(confirm.pending),
             }
         }
+        // So does the emoji picker.
+        if let Some(mut picker) = self.emoji_picker.take() {
+            match emoji::picker(&ctx, &mut picker, &self.images) {
+                emoji::Reply::Waiting => self.emoji_picker = Some(picker),
+                emoji::Reply::Cancelled => {}
+                emoji::Reply::Chose(choice) => self.set_emoji(picker.tile, choice),
+            }
+        }
         let mut commands = Vec::new();
         let mut actions = Vec::new();
-        if self.confirm.is_none() {
+        if self.confirm.is_none() && self.emoji_picker.is_none() {
             actions = menu::pressed(&ctx);
             commands = self.keyboard_commands(&ctx);
             self.escape_hold(&ctx, &mut commands);
@@ -1242,6 +1412,9 @@ impl eframe::App for OlioApp {
                         playing,
                         focus_title,
                         polish: self.prefs.polish,
+                        images: &self.images,
+                        level: tile.and_then(|tile| self.tile_meters.get(&tile.id).copied()),
+                        now: self.meter_time,
                     };
                     inspector::show(ui, &view, &mut self.title_draft)
                 })
@@ -1268,6 +1441,9 @@ impl eframe::App for OlioApp {
                     click_plays: self.prefs.click_plays,
                     polish: self.prefs.polish,
                     style: self.prefs.tile_style,
+                    images: &self.images,
+                    levels: &self.tile_meters,
+                    now: self.meter_time,
                     files_hovering,
                 };
                 grid::show(ui, &view)
@@ -1299,6 +1475,10 @@ impl eframe::App for OlioApp {
         for id in grid.polish {
             self.polish_tile(id);
         }
+        if let Some(id) = grid.choose_emoji {
+            self.selected = Some(id);
+            self.open_emoji_picker(id);
+        }
         if let Some(id) = grid.rename {
             self.selected = Some(id);
             self.act(&ctx, MenuAction::RenameTile);
@@ -1313,6 +1493,7 @@ impl eframe::App for OlioApp {
                 InspectorAction::Recolor(id, color) => self.recolor_tile(id, color),
                 InspectorAction::Remove(id) => self.ask_remove_tile(id),
                 InspectorAction::Polish(id) => self.polish_tile(id),
+                InspectorAction::ChooseEmoji(id) => self.open_emoji_picker(id),
             }
         }
         for action in actions {

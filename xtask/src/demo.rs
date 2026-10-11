@@ -184,16 +184,16 @@ const BOARD: &str = r#"{
       "replace": true,
       "columns": 3,
       "tiles": [
-        { "file": "Applause.wav", "key": "1", "color": "purple", "fade_out": 1.5 },
-        { "file": "Big Win.wav", "key": "2", "color": "pink", "reverb": 0.35 },
-        { "file": "Siren.wav", "key": "3", "color": "red", "loop": true, "fade_in": 0.3, "fade_out": 0.8 },
+        { "file": "Applause.wav", "key": "1", "color": "purple", "fade_out": 1.5, "emoji": "clap" },
+        { "file": "Big Win.wav", "key": "2", "color": "pink", "reverb": 0.35, "emoji": "trophy" },
+        { "file": "Siren.wav", "key": "3", "color": "red", "loop": true, "fade_in": 0.3, "fade_out": 0.8, "emoji": "rotating_light" },
         { "file": "Tense Pad.wav", "key": "Q", "color": "purple", "loop": true, "fade_in": 2, "fade_out": 2, "reverb": 0.5 },
-        { "file": "Bell.wav", "key": "W", "color": "pink", "reverb": 0.6 },
+        { "file": "Bell.wav", "key": "W", "color": "pink", "reverb": 0.6, "emoji": "bell" },
         { "file": "Riser.wav", "key": "E", "color": "red", "fade_in": 0.5 },
         { "file": "Laser.wav", "key": "A", "color": "purple" },
         { "file": "Chime.wav", "key": "S", "color": "pink", "reverb": 0.8 },
-        { "file": "Wrong Answer.wav", "key": "D", "color": "red" },
-        { "file": "Kick.wav", "key": "Z", "color": "purple" },
+        { "file": "Wrong Answer.wav", "key": "D", "color": "red", "emoji": "x" },
+        { "file": "Kick.wav", "key": "Z", "color": "purple", "emoji": "drum" },
         { "file": "Snare.wav", "key": "X", "color": "pink", "reverb": 0.25 },
         { "file": "Bloop.wav", "key": "C", "color": "red" }
       ]

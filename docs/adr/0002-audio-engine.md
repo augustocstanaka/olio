@@ -15,7 +15,9 @@ pieces:
   MP4/MOV video, in pure Rust with no system codecs.
 - **Our own mixer** on the device's real-time thread: a fixed pool of 64
   voices, commands in and events out over wait-free ring buffers (`rtrb`),
-  positions published in atomics.
+  positions and peak levels published in atomics (levels as `f32` bits
+  raised with `fetch_max` and taken with `swap`, so no peak between two
+  reads is lost and neither side waits).
 
 Sounds are decoded fully into memory (`Clip`, interleaved `f32` at the
 file's rate) on a background thread before they are played, so starting a

@@ -56,6 +56,14 @@ On a generation bump, re-check every line below and update the versions.
   started, for the dip) lives in `ctx.data_mut(|d| d.insert_temp(id, ..))`
   and is read back with `get_temp`; time comes from `input.time`, which
   kittest advances by `step_dt`, so animations are deterministic in tests.
+- Pictures: decode once (`image` crate), `ctx.load_texture(name,
+  ColorImage, options)`, keep the `TextureHandle` (dropping it frees the
+  texture) and paint with `painter.image(id, rect, uv, WHITE)`. Use
+  `mipmap_mode: Some(Linear)` for pictures drawn smaller than they are.
+  In a `Button`, an `Image` is an atom: `Button::new((text, image,
+  text))`; the accessible label joins the text atoms with spaces.
+- Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
+  only lays out the visible rows (the emoji picker's 1,900 emoji).
 - Persistence: the `persistence` feature of eframe stores egui's memory
   (panel widths), the window geometry and whatever `App::save` writes
   with `eframe::set_value`. `persistence_path` names the file; it must be

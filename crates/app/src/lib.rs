@@ -13,6 +13,7 @@ pub mod app;
 pub mod cli;
 mod clips;
 mod confirm;
+mod emoji;
 mod fonts;
 mod format;
 mod grid;
@@ -20,6 +21,7 @@ pub mod import;
 mod inspector;
 mod keys;
 mod menu;
+mod meter;
 mod palette;
 mod polish;
 pub mod prefs;
@@ -52,7 +54,9 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
 /// What the command line asked for.
 pub struct Options {
     pub library: PathBuf,
-    /// Play nothing: no output device is opened. For tests.
+    /// Open no output device: the mix is rendered and thrown away in step
+    /// with the window's clock, so playback, progress and meters behave as
+    /// with a device but nothing is heard. For tests.
     pub silent: bool,
     pub set: Option<String>,
     pub screenshot: Option<PathBuf>,

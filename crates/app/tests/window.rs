@@ -22,12 +22,12 @@ const BOARD: &str = r#"{
     "name": "Show",
     "columns": 3,
     "tiles": [
-      { "file": "Applause.wav", "key": "1", "color": "purple", "fade_out": 1 },
-      { "file": "Big Game.wav", "key": "2", "color": "pink", "reverb": 0.4 },
+      { "file": "Applause.wav", "key": "1", "color": "purple", "fade_out": 1, "emoji": "clap" },
+      { "file": "Big Game.wav", "key": "2", "color": "pink", "reverb": 0.4, "emoji": "🏆" },
       { "file": "Country Rock.wav", "key": "3", "color": "red", "loop": true },
       { "file": "Rock Out.wav", "key": "Q", "color": "purple", "fade_in": 0.5 },
       { "file": "Pensive.wav", "key": "W", "color": "pink" },
-      { "file": "Tense.wav", "key": "E", "color": "red" }
+      { "file": "Tense.wav", "key": "E", "color": "red", "emoji": "scream" }
     ]
   }]
 }"#;
@@ -340,6 +340,95 @@ fn the_polish_preset_opens_from_the_playback_menu() {
     harness.run_steps(2);
     harness.get_by_label("Polish Preset");
     harness.get_by_label_contains("Reset to 1 s in · 1 s out · 30 % reverb");
+}
+
+#[test]
+fn an_emoji_is_chosen_by_searching_and_pressing_return() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Pensive").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::E);
+    harness.run_steps(2);
+    harness.get_by_label("Emoji for “Pensive”");
+    // Keys type into the search instead of playing tiles.
+    harness.event(egui::Event::Text("tada".to_owned()));
+    harness.run_steps(2);
+    assert!(harness.state().playing_titles().is_empty());
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "🎉");
+    assert_eq!(harness.query_all_by_label("Emoji for “Pensive”").count(), 0);
+}
+
+#[test]
+fn the_inspector_opens_the_picker_and_an_emoji_can_be_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Applause").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "👏");
+
+    // Escape cancels.
+    harness.get_by_label("Emoji").click();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.query_all_by_label("Emoji for “Applause”").count(),
+        0
+    );
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "👏");
+
+    // A click on a suggested emoji picks it.
+    harness.get_by_label("Emoji").click();
+    harness.run_steps(2);
+    harness.get_by_label("party popper").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "🎉");
+
+    // A group tab shows its emoji.
+    harness.get_by_label("Emoji").click();
+    harness.run_steps(2);
+    harness.get_by_label("Animals and nature").click();
+    harness.run_steps(2);
+    harness.get_by_label("dog face");
+    harness.get_by_label("No Emoji").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_tile().unwrap().emoji, "");
+}
+
+#[test]
+fn the_toolbar_and_inspector_show_levels() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Output level");
+    harness.get_by_label("Tense").click();
+    harness.run_steps(2);
+    harness.get_by_label("Tile level");
+    // A playing tile's bubble keeps its name beside its emoji.
+    harness.key_press(egui::Key::E);
+    harness.run_steps(2);
+    harness.get_by_label("■ Tense");
+    assert_eq!(harness.state().playing_titles(), ["Tense"]);
+
+    // The silent output renders the mix, so the meters move.
+    harness.run_steps(10);
+    let floor = -48.0;
+    assert!(harness.state().output_level_db() > floor);
+    assert!(harness.state().tile_level_db("Tense").unwrap() > floor);
+    assert_eq!(harness.state().tile_level_db("Pensive"), None);
+
+    // Muted, the output falls silent while the tile's own meter still shows
+    // it playing.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::M,
+    );
+    harness.run_steps(180);
+    assert!(harness.state().output_level_db() < floor);
+    assert!(harness.state().tile_level_db("Tense").unwrap() > floor);
 }
 
 #[test]

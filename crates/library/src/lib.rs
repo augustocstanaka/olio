@@ -19,6 +19,6 @@ pub mod store;
 pub use manifest::{Manifest, ManifestError, ManifestSet, ManifestTile, TileSpec};
 pub use model::{
     FORMAT_VERSION, Library, MAX_COLUMNS, MAX_FADE_SECONDS, MAX_ROWS, MAX_TILES, Set, SetId, Slot,
-    Sound, Tile, TileColor, TileId, columns_to_fit,
+    Sound, Tile, TileColor, TileId, columns_to_fit, parse_emoji,
 };
 pub use store::{Lock, Store, StoreError};

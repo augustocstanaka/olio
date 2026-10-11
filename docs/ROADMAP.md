@@ -34,6 +34,10 @@ are intentions, reordered as real use dictates.
   playing.
 - **Polish**: one click (⌘P) for a 1 s fade in, 1 s fade out and 30 %
   reverb, toggled; Polish All Tiles in Set; an adjustable Polish Preset.
+- **Level meters**: the output in the toolbar (stereo, with a clip lamp),
+  every playing tile, and the selected tile in the inspector.
+- **Emoji on tiles**: colour Twemoji, a picker with search and groups,
+  boards accept emoji or shortcodes.
 - **Soft tiles** (View menu): raised tiles that press in while playing,
   a restrained take on neumorphism that keeps contrast in both themes;
   every tile dips briefly when it starts (the trigger bounce).
@@ -46,11 +50,9 @@ are intentions, reordered as real use dictates.
   between them.
 - Pause All (Space); Shift+Ctrl solo, Shift+Ctrl+Cmd fade-and-solo.
 - Selection: Cmd-click and drag selection of several tiles.
-- A peak limiter on the output instead of the hard clip; level meters in
-  the toolbar and inspector.
+- A peak limiter on the output instead of the hard clip.
 - Tile context menu: duplicate, play counts and reset; drag tiles between
   slots and to other sets (copy, Cmd to move).
-- Emoji on tiles (picker with search).
 - Undo for removing tiles and sets.
 - Peaks cached on disk so large sets draw before decoding; decoding of all
   sets in the background; garbage collection of sounds no tile uses.

@@ -110,6 +110,17 @@ _Avoid_: main volume, output level
 A playing tile's button in the toolbar, which stops it.
 _Avoid_: chip, badge
 
+**Emoji**:
+The one emoji a tile can show beside its title, chosen in the emoji
+picker or set by a board.
+_Avoid_: icon, sticker
+
+**Level meter**:
+A bar showing how loud something is playing, in dBFS (0 is full scale):
+the output's in the toolbar, with a clip lamp, and each tile's own,
+before the master volume.
+_Avoid_: VU meter (it is a peak meter), volume (that is a setting)
+
 ### Control
 
 **Command**:

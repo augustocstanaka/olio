@@ -41,8 +41,9 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
 
 The UI and audio threads share no locks. The engine sends `Message`s to the
 mixer over a wait-free ring buffer (`rtrb`); the mixer sends `Event`s back
-over another, and publishes each voice's position in atomics for progress
-bars.
+over another, and publishes in atomics each voice's position (for progress
+bars) and the loudest sample of each voice and of the output since the app
+last looked (for level meters, `meter.rs`).
 
 ## Playing a tile
 

@@ -372,3 +372,82 @@ fn the_reverb_send_can_change_while_a_voice_plays() {
         "the reverb tail sounds"
     );
 }
+
+#[test]
+fn output_peaks_report_the_loudest_sample_since_the_last_read() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    engine.play(mono(RATE, &[0.1, -0.6, 0.3]), PlayOptions::default());
+    render(&mut mixer, 64, 2);
+    assert_eq!(engine.take_output_peaks(), [0.6, 0.6]);
+    // Taken: nothing louder since.
+    render(&mut mixer, 64, 2);
+    assert_eq!(engine.take_output_peaks(), [0.0, 0.0]);
+}
+
+#[test]
+fn output_peaks_follow_the_master_gain_and_show_clipping() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    engine.play(constant(0.8, 4800), PlayOptions::default());
+    engine.play(constant(0.8, 4800), PlayOptions::default());
+    render(&mut mixer, 512, 2);
+    // The mix is 1.6: the output clipped, and the meter says so.
+    assert_close(engine.take_output_peaks()[0], 1.6, 1e-6);
+
+    engine.set_master_gain(0.25);
+    render(&mut mixer, 1024, 2);
+    engine.take_output_peaks();
+    render(&mut mixer, 512, 2);
+    assert_close(engine.take_output_peaks()[1], 0.4, 1e-6);
+}
+
+#[test]
+fn peaks_survive_several_buffers_between_reads() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    let mut samples = vec![0.1; 1000];
+    samples[100] = 0.9;
+    engine.play(mono(RATE, &samples), PlayOptions::default());
+    for _ in 0..8 {
+        render(&mut mixer, 128, 2);
+    }
+    assert_eq!(engine.take_output_peaks(), [0.9, 0.9]);
+}
+
+#[test]
+fn each_voice_reports_its_own_level_until_it_ends() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    let quiet = engine
+        .play(constant(0.2, 4800), PlayOptions::default())
+        .unwrap();
+    let loud = engine
+        .play(
+            constant(0.5, 100),
+            PlayOptions {
+                gain: 0.5,
+                ..PlayOptions::default()
+            },
+        )
+        .unwrap();
+    render(&mut mixer, 64, 2);
+    assert_close(engine.take_voice_peak(quiet).unwrap(), 0.2, 1e-6);
+    assert_close(engine.take_voice_peak(loud).unwrap(), 0.25, 1e-6);
+
+    // The loud one plays out; its slot reports nothing for it any more.
+    render(&mut mixer, 256, 2);
+    engine.poll();
+    assert_eq!(engine.take_voice_peak(loud), None);
+    assert!(engine.take_voice_peak(quiet).is_some());
+}
+
+#[test]
+fn a_new_voice_does_not_inherit_the_level_of_its_slot() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    engine.play(constant(0.9, 10), PlayOptions::default());
+    render(&mut mixer, 64, 2);
+    render(&mut mixer, 64, 2);
+    engine.poll();
+    let quiet = engine
+        .play(constant(0.1, 4800), PlayOptions::default())
+        .unwrap();
+    render(&mut mixer, 64, 2);
+    assert_close(engine.take_voice_peak(quiet).unwrap(), 0.1, 1e-6);
+}

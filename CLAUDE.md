@@ -21,7 +21,8 @@ and UI text.
   `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
-  `polish.rs` the Polish Preset window,
+  `polish.rs` the Polish Preset window, `meter.rs` level meters,
+  `emoji.rs` Twemoji pictures and the emoji picker,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless
@@ -62,7 +63,8 @@ and UI text.
 Developed on an Apple-silicon Mac and Windows. Audio goes through cpal
 (CoreAudio, WASAPI); CI runners have no audio device, so every mixing rule
 is tested by rendering the mixer offline (`Engine::offline`), and window
-tests run with `Options { silent: true }`. Native dialogs come from `rfd`
+tests run with `Options { silent: true }`, which renders the mixer in
+step with the test clock, so progress and meters move as with a device. Native dialogs come from `rfd`
 and block the frame; that is intended.
 
 ## Agent skills

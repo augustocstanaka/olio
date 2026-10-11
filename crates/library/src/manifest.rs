@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::de::{self, MapAccess, Visitor};
 
-use crate::model::{MAX_COLUMNS, MAX_FADE_SECONDS, TileColor};
+use crate::model::{MAX_COLUMNS, MAX_FADE_SECONDS, TileColor, parse_emoji};
 
 /// A board to import: a list of sets.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -102,6 +102,8 @@ pub struct TileSpec {
     pub fade_out: Option<f32>,
     /// 0 (dry) to 1.
     pub reverb: Option<f32>,
+    /// One emoji, or its GitHub shortcode ("tada").
+    pub emoji: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for ManifestTile {
@@ -180,6 +182,13 @@ impl Manifest {
                 {
                     return invalid(format!(
                         "set \"{set_name}\", {file}: reverb must be 0 to 1, not {reverb}"
+                    ));
+                }
+                if let Some(emoji) = &spec.emoji
+                    && parse_emoji(emoji).is_none()
+                {
+                    return invalid(format!(
+                        "set \"{set_name}\", {file}: emoji must be one emoji or its shortcode (like \"tada\"), not \"{emoji}\""
                     ));
                 }
             }

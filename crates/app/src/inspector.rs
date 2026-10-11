@@ -1,12 +1,14 @@
 //! The panel on the right: the selected tile's sound, playback, fades and
 //! reverb.
 
-use egui::{Button, Color32, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{Button, Color32, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
 
 use crate::clips::ClipState;
+use crate::emoji::EmojiImages;
 use crate::menu::{self, MenuAction};
+use crate::meter::{self, Meter};
 use crate::prefs::Polish;
 use crate::{format, palette};
 
@@ -18,6 +20,8 @@ pub enum InspectorAction {
     Remove(TileId),
     /// Apply the Polish preset, or remove it if the tile has it.
     Polish(TileId),
+    /// Open the emoji picker for the tile.
+    ChooseEmoji(TileId),
 }
 
 pub struct View<'a> {
@@ -28,6 +32,10 @@ pub struct View<'a> {
     /// Put the cursor in the title field.
     pub focus_title: bool,
     pub polish: Polish,
+    pub images: &'a EmojiImages,
+    /// The tile's level meter, while it has one.
+    pub level: Option<Meter>,
+    pub now: f64,
 }
 
 pub fn show(
@@ -42,7 +50,10 @@ pub fn show(
             ui.add_space(10.0);
             match view.tile {
                 Some(tile) => {
-                    title_field(ui, tile, view.focus_title, title_draft, &mut actions);
+                    ui.horizontal(|ui| {
+                        emoji_well(ui, tile, view.images, &mut actions);
+                        title_field(ui, tile, view.focus_title, title_draft, &mut actions);
+                    });
                     tile_settings(ui, tile, view, &mut actions);
                 }
                 None => set_summary(ui, view.set),
@@ -158,6 +169,8 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     }
     ui.add_space(4.0);
     polish_button(ui, tile, view.polish, actions);
+    ui.add_space(6.0);
+    level_row(ui, view.level.unwrap_or_default(), view.now);
 
     section(ui, "Playback");
     let mut looping = tile.looping;
@@ -213,6 +226,63 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     {
         actions.push(InspectorAction::Remove(tile.id));
     }
+}
+
+/// The tile's emoji, or a place for one; a click opens the picker.
+fn emoji_well(ui: &mut Ui, tile: &Tile, images: &EmojiImages, actions: &mut Vec<InspectorAction>) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::click());
+    let visuals = ui.visuals();
+    let fill = if response.hovered() {
+        visuals.widgets.hovered.weak_bg_fill
+    } else {
+        visuals.extreme_bg_color
+    };
+    ui.painter().rect_filled(rect, 8, fill);
+    let picture = Rect::from_center_size(rect.center(), Vec2::splat(26.0));
+    if tile.emoji.is_empty() {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "☺",
+            egui::FontId::proportional(20.0),
+            visuals.weak_text_color(),
+        );
+    } else {
+        images.paint(ui.painter(), picture, &tile.emoji, visuals.text_color());
+    }
+    let shortcut = menu::shortcut_text(ui.ctx(), MenuAction::ChooseEmoji);
+    let hint = if tile.emoji.is_empty() {
+        format!("Choose an emoji for this tile ({shortcut})")
+    } else {
+        format!("Change the emoji ({shortcut})")
+    };
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Emoji"));
+    if response.on_hover_text(hint).clicked() {
+        actions.push(InspectorAction::ChooseEmoji(tile.id));
+    }
+}
+
+/// How loud the tile is playing, with the loudest level lately in dB.
+fn level_row(ui: &mut Ui, level: Meter, now: f64) {
+    ui.horizontal(|ui| {
+        ui.label("Level");
+        let readout_width = 58.0;
+        let width = (ui.available_width() - readout_width - ui.spacing().item_spacing.x).max(40.0);
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 8.0), Sense::hover());
+        let dark = ui.visuals().dark_mode;
+        meter::paint_bar(ui.painter(), rect, &level, meter::Colors::Zones, dark);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Tile level"));
+        let text = if level.is_resting(now) {
+            "silent".to_owned()
+        } else {
+            meter::readout(level.hold_db())
+        };
+        ui.add_sized(
+            [readout_width, 16.0],
+            egui::Label::new(RichText::new(text).weak()),
+        )
+        .on_hover_text("The loudest level in the last moment, before the master volume");
+    });
 }
 
 /// One click for the Polish preset's fades and reverb; a second click

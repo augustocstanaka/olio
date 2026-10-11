@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::clip::Clip;
 use crate::reverb::Reverb;
@@ -94,22 +94,70 @@ pub(crate) enum Event {
 }
 
 /// State the mixer publishes after every buffer for the app to read:
-/// which voice occupies each slot and how far into its clip it is.
+/// which voice occupies each slot, how far into its clip it is, and how
+/// loud it and the output have been.
 pub(crate) struct Shared {
     slots: [PublishedVoice; MAX_VOICES],
+    /// The loudest sample of the first two output channels since the app
+    /// last read them.
+    output_peaks: [Peak; 2],
 }
 
 #[derive(Default)]
 struct PublishedVoice {
     voice: AtomicU64,
     position: AtomicU64,
+    peak: Peak,
+}
+
+/// The loudest absolute sample level since the reader last took it. The
+/// mixer only raises it and the reader swaps it back to zero, so neither
+/// side ever waits and no peak between two reads is lost.
+///
+/// Stored as `f32` bits: for values of zero and above, the bit patterns
+/// sort in the same order as the numbers, so `fetch_max` on the bits is a
+/// maximum of the levels.
+#[derive(Default)]
+struct Peak(AtomicU32);
+
+impl Peak {
+    fn raise(&self, level: f32) {
+        if level > 0.0 {
+            self.0.fetch_max(level.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    fn take(&self) -> f32 {
+        f32::from_bits(self.0.swap(0, Ordering::Relaxed))
+    }
+
+    fn clear(&self) {
+        self.0.store(0, Ordering::Relaxed);
+    }
 }
 
 impl Shared {
     pub(crate) fn new() -> Self {
         Self {
             slots: std::array::from_fn(|_| PublishedVoice::default()),
+            output_peaks: Default::default(),
         }
+    }
+
+    /// The loudest output sample on the first two channels since the last
+    /// call (a mono output reports the same level twice), after the master
+    /// gain and before the output is clipped: above 1.0 means it clipped.
+    pub(crate) fn take_output_peaks(&self) -> [f32; 2] {
+        [self.output_peaks[0].take(), self.output_peaks[1].take()]
+    }
+
+    /// The voice's loudest sample since the last call, after its gain and
+    /// fades; `None` once it has ended.
+    pub(crate) fn take_voice_peak(&self, voice: VoiceId) -> Option<f32> {
+        self.slots
+            .iter()
+            .find(|slot| slot.voice.load(Ordering::Relaxed) == voice.get())
+            .map(|slot| slot.peak.take())
     }
 
     /// The voice's position in frames of its clip, if it is still sounding.
@@ -192,6 +240,8 @@ struct Voice {
     send: Ramp,
     stopping: bool,
     finished: bool,
+    /// The loudest sample mixed since the last publish.
+    peak: f32,
 }
 
 impl Voice {
@@ -214,6 +264,7 @@ impl Voice {
             send: Ramp::at(settings.reverb.clamp(0.0, 1.0)),
             stopping: false,
             finished: false,
+            peak: 0.0,
             clip,
         }
     }
@@ -258,6 +309,7 @@ impl Voice {
             let (left, right) = self.sample();
             let gain = self.gain.next() * self.envelope();
             let (left, right) = (left * gain, right * gain);
+            self.peak = self.peak.max(left.abs()).max(right.abs());
             if channels == 1 {
                 frame[0] += 0.5 * (left + right);
             } else {
@@ -337,6 +389,9 @@ pub struct Mixer {
     /// Frames the reverb keeps running for without new input.
     reverb_tail: u32,
     reverb_remaining: u32,
+    /// The loudest sample of the first two output channels since the last
+    /// publish.
+    output_peaks: [f32; 2],
     messages: rtrb::Consumer<Message>,
     events: rtrb::Producer<Event>,
     shared: Arc<Shared>,
@@ -359,6 +414,7 @@ impl Mixer {
             reverb: Reverb::new(rate),
             reverb_tail: (REVERB_TAIL_SECONDS * rate as f32) as u32,
             reverb_remaining: 0,
+            output_peaks: [0.0; 2],
             messages,
             events,
             shared,
@@ -411,13 +467,19 @@ impl Mixer {
             self.reverb_remaining = self.reverb_remaining.saturating_sub(frames as u32);
         }
 
+        let [mut left_peak, mut right_peak] = self.output_peaks;
         for frame in out.chunks_exact_mut(channels) {
             let gain = self.master.next();
+            let left = (frame[0] * gain).abs();
+            let right = frame.get(1).map_or(left, |&right| (right * gain).abs());
+            left_peak = left_peak.max(left);
+            right_peak = right_peak.max(right);
             for sample in frame {
                 // A safety net, not a limiter: the limiter arrives in M1.
                 *sample = (*sample * gain).clamp(-1.0, 1.0);
             }
         }
+        self.output_peaks = [left_peak, right_peak];
     }
 
     fn fade_frames(&self, seconds: f32) -> u32 {
@@ -445,8 +507,12 @@ impl Mixer {
                 settings,
             } => {
                 let new = Voice::new(voice, clip, &settings, self.rate);
-                match self.voices.iter_mut().find(|slot| slot.is_none()) {
-                    Some(slot) => *slot = Some(new),
+                match self.voices.iter().position(Option::is_none) {
+                    Some(index) => {
+                        // The slot's last voice may have left a level behind.
+                        self.shared.slots[index].peak.clear();
+                        self.voices[index] = Some(new);
+                    }
                     // The engine admits at most MAX_VOICES live voices, so
                     // this cannot happen; if it did, the clip would be
                     // freed here.
@@ -486,8 +552,13 @@ impl Mixer {
         }
     }
 
-    /// Publishes positions and hands finished voices back to the engine.
+    /// Publishes positions and levels, and hands finished voices back to
+    /// the engine.
     fn publish(&mut self) {
+        for (peak, published) in self.output_peaks.iter_mut().zip(&self.shared.output_peaks) {
+            published.raise(*peak);
+            *peak = 0.0;
+        }
         for (slot, published) in self.voices.iter_mut().zip(&self.shared.slots) {
             let Some(voice) = slot else {
                 published.voice.store(0, Ordering::Relaxed);
@@ -497,6 +568,8 @@ impl Mixer {
             published
                 .position
                 .store(voice.position as u64, Ordering::Relaxed);
+            published.peak.raise(voice.peak);
+            voice.peak = 0.0;
             // A finished voice keeps its slot until its event fits in the
             // queue, so its clip is never dropped here.
             if voice.finished && self.events.slots() > 0 {

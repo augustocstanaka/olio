@@ -18,7 +18,7 @@ use olio_control::TileKey;
 use olio_library::folder::{natural_cmp, sorted_files, sorted_subfolders};
 use olio_library::{
     Library, MAX_FADE_SECONDS, MAX_TILES, Manifest, Set, SetId, Slot, Sound, Store, TileSpec,
-    columns_to_fit,
+    columns_to_fit, parse_emoji,
 };
 
 /// How deep folder imports look, so a symbolic link loop cannot recurse
@@ -324,6 +324,9 @@ impl<'a> Importer<'a> {
             placed.fade_in_seconds = tile.fade_in.unwrap_or(0.0).clamp(0.0, MAX_FADE_SECONDS);
             placed.fade_out_seconds = tile.fade_out.unwrap_or(0.0).clamp(0.0, MAX_FADE_SECONDS);
             placed.reverb = tile.reverb.unwrap_or(0.0).clamp(0.0, 1.0);
+            if let Some(emoji) = tile.emoji.as_deref().and_then(parse_emoji) {
+                placed.emoji = emoji.to_owned();
+            }
             report.tiles += 1;
         }
     }
@@ -473,7 +476,8 @@ mod tests {
               "trim_silence": false,
               "fade_in": 0.5,
               "fade_out": 2,
-              "reverb": 0.25
+              "reverb": 0.25,
+              "emoji": "musical_note"
             },
             { "file": "sounds/missing.wav" },
             { "file": "sounds/applause.wav", "key": "nope" }
@@ -504,6 +508,7 @@ mod tests {
             (theme.fade_in_seconds, theme.fade_out_seconds, theme.reverb),
             (0.5, 2.0, 0.25)
         );
+        assert_eq!(theme.emoji, "🎵");
         assert_eq!(
             titles_in_slot_order(show),
             ["applause", "applause", "a", "b", "Main Theme"],

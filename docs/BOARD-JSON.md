@@ -67,6 +67,7 @@ A tile is either a path, or an object with a `file` and any of these:
 | `fade_in` | Seconds to rise from silence, 0 to 30. | `0` |
 | `fade_out` | Seconds to sink to silence before the end and when stopped, 0 to 30. | `0` |
 | `reverb` | How much reverb, 0 (none) to 1. | `0` |
+| `emoji` | One emoji shown on the tile, written as the emoji (`"🎉"`) or its GitHub shortcode (`"tada"`, `":clap:"`). | none |
 
 Tiles with a `key` take their slot first; the rest fill the free slots in
 order, row by row.
@@ -82,7 +83,7 @@ order, row by row.
         { "file": "correct.wav", "key": "1", "color": "green" },
         { "file": "wrong.wav", "key": "2", "color": "red" },
         { "file": "clock.mp4", "key": "3", "title": "Thinking Music", "loop": true, "fade_in": 1, "fade_out": 1.5 },
-        { "file": "winner.flac", "key": "Q", "reverb": 0.4 },
+        { "file": "winner.flac", "key": "Q", "reverb": 0.4, "emoji": "trophy" },
         { "file": "applause.wav", "key": "Alt+1", "fade_out": 3 }
       ]
     }
@@ -97,7 +98,7 @@ field name, a colour it does not know, or a value out of range stops the
 import with a message naming the line, the set or the file:
 
 ```text
-problem: show.json: unknown field `loops`, expected one of `file`, `title`, `key`, `color`, `loop`, `trim_silence`, `fade_in`, `fade_out`, `reverb` at line 6 column 41
+problem: show.json: unknown field `loops`, expected one of `file`, `title`, `key`, `color`, `loop`, `trim_silence`, `fade_in`, `fade_out`, `reverb`, `emoji` at line 6 column 41
 ```
 
 A missing sound file or a key that is not on the grid is reported, and the

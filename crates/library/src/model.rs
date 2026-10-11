@@ -247,6 +247,21 @@ pub struct Tile {
     /// Share of the sound sent to the reverb, 0 (dry) to 1.
     #[serde(default)]
     pub reverb: f32,
+    /// One emoji shown on the tile, fully qualified ("☺️", not "☺"); empty
+    /// for none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub emoji: String,
+}
+
+/// The emoji `text` names: the emoji itself ("🎉", with or without its
+/// variation selector) or its GitHub shortcode ("tada" or ":tada:"). Always
+/// returns the fully qualified emoji, so the same emoji is stored the same
+/// way however it was written.
+pub fn parse_emoji(text: &str) -> Option<&'static str> {
+    let text = text.trim();
+    emojis::get(text)
+        .or_else(|| emojis::get_by_shortcode(text.trim_matches(':')))
+        .map(emojis::Emoji::as_str)
 }
 
 fn yes() -> bool {
@@ -270,6 +285,7 @@ impl Tile {
             fade_in_seconds: 0.0,
             fade_out_seconds: 0.0,
             reverb: 0.0,
+            emoji: String::new(),
         }
     }
 }

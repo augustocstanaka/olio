@@ -232,6 +232,19 @@ impl Engine {
         self.shared.position(voice)
     }
 
+    /// The loudest output sample on the first two channels since the last
+    /// call, linear: 1.0 is full scale, and above it the output clipped.
+    /// Measured after the master gain. For level meters.
+    pub fn take_output_peaks(&self) -> [f32; 2] {
+        self.shared.take_output_peaks()
+    }
+
+    /// A voice's loudest sample since the last call, after its gain and
+    /// fades and before the master gain; `None` once it has ended.
+    pub fn take_voice_peak(&self, voice: VoiceId) -> Option<f32> {
+        self.shared.take_voice_peak(voice)
+    }
+
     /// Voices started and not yet reported ended by [`poll`](Self::poll).
     pub fn live_voices(&self) -> usize {
         self.live

@@ -1059,6 +1059,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "emojis"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b1514ced566c94991ed9563258ecf61e311fd773bf0a3f20606830386bf66e3"
+dependencies = [
+ "phf",
+]
+
+[[package]]
 name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2464,6 +2473,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "emojis",
  "image",
  "olio-audio",
  "olio-control",
@@ -2472,6 +2482,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "twemoji-assets",
 ]
 
 [[package]]
@@ -2498,6 +2509,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "dirs",
+ "emojis",
  "serde",
  "serde_json",
  "tempfile",
@@ -3779,6 +3791,12 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "twemoji-assets"
+version = "1.5.1+17.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6857896b4a287e70f8197ab8fb9d68b3c43bb7ae97595aceaf2d11c21b93d9e9"
 
 [[package]]
 name = "type-map"

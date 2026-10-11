@@ -98,5 +98,22 @@ fn mistakes_are_reported_precisely() {
         r#"{ "sets": [ { "name": "A", "tiles": [ { "file": "a.wav", "color": "mauve" } ] } ] }"#,
         "unknown variant `mauve`",
     );
+    assert_rejected(
+        r#"{ "sets": [ { "name": "A", "tiles": [ { "file": "a.wav", "emoji": "party" } ] } ] }"#,
+        "emoji must be one emoji or its shortcode",
+    );
     assert_rejected("{ \"sets\": [ ", "line 1");
+}
+
+#[test]
+fn emoji_are_read_as_emoji_or_shortcodes() {
+    use olio_library::parse_emoji;
+    assert_eq!(parse_emoji("🎉"), Some("🎉"));
+    assert_eq!(parse_emoji("tada"), Some("🎉"));
+    assert_eq!(parse_emoji(":clap:"), Some("👏"));
+    // The variation selector is added, so one emoji is always stored one way.
+    assert_eq!(parse_emoji("\u{263a}"), Some("\u{263a}\u{fe0f}"));
+    assert_eq!(parse_emoji("🎉🎉"), None);
+    assert_eq!(parse_emoji("hello"), None);
+    assert_eq!(parse_emoji(""), None);
 }

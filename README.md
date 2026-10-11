@@ -25,6 +25,13 @@ Milestone 0, the playable skeleton, is done. Olio can:
   Option (Alt) for four more rows. Press a key or double-click a tile to
   play it, press again to stop. Hold Esc to stop everything, `-` to fade
   everything out. The arrow keys move the selection and Return plays it.
+- **See what is loud.** A stereo level meter beside the master volume,
+  with a lamp that lights when the output clips; a meter on every playing
+  tile; and the selected tile's level in the inspector.
+- **Mark tiles with emoji.** Click the well beside a tile's title (or
+  ⌘E / Ctrl+E) to pick one from a searchable picker; boards can set them
+  too. Emoji are drawn in colour from Twemoji, the same on both
+  platforms.
 - **Polish in one click.** ✨ Polish in the inspector (⌘P / Ctrl+P, or
   right-click a tile) gives a tile a 1 s fade in, a 1 s fade out and
   30 % reverb; click again to take it off. Tile ▸ Polish All Tiles in Set
@@ -113,3 +120,11 @@ Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 ## License
 
 MIT or Apache-2.0, at your option.
+
+Emoji graphics are from [Twemoji](https://github.com/jdecked/twemoji),
+Copyright 2020 Twitter, Inc and other contributors, licensed under
+[CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), through the
+[twemoji-assets](https://crates.io/crates/twemoji-assets) crate. Emoji
+names and search data come from the
+[emojis](https://crates.io/crates/emojis) crate (Unicode CLDR and GitHub
+gemoji).

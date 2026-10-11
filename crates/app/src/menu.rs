@@ -27,6 +27,8 @@ pub enum MenuAction {
     PolishSet,
     /// Open the window that edits the Polish preset.
     EditPolish,
+    /// Open the emoji picker for the selected tile.
+    ChooseEmoji,
     ToggleSets,
     ToggleInspector,
     Theme(Theme),
@@ -75,6 +77,7 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
         MenuAction::PolishSelected,
         KeyboardShortcut::new(CMD, Key::P),
     ),
+    (MenuAction::ChooseEmoji, KeyboardShortcut::new(CMD, Key::E)),
     (
         MenuAction::ToggleSets,
         KeyboardShortcut::new(CMD_SHIFT, Key::S),
@@ -195,6 +198,13 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
         ui.menu_button("Tile", |ui| {
             let selected = state.tile_selected;
             item(ui, "Rename", MenuAction::RenameTile, selected, &mut actions);
+            item(
+                ui,
+                "Choose Emoji…",
+                MenuAction::ChooseEmoji,
+                selected,
+                &mut actions,
+            );
             ui.separator();
             let polish = if state.tile_polished {
                 "Remove Polish"
@@ -414,6 +424,10 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (
                             MenuAction::PolishSelected,
                             "Polish the selected tile, or unpolish it",
+                        ),
+                        (
+                            MenuAction::ChooseEmoji,
+                            "Choose an emoji for the selected tile",
                         ),
                         (MenuAction::AddSound, "Add sounds"),
                         (MenuAction::ImportFolder, "Import a folder as a set"),
