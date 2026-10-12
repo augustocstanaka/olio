@@ -517,29 +517,44 @@ fn the_view_menu_switches_to_soft_tiles() {
     assert_eq!(harness.state().playing_titles(), ["Applause"]);
 }
 
-/// Drags with the primary button from one point to another, moving in
-/// steps as a hand would, and releases with `modifiers` held.
+/// Presses the primary button at `at`, starting a drag.
+fn press(harness: &mut Harness<'static, OlioApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run_steps(1);
+    harness.drag_at(at);
+    harness.run_steps(1);
+}
+
+/// Moves the pointer from one point to another in steps, as a hand would.
+fn glide(harness: &mut Harness<'static, OlioApp>, from: egui::Pos2, to: egui::Pos2) {
+    for step in 1..=10 {
+        harness.hover_at(from + (to - from) * (step as f32 / 10.0));
+        harness.run_steps(1);
+    }
+}
+
+/// Releases the primary button at `at` with `modifiers` held.
+fn release(harness: &mut Harness<'static, OlioApp>, at: egui::Pos2, modifiers: egui::Modifiers) {
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers,
+    });
+    harness.run_steps(2);
+}
+
+/// Drags with the primary button from one point to another and releases
+/// with `modifiers` held.
 fn drag(
     harness: &mut Harness<'static, OlioApp>,
     from: egui::Pos2,
     to: egui::Pos2,
     modifiers: egui::Modifiers,
 ) {
-    harness.hover_at(from);
-    harness.run_steps(1);
-    harness.drag_at(from);
-    harness.run_steps(1);
-    for step in 1..=10 {
-        harness.hover_at(from + (to - from) * (step as f32 / 10.0));
-        harness.run_steps(1);
-    }
-    harness.event(egui::Event::PointerButton {
-        pos: to,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers,
-    });
-    harness.run_steps(2);
+    press(harness, from);
+    glide(harness, from, to);
+    release(harness, to, modifiers);
 }
 
 fn slot_of(harness: &Harness<'static, OlioApp>) -> (u8, u8) {
@@ -707,6 +722,83 @@ fn a_tile_dropped_on_its_own_set_stays_put() {
     assert_eq!(harness.query_all_by_label_contains("Moved").count(), 0);
 }
 
+/// Steps for a little longer than a dragged tile must be held over a set
+/// to open it (0.6 s at 60 steps a second).
+const HOLD_STEPS: usize = 45;
+
+#[test]
+fn holding_a_tile_over_a_set_opens_it_to_drop_on_a_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, set) = (center(&harness, "Big Game"), center(&harness, "My Sounds"));
+    press(&mut harness, from);
+    glide(&mut harness, from, set);
+    assert_eq!(
+        harness.state().current_set_name(),
+        "Show",
+        "passing over opens nothing"
+    );
+    harness.run_steps(HOLD_STEPS);
+    assert_eq!(harness.state().current_set_name(), "My Sounds");
+
+    let slot = center(&harness, "Empty slot Q");
+    glide(&mut harness, set, slot);
+    release(&mut harness, slot, egui::Modifiers::NONE);
+    assert_eq!(
+        harness.state().current_set_name(),
+        "My Sounds",
+        "it stays open"
+    );
+    assert_eq!(harness.state().selected_title(), Some("Big Game"));
+    assert_eq!(slot_of(&harness), (1, 0));
+    harness.get_by_label("Moved “Big Game” to “My Sounds”");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "Show");
+    assert_eq!(slot_of(&harness), (0, 1));
+}
+
+#[test]
+fn letting_go_elsewhere_after_opening_a_set_goes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, set) = (center(&harness, "Big Game"), center(&harness, "My Sounds"));
+    press(&mut harness, from);
+    glide(&mut harness, from, set);
+    harness.run_steps(HOLD_STEPS);
+    assert_eq!(harness.state().current_set_name(), "My Sounds");
+
+    // Over the toolbar, where nothing takes a tile.
+    let nowhere = egui::pos2(700.0, 64.0);
+    glide(&mut harness, set, nowhere);
+    release(&mut harness, nowhere, egui::Modifiers::NONE);
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "Show");
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 1), "it never moved");
+}
+
+#[test]
+fn escape_cancels_a_drag_and_goes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let (from, set) = (center(&harness, "Big Game"), center(&harness, "My Sounds"));
+    press(&mut harness, from);
+    glide(&mut harness, from, set);
+    harness.run_steps(HOLD_STEPS);
+    let slot = center(&harness, "Empty slot Q");
+    glide(&mut harness, set, slot);
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    assert_eq!(harness.state().current_set_name(), "Show");
+    // Letting go now drops nothing.
+    release(&mut harness, slot, egui::Modifiers::NONE);
+    harness.get_by_label("Big Game");
+    assert_eq!(harness.query_all_by_label_contains("Moved").count(), 0);
+}
+
 #[test]
 fn render_the_window_to_a_png() {
     if std::env::var_os("OLIO_RENDER").is_none() {
@@ -771,4 +863,14 @@ fn render_the_window_to_a_png() {
     let path = out.join("window-drag-set.png");
     image.save(&path).unwrap();
     println!("rendered {}", path.display());
+
+    // Held over My Sounds: halfway, then open with the tile over Q.
+    harness.run_steps(HOLD_STEPS / 2);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-spring-hold.png")).unwrap();
+    harness.run_steps(HOLD_STEPS);
+    let slot = center(&harness, "Empty slot Q");
+    glide(&mut harness, set, slot);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-spring-open.png")).unwrap();
 }

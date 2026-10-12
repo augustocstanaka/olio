@@ -44,7 +44,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
 - **Arrange the board.** Drag a tile to another slot to give it that key;
   drop it on another tile and the two swap, with a preview of where each
   will go. Drop it on a set in the sidebar to move it to that set,
-  keeping its key if that slot is free there. Hold Option (Ctrl on
+  keeping its key if that slot is free there, or hold it over the set for
+  a moment to open it and drop the tile on the slot you want; let go
+  anywhere else, or press Esc, and you are back where you started. Hold Option (Ctrl on
   Windows) while dropping to drop a copy instead, or press ⌘D (Ctrl+D) to
   duplicate the selected tile. Shift and an arrow
   key move the selected tile from the keyboard. ⌘Z undoes any of it.

@@ -8,7 +8,7 @@ use egui::{
     Ui, Vec2, WidgetInfo, WidgetType,
 };
 use olio_control::{Command, TileKey, TileSetting};
-use olio_library::{Set, Slot, Tile, TileId};
+use olio_library::{Set, SetId, Slot, Tile, TileId};
 
 use crate::clips::{ClipState, Clips, Ready};
 use crate::emoji::EmojiImages;
@@ -62,6 +62,9 @@ pub struct GridView<'a> {
     pub now: f64,
     /// Files are being dragged over the window.
     pub files_hovering: bool,
+    /// The tile being dragged, from any set, and the set it is in. From
+    /// another set it was brought here by holding it over this set.
+    pub dragged: Option<(&'a Tile, SetId)>,
 }
 
 #[derive(Default)]
@@ -91,6 +94,8 @@ pub struct GridOutput {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drop {
     pub tile: TileId,
+    /// The set in front, where it was dropped.
+    pub set: SetId,
     pub slot: Slot,
     pub copy: bool,
 }
@@ -196,13 +201,29 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
             layout.origin = grid_rect.min + Vec2::splat(inset);
             let dark = ui.visuals().dark_mode;
             let pointer = ui.ctx().pointer_latest_pos();
-            let dragging = egui::DragAndDrop::payload::<TileId>(ui.ctx())
-                .map(|id| *id)
-                .filter(|&id| view.set.tile(id).is_some());
             let release = release(ui);
-            let target = dragging
+            let copying = match release {
+                Some((_, modifiers)) => copy_modifier(modifiers),
+                None => ui.input(|input| copy_modifier(input.modifiers)),
+            };
+            let held_over = view
+                .dragged
                 .and(release.map(|(pos, _)| pos).or(pointer))
                 .and_then(|pos| layout.slot_at(pos));
+            // A tile of this set, moved without copying, swaps with any
+            // tile where it is dropped. A copy, or a tile from another set,
+            // lands without displacing one: there, or the next free slot.
+            let own = view
+                .dragged
+                .filter(|&(_, set)| set == view.set.id)
+                .map(|(tile, _)| tile);
+            let swapping = own.is_some() && !copying;
+            let target = if swapping {
+                held_over
+            } else {
+                held_over.and_then(|slot| view.set.landing_slot(slot))
+            };
+            let dragging = own.map(|tile| tile.id);
             for row in 0..rows {
                 for column in 0..columns {
                     let slot = Slot::new(row, column);
@@ -214,7 +235,7 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
                                 // Hovering another tile: it shows where it
                                 // will go, the dragged tile's old slot.
                                 swap_in: target
-                                    .filter(|&target| target != tile.slot)
+                                    .filter(|&target| swapping && target != tile.slot)
                                     .and_then(|target| view.set.tile_at(target)),
                             };
                             tile_ui(ui, rect, tile, view, dark, lifted, &mut output);
@@ -240,21 +261,21 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
                     }
                 }
             }
-            if let Some(id) = dragging {
-                drag_feedback(ui, view, &layout, id, target, pointer);
-                if let (Some((_, modifiers)), Some(slot)) = (release, target) {
-                    let copy = copy_modifier(modifiers);
-                    let from = view.set.tile(id).map(|tile| tile.slot);
-                    if copy || from != Some(slot) {
+            if let Some((tile, _)) = view.dragged {
+                drag_feedback(ui, view, &layout, tile, target, pointer, copying);
+                if let (Some(_), Some(slot)) = (release, target) {
+                    let in_place = swapping && own.is_some_and(|own| own.slot == slot);
+                    if !in_place {
                         output.drops.push(Drop {
-                            tile: id,
+                            tile: tile.id,
+                            set: view.set.id,
                             slot,
-                            copy,
+                            copy: copying,
                         });
                     }
                 }
             }
-            if view.set.tiles.is_empty() && !view.files_hovering {
+            if view.set.tiles.is_empty() && !view.files_hovering && view.dragged.is_none() {
                 let add = ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::COMMAND,
                     egui::Key::O,
@@ -278,21 +299,19 @@ fn drag_feedback(
     ui: &Ui,
     view: &GridView,
     layout: &GridLayout,
-    id: TileId,
+    tile: &Tile,
     target: Option<Slot>,
     pointer: Option<Pos2>,
+    copying: bool,
 ) {
-    let Some(tile) = view.set.tile(id) else {
-        return;
-    };
-    let copying = ui.input(|input| copy_modifier(input.modifiers));
+    let home = view.set.tile(tile.id).is_some();
     ui.ctx().set_cursor_icon(if copying {
         egui::CursorIcon::Copy
     } else {
         egui::CursorIcon::Grabbing
     });
     let dark = ui.visuals().dark_mode;
-    if let Some(slot) = target.filter(|&slot| slot != tile.slot) {
+    if let Some(slot) = target.filter(|&slot| !(home && slot == tile.slot)) {
         let rect = layout.rect(slot);
         let visuals = ui.visuals();
         if view.set.is_free(slot) {

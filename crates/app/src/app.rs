@@ -151,6 +151,10 @@ pub struct OlioApp {
     show_shortcuts: bool,
     show_polish: bool,
     history: History,
+    /// The set in front when a dragged tile first opened another set by
+    /// being held over it; the window goes back to it if the drag ends
+    /// without a drop.
+    spring_origin: Option<SetId>,
     emoji_picker: Option<emoji::Picker>,
     images: EmojiImages,
     /// The output's left and right levels.
@@ -224,6 +228,7 @@ impl OlioApp {
             show_shortcuts: false,
             show_polish: false,
             history: History::default(),
+            spring_origin: None,
             emoji_picker: None,
             images: EmojiImages::default(),
             output_meters: [Meter::default(); 2],
@@ -1202,7 +1207,14 @@ impl OlioApp {
                 self.changed();
             }
             SidebarAction::RemoveSet(id) => self.ask_remove_set(id),
-            SidebarAction::DropTile { tile, set, copy } => self.transfer_tile(tile, set, copy),
+            SidebarAction::DropTile { tile, set, copy } => {
+                self.spring_origin = None;
+                self.transfer_tile(tile, set, copy);
+            }
+            SidebarAction::SpringOpen(set) => {
+                self.spring_origin.get_or_insert(self.current);
+                self.execute(Command::SelectSet(set));
+            }
             SidebarAction::Polish(id) => {
                 self.execute(Command::SelectSet(id));
                 self.polish_set();
@@ -1753,6 +1765,14 @@ impl eframe::App for OlioApp {
             self.selected = None;
         }
 
+        // A drag that opened another set and ended without a drop goes
+        // back to the set it started in.
+        if !egui::DragAndDrop::has_any_payload(&ctx)
+            && let Some(origin) = self.spring_origin.take()
+        {
+            self.execute(Command::SelectSet(origin));
+        }
+
         // A confirmation takes the keyboard while it is up.
         if let Some(confirm) = self.confirm.take() {
             match confirm::show(&ctx, &confirm) {
@@ -1859,6 +1879,9 @@ impl eframe::App for OlioApp {
         if self.prefs.tile_style == TileStyle::Soft {
             canvas = canvas.fill(palette::soft(ui.visuals().dark_mode).canvas);
         }
+        let dragged = egui::DragAndDrop::payload::<TileId>(&ctx)
+            .and_then(|id| self.library.tile(*id))
+            .map(|(set, tile)| (tile, set.id));
         let grid = egui::CentralPanel::default()
             .frame(canvas)
             .show(ui, |ui| {
@@ -1876,6 +1899,7 @@ impl eframe::App for OlioApp {
                     levels: &self.tile_meters,
                     now: self.meter_time,
                     files_hovering,
+                    dragged,
                 };
                 grid::show(ui, &view)
             })
@@ -1907,11 +1931,31 @@ impl eframe::App for OlioApp {
             self.polish_tile(id);
         }
         for drop in grid.drops {
-            if drop.copy {
-                self.duplicate_tile(drop.tile, Some(drop.slot));
+            self.spring_origin = None;
+            let home = self.library.tile(drop.tile).map(|(set, _)| set.id);
+            if home == Some(drop.set) {
+                if drop.copy {
+                    self.duplicate_tile(drop.tile, Some(drop.slot));
+                } else {
+                    self.move_tile(drop.tile, drop.slot);
+                    self.selected = Some(drop.tile);
+                }
+                continue;
+            }
+            // From another set, opened by holding the tile over it.
+            let change = if drop.copy {
+                self.copy_to_set(drop.tile, drop.set, Some(drop.slot))
             } else {
-                self.move_tile(drop.tile, drop.slot);
-                self.selected = Some(drop.tile);
+                self.move_to_set(drop.tile, drop.set, Some(drop.slot))
+            };
+            match change {
+                Some(change) => {
+                    if let Change::ToSet { tile, .. } = &change {
+                        self.selected = Some(tile.id);
+                    }
+                    self.record(change);
+                }
+                None => self.set_status("This set has no free slot", true),
             }
         }
         if let Some(id) = grid.duplicate {

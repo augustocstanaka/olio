@@ -4,12 +4,20 @@ use std::collections::HashSet;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, RichText, Sense, Stroke,
-    StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
+    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, Rect, RichText, Sense,
+    Stroke, StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
 };
 use olio_library::{Library, Set, SetId, TileId};
 
 use crate::{grid, keys};
+
+/// How long a dragged tile is held over a set before the set opens.
+const SPRING_DELAY: f64 = 0.6;
+
+/// Which set a dragged tile is held over, and since when.
+fn spring_id() -> egui::Id {
+    egui::Id::new("olio-spring")
+}
 
 pub enum SidebarAction {
     Select(SetId),
@@ -20,6 +28,9 @@ pub enum SidebarAction {
     RemoveSet(SetId),
     /// Give every tile of the set the Polish preset.
     Polish(SetId),
+    /// A tile dragged and held over a set: bring the set to the front so
+    /// the tile can be dropped on one of its slots.
+    SpringOpen(SetId),
     /// A tile dragged from the grid and dropped on a set: moved there, or
     /// copied with the copy modifier.
     DropTile {
@@ -59,6 +70,10 @@ pub fn show(
     let dragged = egui::DragAndDrop::payload::<TileId>(ui.ctx())
         .map(|id| *id)
         .and_then(|id| library.tile(id).map(|(set, _)| (id, set.id)));
+    let now = ui.input(|input| input.time);
+    let spring: Option<(SetId, f64)> =
+        dragged.and_then(|_| ui.ctx().data(|data| data.get_temp(spring_id())));
+    let mut held_over = None;
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -103,16 +118,58 @@ pub fn show(
                             drop: dragged
                                 .filter(|&(_, from)| from != set.id)
                                 .map(|(tile, _)| tile),
+                            // Opening: how far along the hold is, for any
+                            // set but the one in front.
+                            spring: (dragged.is_some() && set.id != current).then(|| {
+                                spring.filter(|&(held, _)| held == set.id).map_or(
+                                    0.0,
+                                    |(_, since)| {
+                                        ((now - since) / SPRING_DELAY).clamp(0.0, 1.0) as f32
+                                    },
+                                )
+                            }),
                         };
                         match rename.as_mut().filter(|rename| rename.set == set.id) {
                             Some(rename) => rename_row(ui, rename, &mut actions),
-                            None => set_row(ui, &row, &mut actions),
+                            None => {
+                                if set_row(ui, &row, &mut actions) && row.spring.is_some() {
+                                    held_over = Some(set.id);
+                                }
+                            }
                         }
                     }
                 });
         });
     });
+    spring_timer(ui, dragged.is_some(), held_over, spring, now, &mut actions);
     actions
+}
+
+/// Opens the set a dragged tile has been held over for long enough, and
+/// keeps the window redrawing while the hold lasts.
+fn spring_timer(
+    ui: &Ui,
+    dragging: bool,
+    held_over: Option<SetId>,
+    spring: Option<(SetId, f64)>,
+    now: f64,
+    actions: &mut Vec<SidebarAction>,
+) {
+    let ctx = ui.ctx();
+    match held_over.filter(|_| dragging) {
+        Some(set) => match spring.filter(|&(held, _)| held == set) {
+            Some((_, since)) if now - since >= SPRING_DELAY => {
+                actions.push(SidebarAction::SpringOpen(set));
+                ctx.data_mut(|data| data.remove::<(SetId, f64)>(spring_id()));
+            }
+            Some(_) => ctx.request_repaint(),
+            None => {
+                ctx.data_mut(|data| data.insert_temp(spring_id(), (set, now)));
+                ctx.request_repaint();
+            }
+        },
+        None => ctx.data_mut(|data| data.remove::<(SetId, f64)>(spring_id())),
+    }
 }
 
 struct Row<'a> {
@@ -122,11 +179,15 @@ struct Row<'a> {
     sounding: bool,
     /// The tile being dragged, if it can be dropped on this set.
     drop: Option<TileId>,
+    /// While a tile is dragged and this set is not in front: how far the
+    /// hold that opens it has got, 0 to 1.
+    spring: Option<f32>,
 }
 
 const ROW_HEIGHT: f32 = 28.0;
 
-fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
+/// Draws a set's row; true if a dragged tile is over it.
+fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_HEIGHT), Sense::click());
     response.widget_info(|| {
@@ -140,6 +201,7 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
     // `hovered` is false while something is dragged; the pointer still
     // counts as inside.
     let drop_here = row.drop.is_some() && response.contains_pointer();
+    let held_here = row.spring.is_some() && response.contains_pointer();
     let copying = ui.input(|input| grid::copy_modifier(input.modifiers));
     if let (Some(tile), Some((pos, modifiers))) = (row.drop, grid::release(ui))
         && rect.contains(pos)
@@ -162,8 +224,13 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
         );
     } else if row.selected {
         painter.rect_filled(rect, 6, visuals.selection.bg_fill);
-    } else if response.hovered() {
+    } else if response.hovered() || held_here {
         painter.rect_filled(rect, 6, visuals.widgets.hovered.weak_bg_fill);
+    }
+    if held_here && let Some(progress) = row.spring.filter(|&progress| progress > 0.0) {
+        // The row fills from the left while the hold opens the set.
+        let fill = Rect::from_min_size(rect.min, Vec2::new(rect.width() * progress, rect.height()));
+        painter.rect_filled(fill, 6, visuals.selection.bg_fill.gamma_multiply(0.85));
     }
     let text = if row.selected {
         visuals.selection.stroke.color
@@ -240,6 +307,7 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) {
             ui.close();
         }
     });
+    held_here
 }
 
 fn rename_row(ui: &mut Ui, rename: &mut Rename, actions: &mut Vec<SidebarAction>) {

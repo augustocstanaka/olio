@@ -89,6 +89,12 @@ Redo makes the change again. Settings changed in the inspector are not
 recorded.
 _Avoid_: restore, trash
 
+**Spring-loading**:
+Holding a dragged tile over a set in the sidebar until the set opens, to
+drop the tile on one of its slots. A drag that ends without a drop goes
+back to the set it started in.
+_Avoid_: hover-open, auto-open
+
 **Duplicate**:
 A copy of a tile, with the same sound and settings and " copy" after its
 title, in the next free slot (or where it is dropped).

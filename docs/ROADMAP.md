@@ -36,7 +36,8 @@ are intentions, reordered as real use dictates.
   reverb, toggled; Polish All Tiles in Set; an adjustable Polish Preset.
 - **Arranging**: drag tiles between slots (onto a tile swaps, with a
   preview; Option/Ctrl drops a copy) and onto sets in the sidebar (moved
-  there in the same slot if free, or copied), Duplicate (⌘D), Shift+arrows to
+  there in the same slot if free, or copied; held there, the set opens
+  for a drop on a chosen slot), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
 - **Undo** for removing tiles and sets (⌘Z, ⇧⌘Z, an Undo button in the
   status bar); tiles are removed without a confirmation.

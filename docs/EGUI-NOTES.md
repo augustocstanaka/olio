@@ -81,7 +81,10 @@ On a generation bump, re-check every line below and update the versions.
   `Order::Tooltip` layer painter; `painter.multiply_opacity` fades a copy
   of the painter, not the original. While something is dragged, other
   widgets' `hovered()` is false: use `contains_pointer()` for drop
-  targets (the sidebar's set rows).
+  targets (the sidebar's set rows). `DragAndDrop::has_any_payload` turns
+  false the frame after a drag ends, dropped or cancelled: the app uses
+  that to leave a spring-loaded set. A hold timer must call
+  `request_repaint` itself, since a still pointer sends no events.
 - Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
   only lays out the visible rows (the emoji picker's 1,900 emoji).
 - Persistence: the `persistence` feature of eframe stores egui's memory

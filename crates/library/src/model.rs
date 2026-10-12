@@ -270,6 +270,17 @@ impl Set {
             .find(|&slot| self.is_free(slot))
     }
 
+    /// Where something dropped on `slot` lands without displacing a tile:
+    /// `slot` if it is free, else the first free slot after it. `None`
+    /// when the set is full.
+    pub fn landing_slot(&self, slot: Slot) -> Option<Slot> {
+        if self.is_free(slot) {
+            Some(slot)
+        } else {
+            self.free_slot_after(slot)
+        }
+    }
+
     /// Copies a tile, with all its settings and the same sound, into `at`
     /// if that slot is free, else the first free slot after it (after the
     /// original, without `at`). Returns the copy's id; `None` if the tile
@@ -277,8 +288,7 @@ impl Set {
     pub fn duplicate(&mut self, id: TileId, at: Option<Slot>) -> Option<TileId> {
         let original = self.tile(id)?;
         let slot = match at {
-            Some(at) if self.is_free(at) => at,
-            Some(at) => self.free_slot_after(at)?,
+            Some(at) => self.landing_slot(at)?,
             None => self.free_slot_after(original.slot)?,
         };
         let mut copy = original.clone();

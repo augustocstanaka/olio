@@ -562,6 +562,11 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         "Drag a tile onto a set".to_owned(),
                         "Move it to that set",
                     );
+                    row(
+                        ui,
+                        "…and hold it there".to_owned(),
+                        "Open the set to drop on a slot",
+                    );
                     let copy = if cfg!(target_os = "macos") {
                         "⌥"
                     } else {
