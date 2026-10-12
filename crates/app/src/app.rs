@@ -528,6 +528,16 @@ impl OlioApp {
                 self.prefs.show_inspector = !self.prefs.show_inspector;
             }
             MenuAction::TileStyle(style) => self.prefs.tile_style = style,
+            MenuAction::TileSize(size) => self.prefs.tile_size = size,
+            MenuAction::SetColumns(columns) => self.set_columns(self.current, columns),
+            MenuAction::Wider => {
+                let columns = self.current_set().columns.saturating_add(1);
+                self.set_columns(self.current, columns);
+            }
+            MenuAction::Narrower => {
+                let columns = self.current_set().columns.saturating_sub(1).max(1);
+                self.set_columns(self.current, columns);
+            }
             MenuAction::Theme(theme) => {
                 self.prefs.theme = theme;
                 ctx.set_theme(theme.preference());
@@ -787,6 +797,43 @@ impl OlioApp {
         })
     }
 
+    /// Makes a set's grid `columns` wide, as far as its tiles allow, and
+    /// says so if they stop it.
+    fn set_columns(&mut self, set: SetId, columns: u8) {
+        let Some(change) = self.resize_set(set, columns) else {
+            if let Some(target) = self.library.set(set)
+                && columns < target.min_columns()
+            {
+                let message = format!(
+                    "Tiles in column {} keep “{}” at least that wide; move them first",
+                    target.min_columns(),
+                    target.name
+                );
+                self.set_status(message, false);
+            }
+            return;
+        };
+        self.record(change);
+    }
+
+    /// Changes a set's width; `None` if it stays as it is.
+    fn resize_set(&mut self, set: SetId, columns: u8) -> Option<Change> {
+        let target = self.library.set_mut(set)?;
+        let from = target.columns;
+        let to = target.set_columns(columns);
+        if to == from {
+            return None;
+        }
+        let name = target.name.clone();
+        self.changed();
+        Some(Change::Columns {
+            set,
+            name,
+            from,
+            to,
+        })
+    }
+
     /// Moves the selected tile one slot over, swapping with a tile there.
     fn nudge_selected(&mut self, direction: Direction) {
         let Some(id) = self.selected else {
@@ -891,6 +938,11 @@ impl OlioApp {
     /// Makes a change again (redo). Returns the record for undoing it.
     fn apply(&mut self, change: Change) -> Result<Change, Change> {
         match change {
+            Change::Columns { set, to, .. } => {
+                let done = self.resize_set(set, to);
+                self.execute(Command::SelectSet(set));
+                done.ok_or(change)
+            }
             Change::ToSet {
                 mut tile,
                 from,
@@ -972,6 +1024,35 @@ impl OlioApp {
     /// Undoes a change. Returns the record for redoing it.
     fn revert(&mut self, change: Change) -> Result<Change, Change> {
         match change {
+            Change::Columns {
+                set,
+                ref name,
+                from,
+                to,
+            } => {
+                let width = self
+                    .library
+                    .set_mut(set)
+                    .map(|target| target.set_columns(from));
+                self.execute(Command::SelectSet(set));
+                if width == Some(from) {
+                    self.changed();
+                    Ok(Change::Columns {
+                        set,
+                        name: name.clone(),
+                        from,
+                        to,
+                    })
+                } else {
+                    // Tiles placed since keep it wider: leave it as it is.
+                    if let Some(width) = width {
+                        self.library
+                            .set_mut(set)
+                            .map(|target| target.set_columns(width));
+                    }
+                    Err(change)
+                }
+            }
             Change::ToSet {
                 mut tile,
                 from,
@@ -1211,6 +1292,7 @@ impl OlioApp {
                 self.spring_origin = None;
                 self.transfer_tile(tile, set, copy);
             }
+            SidebarAction::SetColumns(set, columns) => self.set_columns(set, columns),
             SidebarAction::SpringOpen(set) => {
                 self.spring_origin.get_or_insert(self.current);
                 self.execute(Command::SelectSet(set));
@@ -1811,6 +1893,8 @@ impl eframe::App for OlioApp {
                 undo: self.history.next_undo().map(Change::describe),
                 redo: self.history.next_redo().map(Change::describe),
                 set_removable: self.library.sets.len() > 1,
+                columns: self.current_set().columns,
+                min_columns: self.current_set().min_columns(),
                 playing: !self.playing.is_empty(),
             };
             actions.extend(menu::bar(ui, &state));
@@ -1894,6 +1978,7 @@ impl eframe::App for OlioApp {
                     click_plays: self.prefs.click_plays,
                     polish: self.prefs.polish,
                     style: self.prefs.tile_style,
+                    size: self.prefs.tile_size,
                     images: &self.images,
                     spectrograms: self.prefs.show_spectrograms,
                     levels: &self.tile_meters,
@@ -1980,6 +2065,7 @@ impl eframe::App for OlioApp {
                 InspectorAction::Remove(id) => self.remove_tile(id),
                 InspectorAction::Polish(id) => self.polish_tile(id),
                 InspectorAction::ChooseEmoji(id) => self.open_emoji_picker(id),
+                InspectorAction::SetColumns(columns) => self.set_columns(self.current, columns),
             }
         }
         for action in actions {

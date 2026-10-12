@@ -179,6 +179,17 @@ The preset of fade in, fade out and reverb a tile gets in one click
 (1 s, 1 s, 30 % unless changed); clicking again takes it off.
 _Avoid_: preset (alone), effect chain, enhance
 
+**Tile size**:
+How big tiles are drawn: Compact (title, key and time only, so more fit
+on screen), Regular, or Large. A preference, not part of a set.
+_Avoid_: zoom (that scales the whole window), density
+
+**Columns**:
+How wide a set's grid is, 1 to 10: the keys of each keyboard row it
+uses (4 columns: 1–4, Q–R, A–F, Z–V). Never narrower than its
+right-most tile.
+_Avoid_: width (alone), grid size
+
 **Tile style**:
 How tiles are drawn: Flat (outlined cards) or Soft (raised buttons that
 press in while they play).

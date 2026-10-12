@@ -13,15 +13,10 @@ use olio_library::{Set, SetId, Slot, Tile, TileId};
 use crate::clips::{ClipState, Clips, Ready};
 use crate::emoji::EmojiImages;
 use crate::meter::{self, Meter};
-use crate::prefs::{Polish, TileStyle};
+use crate::prefs::{Polish, TileSize, TileStyle};
 use crate::{format, palette};
 
-const GAP: f32 = 12.0;
-const MIN_TILE: Vec2 = Vec2::new(120.0, 96.0);
-const MAX_TILE_HEIGHT: f32 = 170.0;
 const ROUNDING: u8 = 10;
-/// The emoji beside a tile's title.
-const EMOJI_SIZE: f32 = 22.0;
 /// Room on a tile's right for its level meter.
 const METER_STRIP: f32 = 9.0;
 /// Room around a Soft grid, so the shadows of the outer tiles show.
@@ -30,6 +25,62 @@ const SOFT_INSET: f32 = 10.0;
 const BOUNCE: f64 = 0.16;
 /// How far it dips: the share of its size it loses at the bottom.
 const BOUNCE_DEPTH: f32 = 0.035;
+
+/// Sizes on the grid for each tile size.
+#[derive(Clone, Copy, Debug)]
+struct Metrics {
+    /// Between tiles.
+    gap: f32,
+    /// Tiles shrink to fit the window down to this; then the grid scrolls.
+    min: Vec2,
+    max_height: f32,
+    /// Font sizes: the title, and the times and key.
+    title: f32,
+    small: f32,
+    /// The emoji beside the title.
+    emoji: f32,
+    /// Room inside a tile's edge.
+    padding: Vec2,
+    /// Waveform, spectrogram and elapsed time; compact tiles have none.
+    detail: bool,
+}
+
+impl Metrics {
+    fn of(size: TileSize) -> Self {
+        match size {
+            TileSize::Compact => Self {
+                gap: 6.0,
+                min: Vec2::new(80.0, 48.0),
+                max_height: 64.0,
+                title: 13.0,
+                small: 11.5,
+                emoji: 16.0,
+                padding: Vec2::new(7.0, 6.0),
+                detail: false,
+            },
+            TileSize::Regular => Self {
+                gap: 12.0,
+                min: Vec2::new(120.0, 96.0),
+                max_height: 170.0,
+                title: 15.0,
+                small: 12.5,
+                emoji: 22.0,
+                padding: Vec2::new(10.0, 8.0),
+                detail: true,
+            },
+            TileSize::Large => Self {
+                gap: 14.0,
+                min: Vec2::new(170.0, 140.0),
+                max_height: 260.0,
+                title: 19.0,
+                small: 14.5,
+                emoji: 28.0,
+                padding: Vec2::new(12.0, 10.0),
+                detail: true,
+            },
+        }
+    }
+}
 
 /// How far a playing tile has got.
 #[derive(Clone, Copy, Debug)]
@@ -53,6 +104,7 @@ pub struct GridView<'a> {
     /// The Polish preset, to label the context menu item.
     pub polish: Polish,
     pub style: TileStyle,
+    pub size: TileSize,
     /// Draw a spectrogram under each waveform.
     pub spectrograms: bool,
     pub images: &'a EmojiImages,
@@ -138,19 +190,22 @@ fn grab_offset_id() -> Id {
 pub struct GridLayout {
     origin: Pos2,
     cell: Vec2,
+    gap: f32,
     columns: u8,
     rows: u8,
 }
 
 impl GridLayout {
-    fn new(available: Vec2, columns: u8, rows: u8) -> Self {
+    fn new(available: Vec2, columns: u8, rows: u8, metrics: &Metrics) -> Self {
         let (columns_f, rows_f) = (f32::from(columns), f32::from(rows));
-        let width = ((available.x - GAP * (columns_f - 1.0)) / columns_f).max(MIN_TILE.x);
-        let height =
-            ((available.y - GAP * (rows_f - 1.0)) / rows_f).clamp(MIN_TILE.y, MAX_TILE_HEIGHT);
+        let gap = metrics.gap;
+        let width = ((available.x - gap * (columns_f - 1.0)) / columns_f).max(metrics.min.x);
+        let height = ((available.y - gap * (rows_f - 1.0)) / rows_f)
+            .clamp(metrics.min.y, metrics.max_height);
         Self {
             origin: Pos2::ZERO,
             cell: Vec2::new(width, height),
+            gap,
             columns,
             rows,
         }
@@ -159,15 +214,15 @@ impl GridLayout {
     fn size(&self) -> Vec2 {
         let (columns, rows) = (f32::from(self.columns), f32::from(self.rows));
         Vec2::new(
-            columns * self.cell.x + (columns - 1.0) * GAP,
-            rows * self.cell.y + (rows - 1.0) * GAP,
+            columns * self.cell.x + (columns - 1.0) * self.gap,
+            rows * self.cell.y + (rows - 1.0) * self.gap,
         )
     }
 
     pub fn rect(&self, slot: Slot) -> Rect {
         let offset = Vec2::new(
-            f32::from(slot.column) * (self.cell.x + GAP),
-            f32::from(slot.row) * (self.cell.y + GAP),
+            f32::from(slot.column) * (self.cell.x + self.gap),
+            f32::from(slot.row) * (self.cell.y + self.gap),
         );
         Rect::from_min_size(self.origin + offset, self.cell)
     }
@@ -188,10 +243,12 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
         TileStyle::Flat => 0.0,
         TileStyle::Soft => SOFT_INSET,
     };
+    let metrics = Metrics::of(view.size);
     let mut layout = GridLayout::new(
         ui.available_size() - Vec2::splat(2.0 * inset),
         columns,
         rows,
+        &metrics,
     );
     egui::ScrollArea::both()
         .auto_shrink([false; 2])
@@ -360,6 +417,7 @@ fn drag_feedback(
         scale: 1.0,
         meter: None,
         spectrogram: view.spectrograms,
+        metrics: Metrics::of(view.size),
     };
     let state = view.clips.get(&tile.sound.hash);
     let progress = view.playing.get(&tile.id).copied();
@@ -544,6 +602,7 @@ fn tile_ui(
         style: view.style,
         scale: bounce(ui, tile.id, progress.is_some()),
         spectrogram: view.spectrograms,
+        metrics: Metrics::of(view.size),
         meter: view
             .levels
             .get(&tile.id)
@@ -593,6 +652,7 @@ struct Look {
     /// The tile's level, while there is one to show.
     meter: Option<Meter>,
     spectrogram: bool,
+    metrics: Metrics,
 }
 
 /// The tile's size this frame: a short dip when it starts playing, like a
@@ -648,21 +708,36 @@ fn paint_tile(
         }
         TileStyle::Soft => soft_background(painter, rect, progress.is_some(), dark),
     }
-    if progress.is_some() {
+    let metrics = look.metrics;
+    if let Some(progress) = progress {
         painter.rect_filled(rect, ROUNDING, palette::tint(tile.color, dark, 28));
+        if !metrics.detail {
+            // No waveform to show progress: the tile fills as it plays.
+            let played = Rect::from_min_size(
+                rect.min,
+                Vec2::new(
+                    rect.width() * progress.fraction.clamp(0.0, 1.0),
+                    rect.height(),
+                ),
+            );
+            painter.rect_filled(played, ROUNDING, palette::tint(tile.color, dark, 45));
+        }
     }
     painter.rect_stroke(rect, ROUNDING, border, StrokeKind::Inside);
-    let inner = rect.shrink2(Vec2::new(10.0, 8.0));
+    let inner = rect.shrink2(metrics.padding);
 
     // The emoji, the title beside it, and the loop mark on the right.
     let loop_room = if tile.looping { 22.0 } else { 0.0 };
     let emoji_room = if tile.emoji.is_empty() {
         0.0
     } else {
-        EMOJI_SIZE + 6.0
+        metrics.emoji + 5.0
     };
-    let mut title =
-        LayoutJob::simple_singleline(tile.title.clone(), FontId::proportional(15.0), strong);
+    let mut title = LayoutJob::simple_singleline(
+        tile.title.clone(),
+        FontId::proportional(metrics.title),
+        strong,
+    );
     title.wrap =
         TextWrapping::truncate_at_width((inner.width() - loop_room - emoji_room).max(10.0));
     let title = painter.layout_job(title);
@@ -671,10 +746,10 @@ fn paint_tile(
     let title_bottom = inner.top() + title.size().y;
     if !tile.emoji.is_empty() {
         let center = Pos2::new(
-            inner.left() + EMOJI_SIZE / 2.0,
+            inner.left() + metrics.emoji / 2.0,
             inner.top() + title.size().y / 2.0,
         );
-        let picture = Rect::from_center_size(center, Vec2::splat(EMOJI_SIZE));
+        let picture = Rect::from_center_size(center, Vec2::splat(metrics.emoji));
         images.paint(painter, picture, &tile.emoji, strong);
     }
     painter.galley(
@@ -687,15 +762,19 @@ fn paint_tile(
             inner.right_top(),
             Align2::RIGHT_TOP,
             "🔁",
-            FontId::proportional(13.0),
+            FontId::proportional(metrics.small + 0.5),
             strong,
         );
+    }
+    if !metrics.detail {
+        compact_footer(painter, inner, rect, tile, state, progress, look);
+        return;
     }
 
     // Along the bottom: the key in the middle; while playing, the time
     // elapsed on the left and the time left on the right; otherwise just
     // the duration on the right.
-    let times = FontId::proportional(12.5);
+    let times = FontId::proportional(metrics.small);
     match progress {
         Some(progress) => {
             painter.text(
@@ -734,9 +813,13 @@ fn paint_tile(
 
     // The waveform fills the space between, leaving a strip on the right
     // for the level meter, so the waveform keeps its width when playing.
+    let badge = metrics.small + 8.0;
     let wave = Rect::from_min_max(
         Pos2::new(rect.left() + 4.0, title_bottom + 6.0),
-        Pos2::new(rect.right() - 4.0 - METER_STRIP, inner.bottom() - 26.0),
+        Pos2::new(
+            rect.right() - 4.0 - METER_STRIP,
+            inner.bottom() - badge - 6.0,
+        ),
     );
     if wave.height() < 6.0 {
         return;
@@ -886,25 +969,94 @@ fn soft_background(painter: &Painter, rect: Rect, pressed: bool, dark: bool) {
     }
 }
 
+/// The bottom of a compact tile: the key on the left, the time on the
+/// right (the duration, or while playing the time left), and the level as
+/// a thin bar along the bottom edge.
+fn compact_footer(
+    painter: &Painter,
+    inner: Rect,
+    rect: Rect,
+    tile: &Tile,
+    state: Option<&ClipState>,
+    progress: Option<Progress>,
+    look: Look,
+) {
+    let dark = look.dark;
+    let strong = palette::strong(tile.color, dark);
+    let metrics = look.metrics;
+    if let Some(key) = TileKey::for_slot(tile.slot) {
+        let size = key_badge_size(painter, &key.label(), metrics);
+        let at = Pos2::new(inner.left() + size.x / 2.0, inner.bottom());
+        key_badge(painter, at, &key.label(), tile, look);
+    }
+    let times = FontId::proportional(metrics.small);
+    let (text, color) = match (progress, state) {
+        (Some(progress), _) => {
+            let left = (progress.total_seconds - progress.elapsed_seconds).max(0.0);
+            (format!("-{}", format::clock(left)), strong)
+        }
+        (None, Some(ClipState::Ready(ready))) => {
+            let region = ready.region(tile.trim_silence);
+            let seconds = region.len() as f64 / f64::from(ready.clip.rate());
+            (format::clock(seconds), palette::tint(tile.color, dark, 200))
+        }
+        (None, Some(ClipState::Failed(_))) => {
+            ("can't play".to_owned(), Color32::from_rgb(220, 60, 60))
+        }
+        (None, _) => ("…".to_owned(), palette::tint(tile.color, dark, 150)),
+    };
+    painter.text(
+        inner.right_bottom(),
+        Align2::RIGHT_BOTTOM,
+        text,
+        times,
+        color,
+    );
+    if let Some(meter) = &look.meter {
+        let bar = Rect::from_min_max(
+            Pos2::new(rect.left() + 8.0, rect.bottom() - 4.0),
+            Pos2::new(rect.right() - 8.0, rect.bottom() - 2.0),
+        );
+        let color = palette::tint(tile.color, dark, 210);
+        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color), dark);
+    }
+}
+
+fn key_badge_size(painter: &Painter, label: &str, metrics: Metrics) -> Vec2 {
+    let font = FontId::proportional(metrics.small + 0.5);
+    let width = painter
+        .layout_no_wrap(label.to_owned(), font, Color32::WHITE)
+        .size()
+        .x;
+    let height = metrics.small + 8.0;
+    Vec2::new((width + height).max(height * 1.9), height)
+}
+
 fn key_badge(painter: &Painter, bottom_center: Pos2, label: &str, tile: &Tile, look: Look) {
     let dark = look.dark;
     let strong = palette::strong(tile.color, dark);
-    let galley = painter.layout_no_wrap(label.to_owned(), FontId::proportional(13.0), strong);
-    let size = Vec2::new((galley.size().x + 22.0).max(38.0), 20.0);
+    let metrics = look.metrics;
+    let galley = painter.layout_no_wrap(
+        label.to_owned(),
+        FontId::proportional(metrics.small + 0.5),
+        strong,
+    );
+    let size = key_badge_size(painter, label, metrics);
     let rect = Rect::from_center_size(bottom_center - Vec2::new(0.0, size.y / 2.0 - 1.0), size);
+    let round = (size.y / 2.0) as u8;
     if look.style == TileStyle::Soft {
         // A small well the key sits in.
         let soft = palette::soft(dark);
-        painter.rect_filled(rect, 10, soft.pressed_rim);
+        painter.rect_filled(rect, round, soft.pressed_rim);
         let lit = Shadow {
             offset: [1, 1],
             blur: 4,
             spread: 0,
             color: soft.pressed_fill,
         };
-        painter.add(lit.as_shape(rect.shrink(2.0), 8));
+        painter.add(lit.as_shape(rect.shrink(2.0), round.saturating_sub(2)));
     }
-    painter.rect_filled(rect, 10, palette::tint(tile.color, dark, 45));
+    painter.rect_filled(rect, round, palette::tint(tile.color, dark, 45));
     painter.galley(rect.center() - galley.size() / 2.0, galley, strong);
 }
 
@@ -930,10 +1082,11 @@ fn empty_slot(ui: &Ui, rect: Rect, slot: Slot, view: &GridView, targeted: bool) 
     let painter = ui.painter();
     painter.rect(rect, ROUNDING, fill, stroke, StrokeKind::Inside);
     if let Some(key) = TileKey::for_slot(slot) {
+        let title = Metrics::of(view.size).title;
         let (size, color) = if files_hovering {
-            (18.0, weak)
+            (title + 3.0, weak)
         } else {
-            (14.0, weak.gamma_multiply(0.5))
+            (title - 1.0, weak.gamma_multiply(0.5))
         };
         painter.text(
             rect.center(),

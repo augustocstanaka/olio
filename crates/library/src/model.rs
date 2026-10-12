@@ -324,6 +324,25 @@ impl Set {
         Some(self.tiles.remove(index))
     }
 
+    /// The fewest columns that keep every tile on the grid: one past the
+    /// right-most tile, and at least 1.
+    pub fn min_columns(&self) -> u8 {
+        self.tiles
+            .iter()
+            .map(|tile| tile.slot.column + 1)
+            .max()
+            .unwrap_or(1)
+    }
+
+    /// Makes the grid `columns` wide, as far as the tiles allow: never
+    /// narrower than [`min_columns`](Self::min_columns), so no tile loses
+    /// its key, and never wider than [`MAX_COLUMNS`]. Returns the width it
+    /// got.
+    pub fn set_columns(&mut self, columns: u8) -> u8 {
+        self.columns = columns.clamp(self.min_columns(), MAX_COLUMNS);
+        self.columns
+    }
+
     /// Rows the grid shows: every row up to the last tile, and at least
     /// [`MIN_VISIBLE_ROWS`].
     pub fn visible_rows(&self) -> u8 {

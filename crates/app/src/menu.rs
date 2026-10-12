@@ -7,8 +7,9 @@
 //! are [`MenuAction`]s.
 
 use egui::{Button, Key, KeyboardShortcut, Modifiers, Ui};
+use olio_library::MAX_COLUMNS;
 
-use crate::prefs::{Preferences, Theme, TileStyle};
+use crate::prefs::{Preferences, Theme, TileSize, TileStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuAction {
@@ -42,6 +43,12 @@ pub enum MenuAction {
     ToggleInspector,
     Theme(Theme),
     TileStyle(TileStyle),
+    TileSize(TileSize),
+    /// Make the front set's grid this many columns wide.
+    SetColumns(u8),
+    /// One column more, or fewer.
+    Wider,
+    Narrower,
     PlaySelected,
     StopAll,
     FadeAll,
@@ -88,6 +95,14 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
         KeyboardShortcut::new(CMD, Key::P),
     ),
     (MenuAction::ChooseEmoji, KeyboardShortcut::new(CMD, Key::E)),
+    (
+        MenuAction::Wider,
+        KeyboardShortcut::new(CMD, Key::CloseBracket),
+    ),
+    (
+        MenuAction::Narrower,
+        KeyboardShortcut::new(CMD, Key::OpenBracket),
+    ),
     (MenuAction::Undo, KeyboardShortcut::new(CMD, Key::Z)),
     (MenuAction::Redo, KeyboardShortcut::new(CMD_SHIFT, Key::Z)),
     (
@@ -203,6 +218,9 @@ pub struct MenuState<'a> {
     /// The selected tile already has the Polish preset.
     pub tile_polished: bool,
     pub set_has_tiles: bool,
+    /// The front set's width, and the narrowest its tiles allow.
+    pub columns: u8,
+    pub min_columns: u8,
     /// What Undo and Redo would do: "Remove “Applause”".
     pub undo: Option<String>,
     pub redo: Option<String>,
@@ -227,16 +245,6 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 "Import Board…",
                 MenuAction::ImportBoard,
                 true,
-                &mut actions,
-            );
-            ui.separator();
-            item(ui, "New Set", MenuAction::NewSet, true, &mut actions);
-            item(ui, "Rename Set", MenuAction::RenameSet, true, &mut actions);
-            item(
-                ui,
-                "Remove Set…",
-                MenuAction::RemoveSet,
-                state.set_removable,
                 &mut actions,
             );
             ui.separator();
@@ -271,6 +279,37 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 state.redo.is_some(),
                 &mut actions,
             );
+        });
+        ui.menu_button("Set", |ui| {
+            item(ui, "New Set", MenuAction::NewSet, true, &mut actions);
+            item(ui, "Rename Set", MenuAction::RenameSet, true, &mut actions);
+            item(
+                ui,
+                "Remove Set…",
+                MenuAction::RemoveSet,
+                state.set_removable,
+                &mut actions,
+            );
+            ui.separator();
+            item(
+                ui,
+                "Wider",
+                MenuAction::Wider,
+                state.columns < MAX_COLUMNS,
+                &mut actions,
+            );
+            item(
+                ui,
+                "Narrower",
+                MenuAction::Narrower,
+                state.columns > state.min_columns,
+                &mut actions,
+            );
+            ui.menu_button("Columns", |ui| {
+                if let Some(columns) = columns_menu(ui, state.columns, state.min_columns) {
+                    actions.push(MenuAction::SetColumns(columns));
+                }
+            });
         });
         ui.menu_button("Tile", |ui| {
             let selected = state.tile_selected;
@@ -404,6 +443,16 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 );
             }
             ui.separator();
+            for size in TileSize::ALL {
+                toggle(
+                    ui,
+                    size.name(),
+                    state.prefs.tile_size == size,
+                    MenuAction::TileSize(size),
+                    &mut actions,
+                );
+            }
+            ui.separator();
             toggle(
                 ui,
                 "Spectrograms",
@@ -441,6 +490,29 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
         });
     });
     actions
+}
+
+/// The choice of grid widths, 1 to 10, the current one ticked and those
+/// too narrow for the tiles disabled. Returns the width clicked.
+pub fn columns_menu(ui: &mut Ui, columns: u8, min_columns: u8) -> Option<u8> {
+    let mut chosen = None;
+    for width in 1..=MAX_COLUMNS {
+        let label = if width == columns {
+            format!("✔ {width}")
+        } else {
+            format!("    {width}")
+        };
+        let response = ui
+            .add_enabled(width >= min_columns, Button::new(label))
+            .on_disabled_hover_text(format!(
+                "Tiles in column {min_columns} keep the grid at least this wide"
+            ));
+        if response.clicked() {
+            chosen = Some(width);
+            ui.close();
+        }
+    }
+    chosen
 }
 
 fn item(
@@ -526,6 +598,8 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         ),
                         (MenuAction::RemoveTile, "Remove the selected tile"),
                         (MenuAction::DuplicateTile, "Duplicate the selected tile"),
+                        (MenuAction::Wider, "One more column in this set"),
+                        (MenuAction::Narrower, "One column fewer"),
                         (
                             MenuAction::MoveTile(Direction::Left),
                             "Move the selected tile (with any arrow)",

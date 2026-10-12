@@ -305,3 +305,15 @@ fn nothing_moves_into_a_full_set() {
     assert_eq!(library.copy_tile_to_set(a, second, None), None);
     assert!(library.set(first).unwrap().tile(a).is_some());
 }
+
+#[test]
+fn a_grid_widens_freely_but_narrows_only_to_its_right_most_tile() {
+    let mut set = Set::new("Test");
+    assert_eq!(set.min_columns(), 1);
+    set.place(sound("a"), Some(Slot::new(2, 2))).unwrap();
+    assert_eq!(set.min_columns(), 3);
+    assert_eq!(set.set_columns(9), 9);
+    assert_eq!(set.set_columns(12), 10, "ten keys in a row at most");
+    assert_eq!(set.set_columns(1), 3, "column 3 has a tile");
+    assert_eq!(set.columns, 3);
+}

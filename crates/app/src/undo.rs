@@ -38,6 +38,13 @@ pub enum Change {
         to_name: String,
         copy: bool,
     },
+    /// The set's grid was made wider or narrower.
+    Columns {
+        set: SetId,
+        name: String,
+        from: u8,
+        to: u8,
+    },
     /// The tile went from one slot to another, swapping with any tile there.
     Moved {
         set: SetId,
@@ -56,6 +63,7 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Remove Set “{}”", set.name),
             Self::Duplicated { source, .. } => format!("Duplicate “{source}”"),
             Self::Moved { title, .. } => format!("Move “{title}”"),
+            Self::Columns { name, to, .. } => format!("{to} Columns for “{name}”"),
             Self::ToSet {
                 tile,
                 to_name,
@@ -74,8 +82,8 @@ impl Change {
             Self::RemovedTile { tile, .. } => Some(format!("Removed “{}”", tile.title)),
             Self::RemovedSet { set, .. } => Some(format!("Removed the set “{}”", set.name)),
             Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
-            // The tile is seen moving; no need to say so.
-            Self::Moved { .. } => None,
+            // The tile is seen moving, the grid changing; no need to say so.
+            Self::Moved { .. } | Self::Columns { .. } => None,
             // It leaves the grid, or lands out of sight: say where it went.
             Self::ToSet {
                 tile,
@@ -96,6 +104,7 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Put back the set “{}”", set.name),
             Self::Duplicated { tile, .. } => format!("Removed the copy “{}”", tile.title),
             Self::Moved { title, .. } => format!("Moved “{title}” back"),
+            Self::Columns { name, from, .. } => format!("“{name}” is {from} columns wide again"),
             Self::ToSet {
                 tile,
                 to_name,

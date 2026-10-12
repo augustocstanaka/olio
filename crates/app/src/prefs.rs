@@ -58,6 +58,29 @@ impl TileStyle {
     }
 }
 
+/// How big tiles are drawn: smaller tiles fit more on screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TileSize {
+    /// Title, key and time only: a full board on a laptop screen.
+    Compact,
+    #[default]
+    Regular,
+    /// Bigger tiles and text, for touch screens and reading from afar.
+    Large,
+}
+
+impl TileSize {
+    pub const ALL: [Self; 3] = [Self::Compact, Self::Regular, Self::Large];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact Tiles",
+            Self::Regular => "Regular Tiles",
+            Self::Large => "Large Tiles",
+        }
+    }
+}
+
 /// What one click of Polish gives a tile: a fade in, a fade out and some
 /// reverb. Adjustable in Playback ▸ Polish Preset.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -147,6 +170,7 @@ fn seconds(value: f32) -> String {
 pub struct Preferences {
     pub theme: Theme,
     pub tile_style: TileStyle,
+    pub tile_size: TileSize,
     /// Draw a spectrogram under each tile's waveform.
     pub show_spectrograms: bool,
     pub polish: Polish,
@@ -165,6 +189,7 @@ impl Default for Preferences {
         Self {
             theme: Theme::System,
             tile_style: TileStyle::Flat,
+            tile_size: TileSize::Regular,
             show_spectrograms: true,
             polish: Polish::default(),
             volume: 1.0,
@@ -253,5 +278,6 @@ mod tests {
         assert_eq!(prefs.polish, Polish::default());
         assert_eq!(prefs.tile_style, TileStyle::Flat);
         assert!(prefs.show_spectrograms);
+        assert_eq!(prefs.tile_size, TileSize::Regular);
     }
 }

@@ -28,6 +28,8 @@ pub enum SidebarAction {
     RemoveSet(SetId),
     /// Give every tile of the set the Polish preset.
     Polish(SetId),
+    /// Make a set's grid this many columns wide.
+    SetColumns(SetId, u8),
     /// A tile dragged and held over a set: bring the set to the front so
     /// the tile can be dropped on one of its slots.
     SpringOpen(SetId),
@@ -293,6 +295,12 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
             actions.push(SidebarAction::StartRename(row.set.id));
             ui.close();
         }
+        ui.menu_button("Columns", |ui| {
+            let set = row.set;
+            if let Some(columns) = crate::menu::columns_menu(ui, set.columns, set.min_columns()) {
+                actions.push(SidebarAction::SetColumns(set.id, columns));
+            }
+        });
         let polishable = !row.set.tiles.is_empty();
         if ui
             .add_enabled(polishable, egui::Button::new("✨ Polish All Tiles"))

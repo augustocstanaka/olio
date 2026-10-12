@@ -48,8 +48,15 @@ Milestone 0, the playable skeleton, is done. Olio can:
   a moment to open it and drop the tile on the slot you want; let go
   anywhere else, or press Esc, and you are back where you started. Hold Option (Ctrl on
   Windows) while dropping to drop a copy instead, or press ⌘D (Ctrl+D) to
-  duplicate the selected tile. Shift and an arrow
-  key move the selected tile from the keyboard. ⌘Z undoes any of it.
+  duplicate the selected tile. Shift and an arrow key move the selected
+  tile from the keyboard. ⌘Z undoes any of it.
+- **Fit more on screen.** Each set is 1 to 10 columns wide: ⌘] and ⌘[
+  (Ctrl on Windows), Set ▸ Columns, or the stepper in the inspector when
+  no tile is selected. A set never gets narrower than its right-most
+  tile, so no sound loses its key. View ▸ Compact Tiles shows just the
+  title, key and time, so a full board of 80 fits on a laptop screen at
+  full size or with the side panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit
+  touch screens and reading from across a room.
 - **Find your way.** Menus list every command with its shortcut (Help ▸
   Keyboard Shortcuts has them all), written the way the platform writes
   them.

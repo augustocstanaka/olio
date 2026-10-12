@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use olio_app::import::Importer;
-use olio_app::prefs::TileStyle;
+use olio_app::prefs::{TileSize, TileStyle};
 use olio_app::{OlioApp, Options};
 use olio_audio::{Clip, WavFormat};
 use olio_library::Store;
@@ -263,7 +263,7 @@ fn removing_a_tile_is_immediate_and_undo_puts_it_back() {
 fn a_removed_set_comes_back_with_its_tiles() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
-    harness.get_by_label("File").click();
+    harness.get_by_label("Set").click();
     harness.run_steps(2);
     harness.get_by_label_contains("Remove Set…").click();
     // The dialog takes a few frames to size and place itself; until then
@@ -722,6 +722,67 @@ fn a_tile_dropped_on_its_own_set_stays_put() {
     assert_eq!(harness.query_all_by_label_contains("Moved").count(), 0);
 }
 
+#[test]
+fn a_set_widens_and_narrows_but_not_past_its_tiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    assert_eq!(harness.query_all_by_label("Empty slot 4").count(), 0);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::CloseBracket);
+    harness.run_steps(2);
+    harness.get_by_label("Empty slot 4");
+    harness.get_by_label("Empty slot R");
+
+    // Back to three, then no further: tiles sit in the third column.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::OpenBracket);
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::OpenBracket);
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Empty slot 4").count(), 0);
+    harness.get_by_label("Country Rock");
+    harness.get_by_label_contains("keep “Show” at least that wide");
+
+    // Undo the narrowing.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    harness.get_by_label("Empty slot 4");
+}
+
+#[test]
+fn the_inspector_sets_the_columns_of_the_set_in_front() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Keys 1–3, Q–E, A–D, Z–C");
+    harness.get_by_label("More columns").click();
+    harness.run_steps(2);
+    harness.get_by_label("More columns").click();
+    harness.run_steps(2);
+    harness.get_by_label("Keys 1–5, Q–T, A–G, Z–B");
+    harness.get_by_label("Empty slot 5");
+    harness.get_by_label("Fewer columns").click();
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Empty slot 5").count(), 0);
+}
+
+#[test]
+fn compact_tiles_are_smaller_and_still_play() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let regular = harness.get_by_label("Applause").rect().height();
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Compact Tiles").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().preferences().tile_size, TileSize::Compact);
+    let compact = harness.get_by_label("Applause").rect().height();
+    assert!(
+        compact < 70.0 && compact < regular,
+        "{compact} vs {regular}"
+    );
+    harness.key_press(egui::Key::Num1);
+    harness.run_steps(2);
+    assert_eq!(harness.state().playing_titles(), ["Applause"]);
+}
+
 /// Steps for a little longer than a dragged tile must be held over a set
 /// to open it (0.6 s at 60 steps a second).
 const HOLD_STEPS: usize = 45;
@@ -873,4 +934,35 @@ fn render_the_window_to_a_png() {
     glide(&mut harness, set, slot);
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-spring-open.png")).unwrap();
+
+    // Compact tiles, six columns wide, two playing.
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), true);
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Compact Tiles").click();
+    harness.run_steps(2);
+    for _ in 0..3 {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::CloseBracket);
+        harness.run_steps(1);
+    }
+    harness.get_by_label("Pensive").click();
+    harness.key_press(egui::Key::Num2);
+    harness.key_press(egui::Key::Q);
+    harness.run_steps(20);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-compact.png")).unwrap();
+
+    // Large tiles, light.
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), true);
+    harness.ctx.set_theme(egui::Theme::Light);
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Large Tiles").click();
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Num2);
+    harness.run_steps(20);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-large.png")).unwrap();
 }

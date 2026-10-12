@@ -22,7 +22,8 @@ are intentions, reordered as real use dictates.
   silence**, **fades**, a **room reverb** send, **folder import** in
   natural alphabetical order, **video audio extraction**, **board JSON**
   and the headless **`olio import`** for scripts.
-- Window ergonomics: a menu bar (File, Tile, Playback, View, Help) with
+- Window ergonomics: a menu bar (File, Edit, Set, Tile, Playback, View,
+  Help) with
   every shortcut written the platform's way and a Keyboard Shortcuts
   window; master volume and mute; Fade All (`-`) beside Stop All
   (Cmd-Esc); arrow keys move the selection, Return plays it, Delete
@@ -39,6 +40,9 @@ are intentions, reordered as real use dictates.
   there in the same slot if free, or copied; held there, the set opens
   for a drop on a chosen slot), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
+- **Grid size**: columns per set (⌘] / ⌘[, Set ▸ Columns, the
+  inspector), never narrower than the tiles allow, undoable; Compact,
+  Regular and Large tile sizes.
 - **Undo** for removing tiles and sets (⌘Z, ⇧⌘Z, an Undo button in the
   status bar); tiles are removed without a confirmation.
 - **Normalize** on by default: every sound at -18 dBFS RMS, peaks under

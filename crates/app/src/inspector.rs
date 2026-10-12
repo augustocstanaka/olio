@@ -3,7 +3,7 @@
 
 use egui::{Button, Color32, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
 use olio_control::{Command, TileKey, TileSetting};
-use olio_library::{MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
+use olio_library::{MAX_COLUMNS, MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
 
 use crate::clips::ClipState;
 use crate::emoji::EmojiImages;
@@ -22,6 +22,8 @@ pub enum InspectorAction {
     Polish(TileId),
     /// Open the emoji picker for the tile.
     ChooseEmoji(TileId),
+    /// Make the front set's grid this many columns wide.
+    SetColumns(u8),
 }
 
 pub struct View<'a> {
@@ -57,7 +59,7 @@ pub fn show(
                     });
                     tile_settings(ui, tile, view, &mut actions);
                 }
-                None => set_summary(ui, view.set),
+                None => set_summary(ui, view.set, &mut actions),
             }
             ui.add_space(10.0);
         });
@@ -110,17 +112,74 @@ fn title_field(
     }
 }
 
-fn set_summary(ui: &mut Ui, set: &Set) {
+fn set_summary(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
     ui.label(RichText::new(&set.name).strong().size(16.0));
     ui.add_space(4.0);
     ui.weak(match set.tiles.len() {
         1 => "1 tile".to_owned(),
         count => format!("{count} tiles"),
     });
+    ui.add_space(12.0);
+    columns_row(ui, set, actions);
     ui.add_space(16.0);
     ui.label("Select a tile to change its title, colour, fades, reverb and how it plays.");
     ui.add_space(10.0);
     ui.weak("Press a tile's key or double-click it to play it. The arrow keys move the selection and Return plays it. Hold Esc to stop everything.");
+}
+
+/// The set's width, with buttons for one column fewer or more, and the
+/// keys its top row ends at.
+fn columns_row(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
+    let (columns, narrowest) = (set.columns, set.min_columns());
+    ui.horizontal(|ui| {
+        ui.label("Columns");
+        let fewer = ui
+            .add_enabled(
+                columns > narrowest,
+                Button::new("−").min_size(Vec2::splat(26.0)),
+            )
+            .on_hover_text(format!(
+                "One column fewer ({})",
+                menu::shortcut_text(ui.ctx(), MenuAction::Narrower)
+            ))
+            .on_disabled_hover_text(format!(
+                "Tiles in column {narrowest} keep the grid at least this wide"
+            ));
+        fewer.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Button, columns > narrowest, "Fewer columns")
+        });
+        if fewer.clicked() {
+            actions.push(InspectorAction::SetColumns(columns - 1));
+        }
+        ui.label(RichText::new(columns.to_string()).strong());
+        let more = ui
+            .add_enabled(
+                columns < MAX_COLUMNS,
+                Button::new("+").min_size(Vec2::splat(26.0)),
+            )
+            .on_hover_text(format!(
+                "One column more ({})",
+                menu::shortcut_text(ui.ctx(), MenuAction::Wider)
+            ));
+        more.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Button, columns < MAX_COLUMNS, "More columns")
+        });
+        if more.clicked() {
+            actions.push(InspectorAction::SetColumns(columns + 1));
+        }
+    });
+    // "1 to 4, Q to R…": what the width means on the keyboard.
+    let last = |row: u8| {
+        TileKey::for_slot(olio_library::Slot::new(row, columns - 1))
+            .map_or_else(String::new, |key| key.label())
+    };
+    ui.weak(format!(
+        "Keys 1–{}, Q–{}, A–{}, Z–{}",
+        last(0),
+        last(1),
+        last(2),
+        last(3)
+    ));
 }
 
 fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<InspectorAction>) {
