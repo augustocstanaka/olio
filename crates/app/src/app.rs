@@ -529,6 +529,15 @@ impl OlioApp {
             }
             MenuAction::TileStyle(style) => self.prefs.tile_style = style,
             MenuAction::TileSize(size) => self.prefs.tile_size = size,
+            MenuAction::NextTileSize => {
+                let size = self.prefs.tile_size.next();
+                self.prefs.tile_size = size;
+                let fit = menu::shortcut_text(ctx, MenuAction::FitColumns);
+                self.set_status(
+                    format!("{} · {fit} fits the columns to the window", size.name()),
+                    false,
+                );
+            }
             MenuAction::SetColumns(columns) => self.set_columns(self.current, columns),
             MenuAction::Wider => {
                 let columns = self.current_set().columns.saturating_add(1);

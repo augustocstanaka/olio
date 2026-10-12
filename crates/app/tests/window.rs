@@ -849,6 +849,26 @@ fn compact_tiles_fit_more_columns_and_the_inspector_fits_too() {
     assert!(compact > regular, "{compact} vs {regular}");
 }
 
+#[test]
+fn a_shortcut_steps_through_the_tile_sizes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    let next = |harness: &mut Harness<'static, OlioApp>| {
+        harness.key_press_modifiers(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::T,
+        );
+        harness.run_steps(2);
+        harness.state().preferences().tile_size
+    };
+    assert_eq!(harness.state().preferences().tile_size, TileSize::Regular);
+    assert_eq!(next(&mut harness), TileSize::Large);
+    harness.get_by_label_contains("Large Tiles ·");
+    assert_eq!(next(&mut harness), TileSize::Compact);
+    assert!(harness.get_by_label("Applause").rect().height() < 70.0);
+    assert_eq!(next(&mut harness), TileSize::Regular);
+}
+
 /// Steps for a little longer than a dragged tile must be held over a set
 /// to open it (0.6 s at 60 steps a second).
 const HOLD_STEPS: usize = 45;

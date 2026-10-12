@@ -79,6 +79,15 @@ impl TileSize {
             Self::Large => "Large Tiles",
         }
     }
+
+    /// The next size, round from Large back to Compact.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Compact => Self::Regular,
+            Self::Regular => Self::Large,
+            Self::Large => Self::Compact,
+        }
+    }
 }
 
 /// What one click of Polish gives a tile: a fade in, a fade out and some
@@ -267,6 +276,20 @@ mod tests {
         assert_eq!(Polish::OFF.settings()[2], TileSetting::Reverb(0.0));
         assert_eq!(seconds(0.5), "0.5 s");
         assert_eq!(seconds(2.25), "2.25 s");
+    }
+
+    #[test]
+    fn tile_sizes_go_round() {
+        let mut size = TileSize::Compact;
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            size = size.next();
+            seen.push(size);
+        }
+        assert_eq!(
+            seen,
+            [TileSize::Regular, TileSize::Large, TileSize::Compact]
+        );
     }
 
     #[test]

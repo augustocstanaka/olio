@@ -44,6 +44,8 @@ pub enum MenuAction {
     Theme(Theme),
     TileStyle(TileStyle),
     TileSize(TileSize),
+    /// Compact, Regular, Large, and round again.
+    NextTileSize,
     /// Make the front set's grid this many columns wide.
     SetColumns(u8),
     /// One column more, or fewer.
@@ -108,6 +110,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::FitColumns,
         KeyboardShortcut::new(CMD, Key::Backslash),
+    ),
+    (
+        MenuAction::NextTileSize,
+        KeyboardShortcut::new(CMD_SHIFT, Key::T),
     ),
     (MenuAction::Undo, KeyboardShortcut::new(CMD, Key::Z)),
     (MenuAction::Redo, KeyboardShortcut::new(CMD_SHIFT, Key::Z)),
@@ -472,6 +478,13 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                     &mut actions,
                 );
             }
+            item(
+                ui,
+                "    Next Tile Size",
+                MenuAction::NextTileSize,
+                true,
+                &mut actions,
+            );
             ui.separator();
             toggle(
                 ui,
@@ -646,6 +659,10 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (MenuAction::Wider, "One more column in this set"),
                         (MenuAction::Narrower, "One column fewer"),
                         (MenuAction::FitColumns, "As many columns as fit the window"),
+                        (
+                            MenuAction::NextTileSize,
+                            "Compact, Regular or Large tiles, in turn",
+                        ),
                         (
                             MenuAction::MoveTile(Direction::Left),
                             "Move the selected tile (with any arrow)",

@@ -55,10 +55,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
   no tile is selected. Fit to Window (⌘\\) picks as many columns as fit
   the window at the current tile size without scrolling sideways. A set
   never gets narrower than its right-most tile, so no sound loses its
-  key. View ▸ Compact Tiles shows just the
-  title, key and time, so a full board of 80 fits on a laptop screen at
-  full size or with the side panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit
-  touch screens and reading from across a room.
+  key. View ▸ Compact Tiles shows just the title, key and time, so a
+  full board of 80 fits on a laptop screen at full size or with the side
+  panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit touch screens and reading
+  from across a room. ⇧⌘T (Ctrl+Shift+T) steps through Compact, Regular
+  and Large.
 - **Find your way.** Menus list every command with its shortcut (Help ▸
   Keyboard Shortcuts has them all), written the way the platform writes
   them.
