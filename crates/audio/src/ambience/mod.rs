@@ -290,7 +290,7 @@ impl Instrument {
     fn spacing(self) -> f32 {
         match self {
             Self::Bass => 9.0,
-            Self::Harp => 3.5,
+            Self::Harp => 6.5,
             Self::Bells => 14.0,
             Self::Strings => 12.0,
             Self::Pad => 18.0,

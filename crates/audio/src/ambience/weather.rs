@@ -158,7 +158,7 @@ impl Bed {
                 for (side, sample) in out.iter_mut().enumerate() {
                     let noise = self.rng.signed();
                     let high = self.high[side].high(noise, hiss);
-                    *sample = self.low[side].low(high, soft) * 0.5;
+                    *sample = self.low[side].low(high, soft) * 0.32;
                 }
                 // About twenty drops a second, each a few milliseconds.
                 if self.rng.chance(22.0 / rate as f32)
@@ -174,8 +174,8 @@ impl Bed {
                         let burst = drop.filter.next(self.rng.signed()) * drop.env;
                         drop.env *= drop.decay;
                         let (l, r) = pan_gains(drop.pan);
-                        out[0] += burst * l * 1.3;
-                        out[1] += burst * r * 1.3;
+                        out[0] += burst * l * 0.85;
+                        out[1] += burst * r * 0.85;
                     }
                 }
             }
