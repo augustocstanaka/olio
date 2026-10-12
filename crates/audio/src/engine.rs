@@ -8,6 +8,7 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
+use crate::ambience::AmbienceSettings;
 use crate::clip::Clip;
 use crate::mixer::{Event, MAX_VOICES, Message, Mixer, Shared, VoiceId, VoiceSettings};
 
@@ -219,6 +220,11 @@ impl Engine {
     /// Changes how much of a playing voice goes to the reverb (0 to 1).
     pub fn set_reverb(&mut self, voice: VoiceId, reverb: f32) {
         self.send(Message::SetReverb { voice, reverb });
+    }
+
+    /// Turns the ambience on or off, or changes how it sounds.
+    pub fn set_ambience(&mut self, settings: AmbienceSettings) {
+        self.send(Message::Ambience(settings));
     }
 
     /// Sets the gain applied to the whole mix (linear, 1.0 is unity).

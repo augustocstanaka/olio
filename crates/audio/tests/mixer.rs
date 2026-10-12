@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use olio_audio::{Clip, Engine, MAX_VOICES, Mixer, PlayOptions};
+use olio_audio::{AmbienceSettings, Clip, Engine, MAX_VOICES, Mixer, PlayOptions, Weather};
 
 const RATE: u32 = 48_000;
 /// The mixer's shortest fade (5 ms) at `RATE`.
@@ -450,4 +450,82 @@ fn a_new_voice_does_not_inherit_the_level_of_its_slot() {
         .unwrap();
     render(&mut mixer, 64, 2);
     assert_close(engine.take_voice_peak(quiet).unwrap(), 0.1, 1e-6);
+}
+
+fn rms(samples: &[f32]) -> f32 {
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt()
+}
+
+fn peak(samples: &[f32]) -> f32 {
+    samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()))
+}
+
+#[test]
+fn the_ambience_is_silent_until_turned_on_and_stays_quiet() {
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    let silent = render(&mut mixer, 4800, 2);
+    assert_eq!(peak(&silent), 0.0);
+
+    let full = AmbienceSettings {
+        enabled: true,
+        level: 1.0,
+        weather: Weather::Rain,
+        ..AmbienceSettings::default()
+    };
+    engine.set_ambience(full);
+    // Past the second it takes to fade in.
+    render(&mut mixer, RATE as usize * 2, 2);
+    let mut out = Vec::new();
+    for _ in 0..20 {
+        out.extend(render(&mut mixer, 4800, 2));
+    }
+    let level = rms(&out);
+    assert!(level > 0.002, "it can be heard: {level}");
+    assert!(level < 0.08, "but it stays under the sounds: {level}");
+    assert!(
+        peak(&out) < 0.5,
+        "and never gets near full scale: {}",
+        peak(&out)
+    );
+
+    engine.set_ambience(AmbienceSettings {
+        enabled: false,
+        ..full
+    });
+    render(&mut mixer, RATE as usize * 2, 2);
+    let after = render(&mut mixer, 4800, 2);
+    // Only the reverb's tail is left, well under hearing.
+    assert!(
+        peak(&after) < 1e-3,
+        "off, it fades to nothing: {}",
+        peak(&after)
+    );
+    render(&mut mixer, RATE as usize * 8, 2);
+    let later = render(&mut mixer, 4800, 2);
+    assert_eq!(peak(&later), 0.0);
+}
+
+#[test]
+fn the_ambience_ducks_under_a_playing_sound() {
+    let settings = AmbienceSettings {
+        enabled: true,
+        level: 0.8,
+        weather: Weather::Wind,
+        duck: true,
+        ..AmbienceSettings::default()
+    };
+    let bed_level = |with_voice: bool| {
+        let (mut engine, mut mixer) = Engine::offline(RATE);
+        engine.set_ambience(settings);
+        render(&mut mixer, RATE as usize * 2, 2);
+        if with_voice {
+            // A silent clip still counts as playing.
+            engine.play(constant(0.0, RATE as usize * 4), PlayOptions::default());
+            render(&mut mixer, RATE as usize, 2);
+        }
+        rms(&render(&mut mixer, RATE as usize, 2))
+    };
+    let (alone, ducked) = (bed_level(false), bed_level(true));
+    assert!(ducked < alone * 0.6, "{ducked} vs {alone}");
+    assert!(ducked > 0.0);
 }

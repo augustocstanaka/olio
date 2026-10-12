@@ -5,6 +5,7 @@
 //! library, so a scratch library opened with `--library` has its own.
 
 use egui::ThemePreference;
+use olio_audio::AmbienceSettings;
 use olio_control::TileSetting;
 use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
@@ -180,6 +181,8 @@ pub struct Preferences {
     pub theme: Theme,
     pub tile_style: TileStyle,
     pub tile_size: TileSize,
+    /// The generated bed behind the sounds.
+    pub ambience: AmbienceSettings,
     /// Draw a spectrogram under each tile's waveform.
     pub show_spectrograms: bool,
     pub polish: Polish,
@@ -199,6 +202,7 @@ impl Default for Preferences {
             theme: Theme::System,
             tile_style: TileStyle::Flat,
             tile_size: TileSize::Regular,
+            ambience: AmbienceSettings::default(),
             show_spectrograms: true,
             polish: Polish::default(),
             volume: 1.0,
@@ -223,6 +227,7 @@ impl Preferences {
             1.0
         };
         prefs.polish = prefs.polish.clamped();
+        prefs.ambience = prefs.ambience.clamped();
         prefs
     }
 
@@ -302,5 +307,6 @@ mod tests {
         assert_eq!(prefs.tile_style, TileStyle::Flat);
         assert!(prefs.show_spectrograms);
         assert_eq!(prefs.tile_size, TileSize::Regular);
+        assert!(!prefs.ambience.enabled);
     }
 }

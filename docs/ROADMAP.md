@@ -40,6 +40,10 @@ are intentions, reordered as real use dictates.
   there in the same slot if free, or copied; held there, the set opens
   for a drop on a chosen slot), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
+- **Ambience**: a generated bed (weather, bass, harp, bells, strings,
+  pad, drone) in a chosen scale, with styles, presence, endless or
+  pieces, synthesised on the audio thread without allocation; a
+  `SetAmbience` command for control surfaces.
 - **Grid size**: columns per set (⌘] / ⌘[, Fit to Window ⌘\\, Set ▸
   Columns, the inspector), never narrower than the tiles allow, undoable; Compact,
   Regular and Large tile sizes.

@@ -9,6 +9,7 @@
 //! `olio import [--library DIR] [--set NAME] [--force] PATH...` imports
 //! without opening a window, for scripts (see `docs/BOARD-JSON.md`).
 
+mod ambience;
 pub mod app;
 pub mod cli;
 mod clips;

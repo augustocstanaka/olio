@@ -869,6 +869,88 @@ fn a_shortcut_steps_through_the_tile_sizes() {
     assert_eq!(next(&mut harness), TileSize::Regular);
 }
 
+#[test]
+fn the_ambience_switches_on_with_a_shortcut_and_can_be_heard_on_the_meter() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    assert!(!harness.state().preferences().ambience.enabled);
+    harness.run_steps(30);
+    assert!(harness.state().output_level_db() < -48.0, "silent before");
+
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::B,
+    );
+    harness.run_steps(2);
+    assert!(harness.state().preferences().ambience.enabled);
+    harness.get_by_label("Ambience: Rain Study");
+    // Past the fade-in, the rain shows on the output meter with nothing
+    // else playing.
+    harness.run_steps(150);
+    assert!(
+        harness.state().output_level_db() > -48.0,
+        "the bed can be heard"
+    );
+
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::B,
+    );
+    harness.run_steps(2);
+    harness.get_by_label("Ambience off");
+}
+
+#[test]
+fn the_ambience_window_picks_styles_and_a_touch_makes_them_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Playback").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Ambience Settings…").click();
+    harness.run_steps(10);
+    harness.get_by_label("Cathedral").click();
+    harness.run_steps(2);
+    let settings = harness.state().preferences().ambience;
+    assert_eq!(settings.describe(), "Cathedral");
+    assert!(
+        settings
+            .layer(olio_audio::ambience::Instrument::Drone)
+            .enabled
+    );
+    assert!(
+        !settings
+            .layer(olio_audio::ambience::Instrument::Harp)
+            .enabled
+    );
+
+    harness.get_by_label("Instruments").click();
+    harness.run_steps(2);
+    harness.get_by_label("Harp").click();
+    harness.run_steps(2);
+    let settings = harness.state().preferences().ambience;
+    assert!(
+        settings
+            .layer(olio_audio::ambience::Instrument::Harp)
+            .enabled
+    );
+    assert_eq!(settings.describe(), "Custom: G Aeolian");
+    harness.get_by_label("Custom");
+
+    harness.get_by_label("Presence").click();
+    harness.run_steps(2);
+    harness.get_by_label("Declarative").click();
+    harness.run_steps(2);
+    harness.get_by_label("Pulse");
+    harness.get_by_label("Form").click();
+    harness.run_steps(2);
+    harness.get_by_label("Pieces").click();
+    harness.run_steps(2);
+    assert!(matches!(
+        harness.state().preferences().ambience.form,
+        olio_audio::ambience::Form::Piece { .. }
+    ));
+}
+
 /// Steps for a little longer than a dragged tile must be held over a set
 /// to open it (0.6 s at 60 steps a second).
 const HOLD_STEPS: usize = 45;
@@ -1051,4 +1133,18 @@ fn render_the_window_to_a_png() {
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-large.png")).unwrap();
+
+    // The Ambience window, on Affirmation.
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), true);
+    harness.get_by_label("Playback").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Ambience Settings…").click();
+    harness.run_steps(10);
+    harness.get_by_label("Affirmation").click();
+    harness.run_steps(2);
+    harness.get_by_label("Instruments").click();
+    harness.run_steps(10);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-ambience.png")).unwrap();
 }

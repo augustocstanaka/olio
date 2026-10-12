@@ -9,8 +9,10 @@ and UI text.
 
 - `crates/audio` (`olio-audio`): decoding (`clip.rs`), waveform peaks,
   the real-time `mixer.rs` (voices, fades, regions, reverb send), the
-  `reverb.rs` effect, `spectrum.rs` (FFT and spectrograms), and
-  `engine.rs` (the app's handle on the mixer plus
+  `reverb.rs` effect, `spectrum.rs` (FFT and spectrograms), `ambience/`
+  (the generated bed: `mod.rs` settings, scales and styles,
+  `composer.rs` what plays when, `synth.rs` the instruments,
+  `weather.rs`), and `engine.rs` (the app's handle on the mixer plus
   the cpal output stream). No UI or library dependency.
 - `crates/library` (`olio-library`): `model.rs` (Library, Set, Tile,
   Sound, Slot), `store.rs` (the library directory, imports, lock file),
@@ -22,7 +24,8 @@ and UI text.
   `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
-  `polish.rs` the Polish Preset window, `meter.rs` level meters,
+  `polish.rs` the Polish Preset window, `ambience.rs` the Ambience
+  window, `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
   redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),

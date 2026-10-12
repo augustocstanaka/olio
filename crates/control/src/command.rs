@@ -18,6 +18,8 @@ pub enum Command {
     FadeAll,
     /// Set the master volume, 0 (silent) to 1 (full).
     SetMasterVolume(f32),
+    /// The generated ambience bed, on or off.
+    SetAmbience(bool),
     /// Bring a set to the front, so its tiles answer the keyboard.
     SelectSet(SetId),
     /// Change one of a tile's settings. Looping and reverb also change a

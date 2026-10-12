@@ -21,6 +21,7 @@ use olio_library::{
 };
 
 use crate::Options;
+use crate::ambience;
 use crate::clips::{ClipState, Clips};
 use crate::confirm::{self, Confirm, Pending, Reply};
 use crate::emoji::{self, EmojiImages};
@@ -150,6 +151,7 @@ pub struct OlioApp {
     confirm: Option<Confirm>,
     show_shortcuts: bool,
     show_polish: bool,
+    show_ambience: bool,
     history: History,
     /// The set in front when a dragged tile first opened another set by
     /// being held over it; the window goes back to it if the drag ends
@@ -227,6 +229,7 @@ impl OlioApp {
             confirm: None,
             show_shortcuts: false,
             show_polish: false,
+            show_ambience: false,
             history: History::default(),
             spring_origin: None,
             emoji_picker: None,
@@ -253,6 +256,7 @@ impl OlioApp {
             app.audio = open_audio();
         }
         app.apply_master_gain();
+        app.apply_ambience();
         if let Some(name) = &options.set {
             match app.library.sets.iter().find(|set| &set.name == name) {
                 Some(set) => app.current = set.id,
@@ -357,6 +361,12 @@ impl OlioApp {
         self.unsaved_since.get_or_insert_with(Instant::now);
     }
 
+    fn apply_ambience(&mut self) {
+        if let Audio::Running(engine) = &mut self.audio {
+            engine.set_ambience(self.prefs.ambience);
+        }
+    }
+
     fn apply_master_gain(&mut self) {
         if let Audio::Running(engine) = &mut self.audio {
             engine.set_master_gain(self.prefs.master_gain());
@@ -382,6 +392,10 @@ impl OlioApp {
             Command::StopTile(id) => self.stop_tile(id),
             Command::StopAll => self.stop_all(Duration::ZERO),
             Command::FadeAll => self.stop_all(FADE_ALL),
+            Command::SetAmbience(on) => {
+                self.prefs.ambience.enabled = on;
+                self.apply_ambience();
+            }
             Command::SetMasterVolume(volume) => {
                 self.prefs.volume = volume.clamp(0.0, 1.0);
                 self.apply_master_gain();
@@ -583,6 +597,16 @@ impl OlioApp {
             }
             MenuAction::PolishSet => self.polish_set(),
             MenuAction::EditPolish => self.show_polish = true,
+            MenuAction::EditAmbience => self.show_ambience = true,
+            MenuAction::ToggleAmbience => {
+                self.execute(Command::SetAmbience(!self.prefs.ambience.enabled));
+                let message = if self.prefs.ambience.enabled {
+                    format!("Ambience: {}", self.prefs.ambience.describe())
+                } else {
+                    "Ambience off".to_owned()
+                };
+                self.set_status(message, false);
+            }
             MenuAction::ChooseEmoji => {
                 if let Some(id) = self.selected {
                     self.open_emoji_picker(id);
@@ -1439,6 +1463,7 @@ impl OlioApp {
                         let message = format!("Playing through {}", output.device);
                         self.set_status(message, false);
                         self.apply_master_gain();
+                        self.apply_ambience();
                     }
                 } else {
                     ctx.request_repaint_after(*retry_at - now);
@@ -2038,6 +2063,11 @@ impl eframe::App for OlioApp {
         }
         if self.show_polish {
             polish::window(&ctx, &mut self.show_polish, &mut self.prefs.polish);
+        }
+        if self.show_ambience
+            && ambience::window(&ctx, &mut self.show_ambience, &mut self.prefs.ambience)
+        {
+            self.apply_ambience();
         }
 
         let acted = !commands.is_empty() || !actions.is_empty();

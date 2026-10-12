@@ -10,6 +10,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use crate::ambience::{Ambience, AmbienceSettings};
 use crate::clip::Clip;
 use crate::reverb::Reverb;
 
@@ -84,6 +85,7 @@ pub(crate) enum Message {
     MasterGain {
         gain: f32,
     },
+    Ambience(AmbienceSettings),
 }
 
 /// What the mixer tells the engine.
@@ -171,7 +173,7 @@ impl Shared {
 
 /// A gain that moves linearly to a target over a number of frames.
 #[derive(Clone, Copy, Debug)]
-struct Ramp {
+pub(crate) struct Ramp {
     value: f32,
     target: f32,
     step: f32,
@@ -179,7 +181,7 @@ struct Ramp {
 }
 
 impl Ramp {
-    fn at(value: f32) -> Self {
+    pub(crate) fn at(value: f32) -> Self {
         Self {
             value,
             target: value,
@@ -188,7 +190,7 @@ impl Ramp {
         }
     }
 
-    fn towards(&mut self, target: f32, frames: u32) {
+    pub(crate) fn towards(&mut self, target: f32, frames: u32) {
         self.target = target;
         self.remaining = frames;
         if frames == 0 {
@@ -200,8 +202,12 @@ impl Ramp {
     }
 
     /// The gain for the next frame.
+    pub(crate) fn target(&self) -> f32 {
+        self.target
+    }
+
     #[inline]
-    fn next(&mut self) -> f32 {
+    pub(crate) fn next(&mut self) -> f32 {
         if self.remaining > 0 {
             self.remaining -= 1;
             self.value = if self.remaining == 0 {
@@ -213,7 +219,7 @@ impl Ramp {
         self.value
     }
 
-    fn is_silent(&self) -> bool {
+    pub(crate) fn is_silent(&self) -> bool {
         self.remaining == 0 && self.value == 0.0
     }
 }
@@ -386,6 +392,7 @@ pub struct Mixer {
     /// The voices' reverb sends for the current chunk, stereo interleaved.
     bus: Vec<f32>,
     reverb: Reverb,
+    ambience: Ambience,
     /// Frames the reverb keeps running for without new input.
     reverb_tail: u32,
     reverb_remaining: u32,
@@ -412,6 +419,7 @@ impl Mixer {
             master: Ramp::at(1.0),
             bus: vec![0.0; CHUNK_FRAMES * 2],
             reverb: Reverb::new(rate),
+            ambience: Ambience::new(rate, 0x0110),
             reverb_tail: (REVERB_TAIL_SECONDS * rate as f32) as u32,
             reverb_remaining: 0,
             output_peaks: [0.0; 2],
@@ -449,6 +457,10 @@ impl Mixer {
                 voice.mix(out, bus, channels);
             }
         }
+
+        // The ambience, under everything, quieter while anything plays.
+        let sounding = self.voices.iter().flatten().any(|voice| !voice.finished);
+        self.ambience.render(out, bus, channels, sounding);
 
         if bus.iter().any(|&sample| sample != 0.0) {
             self.reverb_remaining = self.reverb_tail;
@@ -545,6 +557,7 @@ impl Mixer {
                     voice.stop(frames);
                 }
             }
+            Message::Ambience(settings) => self.ambience.set(settings),
             Message::MasterGain { gain } => {
                 let frames = self.declick;
                 self.master.towards(gain.max(0.0), frames);

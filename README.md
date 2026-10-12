@@ -60,6 +60,17 @@ Milestone 0, the playable skeleton, is done. Olio can:
   panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit touch screens and reading
   from across a room. ⇧⌘T (Ctrl+Shift+T) steps through Compact, Regular
   and Large.
+- **Ambience.** A quiet, endless bed behind your sounds, made up as it
+  goes (⇧⌘B, Playback ▸ Ambience): weather (rain, wind or a winter
+  wind) and up to six instruments, a plucked bass, a harp, bells,
+  strings, a pad and a drone, each with its own level, density and
+  register, playing in a key you choose from the seven church modes,
+  pentatonics, harmonic minor or whole tone. Presence runs from
+  *Background* (barely there) to *Declarative* (louder, on a slow pulse,
+  with cadences); the form is endless or pieces of a set length that
+  close on the root and pause. Styles such as Rain Study, Winter Hush,
+  Cathedral and Affirmation fill it all in; touch anything and it is
+  yours. It ducks while sounds play and never gets near their level.
 - **Find your way.** Menus list every command with its shortcut (Help ▸
   Keyboard Shortcuts has them all), written the way the platform writes
   them.

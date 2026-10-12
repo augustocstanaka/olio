@@ -28,6 +28,9 @@ pub enum MenuAction {
     PolishSet,
     /// Open the window that edits the Polish preset.
     EditPolish,
+    /// The generated bed behind the sounds, on or off.
+    ToggleAmbience,
+    EditAmbience,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
     /// Copy the selected tile into the next free slot.
@@ -99,6 +102,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
         KeyboardShortcut::new(CMD, Key::P),
     ),
     (MenuAction::ChooseEmoji, KeyboardShortcut::new(CMD, Key::E)),
+    (
+        MenuAction::ToggleAmbience,
+        KeyboardShortcut::new(CMD_SHIFT, Key::B),
+    ),
     (
         MenuAction::Wider,
         KeyboardShortcut::new(CMD, Key::CloseBracket),
@@ -420,6 +427,21 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 &mut actions,
             );
             ui.separator();
+            toggle(
+                ui,
+                "Ambience",
+                state.prefs.ambience.enabled,
+                MenuAction::ToggleAmbience,
+                &mut actions,
+            );
+            item(
+                ui,
+                "Ambience Settings…",
+                MenuAction::EditAmbience,
+                true,
+                &mut actions,
+            );
+            ui.separator();
             item(
                 ui,
                 "Polish Preset…",
@@ -643,6 +665,7 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (MenuAction::StopAll, "Stop all sounds"),
                         (MenuAction::FadeAll, "Fade all sounds out"),
                         (MenuAction::ToggleMute, "Mute or unmute"),
+                        (MenuAction::ToggleAmbience, "The ambience on or off"),
                         (MenuAction::PlaySelected, "Play or stop the selected tile"),
                         (MenuAction::Move(Direction::Up), "Select the tile above"),
                         (MenuAction::Move(Direction::Down), "Select the tile below"),

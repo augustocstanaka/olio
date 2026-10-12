@@ -38,7 +38,9 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    `Clip`s, computes their peaks, audible region, loudness (for
    Normalize) and spectrogram (`spectrum.rs`), and wakes the UI.
 3. **The audio thread** belongs to the output device (cpal). It calls
-   `Mixer::render` for every buffer.
+   `Mixer::render` for every buffer. The mixer also runs the ambience
+   (`ambience/`): its composer plans notes a buffer at a time and its
+   synth renders them under the voices, ducked while any voice plays.
 
 The UI and audio threads share no locks. The engine sends `Message`s to the
 mixer over a wait-free ring buffer (`rtrb`); the mixer sends `Event`s back

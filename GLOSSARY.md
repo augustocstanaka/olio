@@ -138,6 +138,21 @@ The level of the whole mix, with a mute; a preference, not part of the
 library.
 _Avoid_: main volume, output level
 
+**Ambience**:
+The generated bed behind the sounds: weather and instruments playing in a
+scale, made up as it goes on the audio thread. Not a sound or a tile;
+never recorded.
+_Avoid_: background music (as a name), soundtrack, loop
+
+**Style**:
+A named preset of ambience settings (Rain Study, Cathedral…). Picking one
+fills everything in; changing anything makes the settings Custom.
+_Avoid_: preset (that is Polish), theme
+
+**Presence**:
+How noticeable the ambience is: Background, Ambient or Declarative.
+_Avoid_: intensity, volume (that is level)
+
 **Bubble**:
 A playing tile's button in the toolbar, which stops it.
 _Avoid_: chip, badge

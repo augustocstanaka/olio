@@ -19,6 +19,12 @@ pieces:
   raised with `fetch_max` and taken with `swap`, so no peak between two
   reads is lost and neither side waits).
 
+The ambience bed is synthesised in the mixer rather than played from
+files: everything it needs (delay lines, voice pools, noise filters) is
+allocated when the mixer is built, its composer plans with fixed-size
+queues, and settings arrive as one `Message::Ambience` value. The mixing
+rules apply to it unchanged.
+
 Sounds are decoded fully into memory (`Clip`, interleaved `f32` at the
 file's rate) on a background thread before they are played, so starting a
 voice costs nothing but a queue push. Voices resample on the fly
