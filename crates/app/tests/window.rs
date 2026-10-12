@@ -892,12 +892,12 @@ fn the_ambience_switches_on_with_a_shortcut_and_can_be_heard_on_the_meter() {
         "the bed can be heard"
     );
 
-    harness.key_press_modifiers(
-        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-        egui::Key::B,
-    );
+    // Its bubble in the toolbar switches it off.
+    harness.get_by_label("■ Rain Study").click();
     harness.run_steps(2);
     harness.get_by_label("Ambience off");
+    assert!(!harness.state().preferences().ambience.enabled);
+    assert_eq!(harness.query_all_by_label("■ Rain Study").count(), 0);
 }
 
 #[test]

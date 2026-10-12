@@ -14,7 +14,7 @@ use egui::{
     Align, CornerRadius, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo,
     WidgetType,
 };
-use olio_audio::{Engine, Mixer, PlayOptions, VoiceId};
+use olio_audio::{Engine, Mixer, PlayOptions, VoiceId, Weather};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{
     Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, Tile, TileColor, TileId,
@@ -1721,8 +1721,46 @@ impl OlioApp {
                 })
                 .collect();
             playing.sort_by(|a, b| a.0.cmp(b.0));
-            if playing.is_empty() {
+            let ambience = &self.prefs.ambience;
+            if playing.is_empty() && !ambience.enabled {
                 ui.weak("Nothing playing");
+            }
+            if ambience.enabled {
+                // The ambience's own bubble: its weather and style; a click
+                // switches it off.
+                let emoji = match ambience.weather {
+                    Weather::Rain => "🌧️",
+                    Weather::Wind => "🌬️",
+                    Weather::Winter => "❄️",
+                    Weather::None => "🎵",
+                };
+                let color = ui.visuals().weak_text_color();
+                let text = RichText::new(format!("■ {}", ambience.describe())).color(color);
+                let bubble = match self.images.texture(ui.ctx(), emoji) {
+                    Some(texture) => {
+                        let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
+                            texture,
+                            egui::vec2(16.0, 16.0),
+                        ));
+                        let stop = RichText::new("■").color(color);
+                        let name = RichText::new(ambience.describe()).color(color);
+                        egui::Button::new((stop, picture, name))
+                    }
+                    None => egui::Button::new(text),
+                }
+                .fill(ui.visuals().faint_bg_color);
+                if ui
+                    .add(bubble)
+                    .on_hover_text(format!(
+                        "Ambience: {}, {}. Click to switch it off ({}).",
+                        ambience.weather.name().to_lowercase(),
+                        ambience.scale.name(),
+                        menu::shortcut_text(ui.ctx(), MenuAction::ToggleAmbience)
+                    ))
+                    .clicked()
+                {
+                    actions.push(MenuAction::ToggleAmbience);
+                }
             }
             for (title, color, id, emoji) in playing {
                 let text = RichText::new(format!("■ {title}")).color(palette::strong(color, dark));
