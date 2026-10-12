@@ -1,12 +1,17 @@
 //! Decides what the instruments play and when, without making a sound.
 //!
 //! A slow harmony (a chord degree of the scale) underlies everything: the
-//! bass and strings lean on it, the harp and bells mostly touch its tones,
-//! the pad voices it. Declarative presence puts the notes on a pulse and
-//! walks a cadence; the other presences drift. Pieces have an intro, a
-//! close that thins out and lands on the root, and a pause.
+//! bass and strings lean on it, the harp, piano, violin and bells mostly
+//! touch its tones, the pad voices it, the frame drum keeps to the root.
+//! Declarative presence puts the notes on a pulse and walks a cadence; the
+//! other presences drift. Pieces have an intro, a close that thins out and
+//! lands on the root, and a pause.
 
 use super::{AmbienceSettings, Form, Instrument, Rng};
+
+/// The note the drums play for a shaker. Any lower note is a frame drum
+/// tuned to it.
+pub const SHAKER: u8 = 120;
 
 /// One note for an instrument.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,7 +47,7 @@ fn frames(rate: u32, seconds: f32) -> u64 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
     Playing,
-    /// Weather only, until this frame.
+    /// The background only, until this frame.
     Pausing(u64),
 }
 
@@ -56,10 +61,13 @@ pub struct Composer {
     queue: [Option<Event>; QUEUE],
     queued: usize,
     /// When each instrument next plays, by [`Instrument::ALL`] index.
-    next: [u64; 6],
+    next: [u64; Instrument::COUNT],
     /// The harp's last scale degree and how many notes of a phrase are left.
     harp_degree: i32,
     phrase_left: u8,
+    /// The piano's and violin's last scale degrees.
+    piano_degree: i32,
+    violin_degree: i32,
     /// The harmony: a chord on this scale degree, until this frame.
     chord: i32,
     next_harmony: u64,
@@ -91,9 +99,11 @@ impl Composer {
             started: false,
             queue: [None; QUEUE],
             queued: 0,
-            next: [0; 6],
+            next: [0; Instrument::COUNT],
             harp_degree: 4,
             phrase_left: 0,
+            piano_degree: 4,
+            violin_degree: 2,
             chord: 0,
             next_harmony: 0,
             cadence_step: 0,
@@ -130,6 +140,8 @@ impl Composer {
         self.next_harmony = now + self.harmony_span(settings);
         self.harp_degree = 4;
         self.phrase_left = 0;
+        self.piano_degree = 4;
+        self.violin_degree = 2;
         self.home = false;
         self.ended_on_root = false;
         for instrument in Instrument::ALL {
@@ -358,23 +370,40 @@ impl Composer {
                 Instrument::Bells => self.bells(settings, at, spacing),
                 Instrument::Strings => self.strings(settings, at, spacing),
                 Instrument::Pad => self.pad(settings, at, spacing),
+                Instrument::Piano => self.piano(settings, at, spacing),
+                Instrument::Violin => self.violin(settings, at, spacing),
+                Instrument::Drums => self.drums(settings, at, spacing),
                 Instrument::Drone => 0,
             };
             self.next[index] = at + next_gap.max(1);
         }
     }
 
-    /// The next beat at or after `at`; the harp may fall on the half beat.
+    /// The next beat at or after `at`; the harp, violin and drums may
+    /// fall on the half beat.
     fn on_pulse(&self, settings: &AmbienceSettings, at: u64, instrument: Instrument) -> u64 {
-        let beat = self.beat(settings).max(1);
-        let grid = if instrument == Instrument::Harp {
-            (beat / 2).max(1)
-        } else {
-            beat
-        };
+        let grid = Self::grid(self.beat(settings), instrument);
         let since = at.saturating_sub(self.origin);
         let steps = since.div_ceil(grid);
         self.origin + steps * grid
+    }
+
+    /// The finest step an instrument keeps to on the pulse.
+    fn grid(beat: u64, instrument: Instrument) -> u64 {
+        match instrument {
+            Instrument::Harp | Instrument::Violin | Instrument::Drums => (beat / 2).max(1),
+            _ => beat.max(1),
+        }
+    }
+
+    /// How long after a note its answer comes: half a beat on the pulse,
+    /// else a moment.
+    fn answer(&mut self, settings: &AmbienceSettings, low: f32, high: f32) -> u64 {
+        if settings.presence.pulsed() {
+            (self.beat(settings) / 2).max(1)
+        } else {
+            frames(self.rate, self.rng.range(low, high))
+        }
     }
 
     fn note(
@@ -478,6 +507,75 @@ impl Composer {
         )
     }
 
+    /// A struck note, mostly a chord tone, else a step from the last; a
+    /// third or a sixth below it now and then, softer.
+    fn piano(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
+        let len = settings.scale.degrees();
+        let degree = if self.rng.chance(0.55) {
+            let tones = [0, 2, 4, len];
+            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
+        } else {
+            let step = [-2, -1, 1, 2][self.rng.below(4) as usize];
+            self.piano_degree + step
+        };
+        self.piano_degree = degree.clamp(0, 2 * len);
+        let midi = settings.note(Instrument::Piano, self.piano_degree);
+        let velocity = self.rng.range(0.3, 0.65);
+        let pan = self.rng.range(-0.35, 0.35);
+        self.note(at, Instrument::Piano, midi, velocity, pan, 0);
+        if self.rng.chance(0.3) {
+            let below = [2, 5][self.rng.below(2) as usize];
+            let low = settings.note(Instrument::Piano, self.piano_degree - below);
+            self.note(at, Instrument::Piano, low, velocity * 0.7, pan - 0.1, 0);
+        }
+        frames(self.rate, spacing * self.rng.range(0.5, 1.7))
+    }
+
+    /// A short pluck high up on a chord tone or a step away; a quarter of
+    /// the time a neighbour answers it.
+    fn violin(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
+        let len = settings.scale.degrees();
+        let degree = if self.rng.chance(0.6) {
+            let tones = [0, 2, 4, len, len + 2];
+            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
+        } else {
+            let step = [-2, -1, 1, 2][self.rng.below(4) as usize];
+            self.violin_degree + step
+        };
+        self.violin_degree = degree.clamp(0, 2 * len);
+        let midi = settings.note(Instrument::Violin, self.violin_degree);
+        let velocity = self.rng.range(0.35, 0.7);
+        let pan = self.rng.range(-0.5, 0.5);
+        self.note(at, Instrument::Violin, midi, velocity, pan, 0);
+        if self.rng.chance(0.25) {
+            let step = if self.rng.chance(0.5) { 1 } else { -1 };
+            let answer = settings.note(Instrument::Violin, (self.violin_degree + step).max(0));
+            let later = at + self.answer(settings, 0.25, 0.4);
+            self.note(later, Instrument::Violin, answer, velocity * 0.8, pan, 0);
+        }
+        frames(self.rate, spacing * self.rng.range(0.5, 1.8))
+    }
+
+    /// A soft frame drum on the root, or a shaker; now and then two
+    /// together, the second half a beat later.
+    fn drums(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
+        let pan = self.rng.range(-0.3, 0.3);
+        if self.rng.chance(0.55) {
+            let midi = settings.note(Instrument::Drums, 0);
+            let velocity = self.rng.range(0.4, 0.75);
+            self.note(at, Instrument::Drums, midi, velocity, pan, 0);
+        } else {
+            let velocity = self.rng.range(0.25, 0.5);
+            self.note(at, Instrument::Drums, SHAKER, velocity, pan * 2.0, 0);
+        }
+        if self.rng.chance(0.3) {
+            let later = at + self.answer(settings, 0.3, 0.5);
+            let velocity = self.rng.range(0.2, 0.4);
+            self.note(later, Instrument::Drums, SHAKER, velocity, -pan, 0);
+        }
+        frames(self.rate, spacing * self.rng.range(0.7, 1.8))
+    }
+
     /// The chord as three slow notes, a little staggered.
     fn pad(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let seconds = self.rng.range(12.0, 22.0);
@@ -497,7 +595,7 @@ impl Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Density, Layer, Presence, Scale, ScaleKind, Style, Weather};
+    use super::super::{Background, Density, Layer, Presence, Scale, ScaleKind, Style};
     use super::*;
 
     /// Every event in `minutes` of music, in order.
@@ -544,6 +642,9 @@ mod tests {
         );
         for event in &events {
             let note = event.note;
+            if note.instrument == Instrument::Drums && note.midi == SHAKER {
+                continue;
+            }
             assert!(
                 settings.scale.contains(note.midi),
                 "{} is not in {}",
@@ -561,6 +662,15 @@ mod tests {
         assert!(span(Instrument::Bass).1 <= 60, "bass stays low");
         assert!(span(Instrument::Harp).0 >= 60, "harp stays high");
         assert!(span(Instrument::Bells).0 >= 72, "bells higher still");
+        assert!(span(Instrument::Violin).0 >= 60, "the violin plays high");
+        let piano = span(Instrument::Piano);
+        assert!(piano.0 >= 40 && piano.1 <= 90, "the piano in the middle");
+        assert!(
+            of(&events, Instrument::Drums)
+                .iter()
+                .all(|e| e.note.midi == SHAKER || e.note.midi % 12 == settings.scale.root),
+            "the frame drum keeps to the root"
+        );
         assert_eq!(
             span(Instrument::Drone),
             (29, 29),
@@ -601,17 +711,19 @@ mod tests {
         settings.enabled = true;
         settings.form = Form::Endless;
         settings.tempo = 60;
+        for instrument in [Instrument::Violin, Instrument::Drums, Instrument::Piano] {
+            *settings.layer_mut(instrument) = Layer::on(0.6, Density::Lively);
+        }
         let events = play(&settings, 5, 2);
+        for instrument in [Instrument::Violin, Instrument::Drums, Instrument::Piano] {
+            assert!(!of(&events, instrument).is_empty(), "{instrument:?} plays");
+        }
         let beat = 48_000u64;
         for event in &events {
             if event.note.instrument == Instrument::Pad {
                 continue; // staggered on purpose
             }
-            let grid = if event.note.instrument == Instrument::Harp {
-                beat / 2
-            } else {
-                beat
-            };
+            let grid = Composer::grid(beat, event.note.instrument);
             assert_eq!(
                 event.at % grid,
                 0,
@@ -634,7 +746,7 @@ mod tests {
     fn a_piece_opens_with_the_pad_closes_on_the_root_and_pauses() {
         let mut settings = Style::Affirmation.settings();
         settings.enabled = true;
-        settings.weather = Weather::None;
+        settings.background = Background::None;
         settings.form = Form::Piece {
             minutes: 1.0,
             pause_seconds: 10.0,
@@ -665,6 +777,25 @@ mod tests {
         let pause = piece_end..piece_end + rate * 10;
         assert!(!events.iter().any(|e| pause.contains(&e.at)));
         assert!(events.iter().any(|e| e.at > pause.end + rate));
+    }
+
+    #[test]
+    fn drums_are_very_sparse_and_drift_off_the_beat_without_a_pulse() {
+        let mut settings = Style::Campfire.settings();
+        settings.enabled = true;
+        let events = play(&settings, 4, 3);
+        let drums = of(&events, Instrument::Drums);
+        // Sparse, at the Ambient presence: a hit every ten seconds or more.
+        assert!(
+            (3..=40).contains(&drums.len()),
+            "{} hits in three minutes",
+            drums.len()
+        );
+        let beat = 48_000u64;
+        assert!(
+            drums.iter().any(|e| e.at % (beat / 2) != 0),
+            "free time, not on a grid"
+        );
     }
 
     #[test]

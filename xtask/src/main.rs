@@ -16,6 +16,8 @@ usage: cargo xtask <command>
   check          lint, test, and import the demo board headlessly (what CI runs)
   demo [DIR]     write a demo sound pack and board to DIR (default target/demo)
                  and import it into DIR/library
+  previews [DIR] render 30 s of each Generator style to a WAV in DIR
+                 (default target/previews), to listen to without the app
   run [args...]  build the app and run a copy of it, passing args through:
                    cargo xtask run --library target/demo/library
                    cargo xtask run --screenshot out.png --library target/demo/library
@@ -33,6 +35,21 @@ fn main() -> ExitCode {
                 .get(1)
                 .map_or_else(|| target_dir().join("demo"), PathBuf::from);
             build_app_copy().and_then(|app| demo_library(&app, &dir))
+        }
+        Some("previews") => {
+            let dir = args
+                .get(1)
+                .map_or_else(|| target_dir().join("previews"), PathBuf::from);
+            build_app_copy().and_then(|app| {
+                run(
+                    &app,
+                    &[
+                        "generate".to_owned(),
+                        "--out".to_owned(),
+                        dir.display().to_string(),
+                    ],
+                )
+            })
         }
         Some("run") => build_app_copy().and_then(|app| run(&app, &args[1..])),
         _ => {

@@ -10,10 +10,12 @@ and UI text.
 - `crates/audio` (`olio-audio`): decoding (`clip.rs`), waveform peaks,
   the real-time `mixer.rs` (voices, fades, regions, reverb send), the
   `reverb.rs` effect, `spectrum.rs` (FFT and spectrograms), `ambience/`
-  (the generated bed: `mod.rs` settings, scales and styles,
+  (the Generator's music: `mod.rs` settings, scales and styles,
   `composer.rs` what plays when, `synth.rs` the instruments,
-  `weather.rs`), and `engine.rs` (the app's handle on the mixer plus
-  the cpal output stream). No UI or library dependency.
+  `background.rs` rain, waves, fire and the rest, `dsp.rs` shared
+  filters, `track.rs` rendering a track offline), and `engine.rs` (the
+  app's handle on the mixer plus the cpal output stream). No UI or
+  library dependency.
 - `crates/library` (`olio-library`): `model.rs` (Library, Set, Tile,
   Sound, Slot), `store.rs` (the library directory, imports, lock file),
   `manifest.rs` (board JSON), `folder.rs` (natural-order listings). No UI
@@ -24,14 +26,14 @@ and UI text.
   `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
-  `polish.rs` the Polish Preset window, `ambience.rs` the Ambience
-  window, `meter.rs` level meters,
+  `polish.rs` the Polish Preset window, `generator.rs` the Generator
+  panel and the thread that generates tracks, `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
   redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless
-  `olio import`), `clips.rs` background decoding.
+  `olio import` and `olio generate`), `clips.rs` background decoding.
 - `xtask/`: the `cargo xtask` commands below; `demo.rs` synthesises the
   demo pack.
 - `docs/ARCHITECTURE.md`: threads, data flow, where a feature goes.
@@ -51,7 +53,8 @@ and UI text.
   `cargo xtask check` on Windows and macOS.
 - `cargo xtask run [args]` to try the app (runs a copy of the binary, so
   you can rebuild while a window is open). `cargo xtask demo` builds a demo
-  library to open with `--library target/demo/library`.
+  library to open with `--library target/demo/library`. `cargo xtask
+  previews` renders 30 s of each Generator style to `target/previews/`.
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
   in both themes and both tile styles to `target/screenshots/`; use it
   for visual changes, and copy the results to `docs/images/` when they

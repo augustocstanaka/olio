@@ -40,10 +40,15 @@ are intentions, reordered as real use dictates.
   there in the same slot if free, or copied; held there, the set opens
   for a drop on a chosen slot), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
-- **Ambience**: a generated bed (weather, bass, harp, bells, strings,
-  pad, drone) in a chosen scale, with styles, presence, endless or
-  pieces, synthesised on the audio thread without allocation; a
-  `SetAmbience` command for control surfaces.
+- **Generator**: gentle music made up as it goes, in a panel in place of
+  the inspector (⇧⌘G): a background (rain, thunder, wind, winter, waves,
+  forest, desert, fire) and nine instruments (bass, harp, bells,
+  strings, pad, drone, piano, plucked violin, hand drums) in a chosen
+  mode or scale, with styles, presence, endless or pieces. It plays live
+  as the ambience, synthesised on the audio thread without allocation (a
+  `SetAmbience` command for control surfaces), and generates tracks of
+  30 s to 10 min onto tiles, undoable; `olio generate` and `cargo xtask
+  previews` render the styles to WAV files.
 - **Grid size**: columns per set (⌘] / ⌘[, Fit to Window ⌘\\, Set ▸
   Columns, the inspector), never narrower than the tiles allow, undoable; Compact,
   Regular and Large tile sizes.

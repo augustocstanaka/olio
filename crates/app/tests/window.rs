@@ -900,55 +900,145 @@ fn the_ambience_switches_on_with_a_shortcut_and_can_be_heard_on_the_meter() {
     assert_eq!(harness.query_all_by_label("■ Rain Study").count(), 0);
 }
 
+fn open_generator(harness: &mut Harness<'static, OlioApp>) {
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::G,
+    );
+    harness.run_steps(3);
+    assert!(harness.state().preferences().show_generator);
+}
+
+/// Clicks a control in the Generator, scrolling to it first.
+fn click_in_generator(harness: &mut Harness<'static, OlioApp>, label: &str) {
+    harness.get_by_label(label).scroll_to_me();
+    harness.run_steps(3);
+    harness.get_by_label(label).click();
+    harness.run_steps(2);
+}
+
 #[test]
-fn the_ambience_window_picks_styles_and_a_touch_makes_them_custom() {
+fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
+    use olio_audio::ambience::{Background, Form, Instrument};
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
-    harness.get_by_label("Playback").click();
-    harness.run_steps(2);
-    harness.get_by_label_contains("Ambience Settings…").click();
-    harness.run_steps(10);
-    harness.get_by_label("Cathedral").click();
-    harness.run_steps(2);
+    open_generator(&mut harness);
+    harness.get_by_label("Generate Track");
+
+    click_in_generator(&mut harness, "Cathedral");
     let settings = harness.state().preferences().ambience;
     assert_eq!(settings.describe(), "Cathedral");
-    assert!(
-        settings
-            .layer(olio_audio::ambience::Instrument::Drone)
-            .enabled
-    );
-    assert!(
-        !settings
-            .layer(olio_audio::ambience::Instrument::Harp)
-            .enabled
-    );
+    assert!(settings.layer(Instrument::Drone).enabled);
+    assert!(!settings.layer(Instrument::Harp).enabled);
 
-    harness.get_by_label("Instruments").click();
-    harness.run_steps(2);
-    harness.get_by_label("Harp").click();
-    harness.run_steps(2);
+    click_in_generator(&mut harness, "Harp");
     let settings = harness.state().preferences().ambience;
-    assert!(
-        settings
-            .layer(olio_audio::ambience::Instrument::Harp)
-            .enabled
-    );
+    assert!(settings.layer(Instrument::Harp).enabled);
     assert_eq!(settings.describe(), "Custom: G Aeolian");
     harness.get_by_label("Custom");
 
-    harness.get_by_label("Presence").click();
-    harness.run_steps(2);
-    harness.get_by_label("Declarative").click();
-    harness.run_steps(2);
+    click_in_generator(&mut harness, "Waves");
+    assert_eq!(
+        harness.state().preferences().ambience.background,
+        Background::Waves
+    );
+    click_in_generator(&mut harness, "Piano");
+    assert!(
+        harness
+            .state()
+            .preferences()
+            .ambience
+            .layer(Instrument::Piano)
+            .enabled
+    );
+    click_in_generator(&mut harness, "Declarative");
     harness.get_by_label("Pulse");
-    harness.get_by_label("Form").click();
-    harness.run_steps(2);
-    harness.get_by_label("Pieces").click();
-    harness.run_steps(2);
+    click_in_generator(&mut harness, "Pieces");
     assert!(matches!(
         harness.state().preferences().ambience.form,
-        olio_audio::ambience::Form::Piece { .. }
+        Form::Piece { .. }
     ));
+}
+
+#[test]
+fn the_generator_takes_the_inspectors_place_and_gives_it_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Tense").click();
+    harness.run_steps(2);
+    harness.get_by_label("Trim silence");
+
+    // The Generator button in the status bar.
+    harness.get_by_label("Generator").click();
+    harness.run_steps(3);
+    assert!(harness.state().preferences().show_generator);
+    assert_eq!(harness.query_all_by_label("Trim silence").count(), 0);
+    harness.get_by_label("Generate Track");
+
+    // The Inspector button in the status bar brings the inspector back.
+    harness.get_by_label("Inspector").click();
+    harness.run_steps(3);
+    assert!(!harness.state().preferences().show_generator);
+    harness.get_by_label("Trim silence");
+}
+
+#[test]
+fn a_generated_track_lands_on_a_tile_and_undo_takes_it_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    harness.get_by_label("30 s").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().preferences().track_seconds, 30);
+    harness.get_by_label("Generate Track").click();
+    harness.run_steps(2);
+    assert!(harness.state().is_generating());
+    // The status says so, and the panel shows how far it has got.
+    harness.get_by_label("Generating “Rain Study 30 s”…");
+    harness.get_by_label("Cancel");
+
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while harness.state().is_generating() {
+        assert!(Instant::now() < deadline, "the track never finished");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.run_steps(3);
+    harness.get_by_label("Generated “Rain Study 30 s”");
+    let tile = harness
+        .state()
+        .selected_tile()
+        .expect("the new tile, selected");
+    assert_eq!(tile.title, "Rain Study 30 s");
+    assert_eq!(tile.emoji, "🌧️");
+    assert_eq!(harness.state().current_set_name(), "Show");
+    harness.get_by_label("Rain Study 30 s");
+
+    // It plays like any sound, once decoded.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while harness.state().is_loading() {
+        assert!(Instant::now() < deadline, "the track never loaded");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.get_by_label("Rain Study 30 s").click();
+    harness.run_steps(1);
+    harness.get_by_label("Rain Study 30 s").click();
+    harness.run_steps(30);
+    assert_eq!(harness.state().playing_titles(), ["Rain Study 30 s"]);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Escape);
+    harness.run_steps(2);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Rain Study 30 s").count(), 0);
+    harness.get_by_label("Removed the track “Rain Study 30 s”");
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    harness.run_steps(2);
+    harness.get_by_label("Rain Study 30 s");
 }
 
 /// Steps for a little longer than a dragged tile must be held over a set
@@ -1134,17 +1224,17 @@ fn render_the_window_to_a_png() {
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-large.png")).unwrap();
 
-    // The Ambience window, on Affirmation.
+    // The Generator, on Seaside Piano, playing live.
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), true);
-    harness.get_by_label("Playback").click();
+    open_generator(&mut harness);
+    harness.get_by_label("Seaside Piano").click();
     harness.run_steps(2);
-    harness.get_by_label_contains("Ambience Settings…").click();
-    harness.run_steps(10);
-    harness.get_by_label("Affirmation").click();
-    harness.run_steps(2);
-    harness.get_by_label("Instruments").click();
-    harness.run_steps(10);
+    harness.get_by_label("Play live").click();
+    harness.run_steps(5);
+    // Down to the backgrounds and instruments.
+    harness.get_by_label("Bass").scroll_to_me();
+    harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
-    image.save(out.join("window-ambience.png")).unwrap();
+    image.save(out.join("window-generator.png")).unwrap();
 }

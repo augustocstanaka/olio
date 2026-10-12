@@ -14,6 +14,11 @@ raised buttons that press in while they play:
 
 ![Soft tiles: raised at rest, pressed in while playing](docs/images/window-soft-light.png)
 
+The Generator makes gentle music and backgrounds, live or as tracks on
+tiles:
+
+![The Generator panel: a background of waves, a piano, a drone and a bass in D Lydian](docs/images/window-generator.png)
+
 > *Olio* is a medley, the same meaning as *farrago*.
 
 ## Status
@@ -60,17 +65,29 @@ Milestone 0, the playable skeleton, is done. Olio can:
   panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit touch screens and reading
   from across a room. ⇧⌘T (Ctrl+Shift+T) steps through Compact, Regular
   and Large.
-- **Ambience.** A quiet, endless bed behind your sounds, made up as it
-  goes (⇧⌘B, Playback ▸ Ambience): weather (rain, wind or a winter
-  wind) and up to six instruments, a plucked bass, a harp, bells,
-  strings, a pad and a drone, each with its own level, density and
-  register, playing in a key you choose from the seven church modes,
-  pentatonics, harmonic minor or whole tone. Presence runs from
-  *Background* (barely there) to *Declarative* (louder, on a slow pulse,
-  with cadences); the form is endless or pieces of a set length that
-  close on the root and pause. Styles such as Rain Study, Winter Hush,
-  Cathedral and Affirmation fill it all in; touch anything and it is
-  yours. It ducks while sounds play and never gets near their level.
+- **Generate gentle music.** The Generator (⇧⌘G, or the Generator
+  button in the status bar) makes up sparse, quiet music as it goes, in
+  place of the inspector:
+  - **a background**: rain, distant thunder, wind, a winter wind, waves
+    on a shore, a forest with a bird now and then, a desert wind, or a
+    crackling fire;
+  - **up to nine instruments**: a plucked bass, a harp, bells, bowed
+    strings, a pad, a drone, a piano, a plucked violin and soft hand
+    drums (a frame drum and a shaker), each with its own level, density
+    and register;
+  - **a key** from the seven Greek (church) modes, pentatonics, harmonic
+    minor or whole tone;
+  - **presence**, from *Background* (barely there) to *Declarative*
+    (louder, on a slow pulse, with cadences), and **form**: endless, or
+    pieces that close on the root and pause.
+
+  Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
+  Desert Night and Storm Watch fill it all in; touch anything and it is
+  yours. Play it live behind your sounds as the ambience (⇧⌘B, or
+  Playback ▸ Ambience): it ducks while sounds play and never gets near
+  their level. Or press Generate Track to render 30 s to 10 min of it
+  into the library onto a tile, titled after its style and length, to
+  play, loop and polish like any sound; ⌘Z takes it off again.
 - **Find your way.** Menus list every command with its shortcut (Help ▸
   Keyboard Shortcuts has them all), written the way the platform writes
   them.
@@ -89,6 +106,8 @@ Milestone 0, the playable skeleton, is done. Olio can:
   MOV, M4V, MKV) are imported as their audio track.
 - **Script boards.** `olio import board.json` builds sets from a JSON file
   without opening a window; see [docs/BOARD-JSON.md](docs/BOARD-JSON.md).
+  `olio generate --style "Rain Study" --seconds 120` renders Generator
+  styles to WAV files the same way.
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 
@@ -120,6 +139,13 @@ cargo xtask run --library target/demo/library --set "Demo Board"
 `cargo xtask run` builds the app and runs a copy of the binary, so it can be
 rebuilt while a window is open (Windows locks a running executable).
 
+To hear the Generator's styles without opening the app, render 30 s of
+each to `target/previews/`:
+
+```bash
+cargo xtask previews
+```
+
 ## Your library
 
 Olio keeps everything in one folder: `~/Library/Application Support/Olio`
@@ -132,8 +158,8 @@ the `OLIO_LIBRARY` environment variable.
   contents, so moving or deleting the originals breaks nothing and a sound
   used twice is stored once.
 - `preferences.ron` remembers the window's size and position, the panel
-  widths, the theme and tile style, the master volume, the Polish preset
-  and which panels are shown.
+  widths, the theme and tile style, the master volume, the Polish preset,
+  the Generator's settings and which panels are shown.
 
 ## Development
 
@@ -151,7 +177,7 @@ Windows. Enable the pre-commit hook once per clone with
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
 offscreen in both themes and both tile styles to `target/screenshots/`
 (`window.png`, `window-light.png`, `window-soft.png`,
-`window-soft-light.png`).
+`window-soft-light.png`, and the Generator in `window-generator.png`).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

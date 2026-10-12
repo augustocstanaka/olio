@@ -138,15 +138,32 @@ The level of the whole mix, with a mute; a preference, not part of the
 library.
 _Avoid_: main volume, output level
 
+**Generator**:
+The panel, in place of the inspector, where gentle music is made up: a
+key, a background, instruments, presence and form. It plays the
+ambience live and generates tracks.
+_Avoid_: composer (that is the code that picks the notes), synth
+
 **Ambience**:
-The generated bed behind the sounds: weather and instruments playing in a
-scale, made up as it goes on the audio thread. Not a sound or a tile;
-never recorded.
+The Generator's music playing live behind the sounds, made up as it goes
+on the audio thread. Not a sound or a tile; a track is how to keep it.
 _Avoid_: background music (as a name), soundtrack, loop
 
+**Track**:
+A sound the Generator rendered into the library and put on a tile, named
+after its style and length ("Rain Study 2 min"). From then on it is a
+sound like any other.
+_Avoid_: recording, export, song
+
+**Background**:
+The sound under the generated music: rain, thunder, wind, winter, waves,
+a forest, a desert, a fire, or none.
+_Avoid_: weather (only some are), noise, ambience (that is the whole)
+
 **Style**:
-A named preset of ambience settings (Rain Study, Cathedral…). Picking one
-fills everything in; changing anything makes the settings Custom.
+A named preset of Generator settings (Rain Study, Seaside Piano,
+Campfire…). Picking one fills everything in; changing anything makes the
+settings Custom.
 _Avoid_: preset (that is Polish), theme
 
 **Presence**:

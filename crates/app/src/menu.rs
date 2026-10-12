@@ -30,7 +30,8 @@ pub enum MenuAction {
     EditPolish,
     /// The generated bed behind the sounds, on or off.
     ToggleAmbience,
-    EditAmbience,
+    /// The Generator panel, in place of the inspector, shown or hidden.
+    ToggleGenerator,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
     /// Copy the selected tile into the next free slot.
@@ -105,6 +106,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::ToggleAmbience,
         KeyboardShortcut::new(CMD_SHIFT, Key::B),
+    ),
+    (
+        MenuAction::ToggleGenerator,
+        KeyboardShortcut::new(CMD_SHIFT, Key::G),
     ),
     (
         MenuAction::Wider,
@@ -436,9 +441,9 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
             );
             item(
                 ui,
-                "Ambience Settings…",
-                MenuAction::EditAmbience,
-                true,
+                "Generator…",
+                MenuAction::ToggleGenerator,
+                !state.prefs.show_generator,
                 &mut actions,
             );
             ui.separator();
@@ -476,8 +481,15 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
             toggle(
                 ui,
                 "Inspector",
-                state.prefs.show_inspector,
+                state.prefs.show_inspector && !state.prefs.show_generator,
                 MenuAction::ToggleInspector,
+                &mut actions,
+            );
+            toggle(
+                ui,
+                "Generator",
+                state.prefs.show_generator,
+                MenuAction::ToggleGenerator,
                 &mut actions,
             );
             ui.separator();
@@ -666,6 +678,7 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (MenuAction::FadeAll, "Fade all sounds out"),
                         (MenuAction::ToggleMute, "Mute or unmute"),
                         (MenuAction::ToggleAmbience, "The ambience on or off"),
+                        (MenuAction::ToggleGenerator, "Show or hide the generator"),
                         (MenuAction::PlaySelected, "Play or stop the selected tile"),
                         (MenuAction::Move(Direction::Up), "Select the tile above"),
                         (MenuAction::Move(Direction::Down), "Select the tile below"),

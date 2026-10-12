@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use olio_audio::{AmbienceSettings, Clip, Engine, MAX_VOICES, Mixer, PlayOptions, Weather};
+use olio_audio::{AmbienceSettings, Background, Clip, Engine, MAX_VOICES, Mixer, PlayOptions};
 
 const RATE: u32 = 48_000;
 /// The mixer's shortest fade (5 ms) at `RATE`.
@@ -469,7 +469,7 @@ fn the_ambience_is_silent_until_turned_on_and_stays_quiet() {
     let full = AmbienceSettings {
         enabled: true,
         level: 1.0,
-        weather: Weather::Rain,
+        background: Background::Rain,
         ..AmbienceSettings::default()
     };
     engine.set_ambience(full);
@@ -510,7 +510,7 @@ fn the_ambience_ducks_under_a_playing_sound() {
     let settings = AmbienceSettings {
         enabled: true,
         level: 0.8,
-        weather: Weather::Wind,
+        background: Background::Wind,
         duck: true,
         ..AmbienceSettings::default()
     };

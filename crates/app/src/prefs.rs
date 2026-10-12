@@ -181,8 +181,10 @@ pub struct Preferences {
     pub theme: Theme,
     pub tile_style: TileStyle,
     pub tile_size: TileSize,
-    /// The generated bed behind the sounds.
+    /// The generated bed behind the sounds, and the Generator's settings.
     pub ambience: AmbienceSettings,
+    /// How long a generated track is, in seconds.
+    pub track_seconds: u32,
     /// Draw a spectrogram under each tile's waveform.
     pub show_spectrograms: bool,
     pub polish: Polish,
@@ -191,6 +193,8 @@ pub struct Preferences {
     pub muted: bool,
     pub show_sets: bool,
     pub show_inspector: bool,
+    /// The Generator in place of the inspector.
+    pub show_generator: bool,
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
@@ -203,12 +207,14 @@ impl Default for Preferences {
             tile_style: TileStyle::Flat,
             tile_size: TileSize::Regular,
             ambience: AmbienceSettings::default(),
+            track_seconds: crate::generator::DEFAULT_TRACK_SECONDS,
             show_spectrograms: true,
             polish: Polish::default(),
             volume: 1.0,
             muted: false,
             show_sets: true,
             show_inspector: true,
+            show_generator: false,
             click_plays: false,
         }
     }
@@ -228,6 +234,12 @@ impl Preferences {
         };
         prefs.polish = prefs.polish.clamped();
         prefs.ambience = prefs.ambience.clamped();
+        if !crate::generator::TRACK_LENGTHS
+            .iter()
+            .any(|(seconds, _)| *seconds == prefs.track_seconds)
+        {
+            prefs.track_seconds = crate::generator::DEFAULT_TRACK_SECONDS;
+        }
         prefs
     }
 
@@ -281,6 +293,46 @@ mod tests {
         assert_eq!(Polish::OFF.settings()[2], TileSetting::Reverb(0.0));
         assert_eq!(seconds(0.5), "0.5 s");
         assert_eq!(seconds(2.25), "2.25 s");
+    }
+
+    /// Preferences as one saved them before the Generator.
+    const SAVED_BEFORE_THE_GENERATOR: &str = "(theme:System,tile_style:Flat,tile_size:Regular,\
+        ambience:(enabled:true,style:Some(RainStudy),scale:(root:2,kind:Mode(Dorian)),\
+        weather:Winter,layers:((enabled:true,level:0.8,density:Sparse,register:Middle),\
+        (enabled:true,level:0.7,density:Occasional,register:Middle),\
+        (enabled:false,level:0.8,density:Sparse,register:Middle),\
+        (enabled:false,level:0.8,density:Sparse,register:Middle),\
+        (enabled:false,level:0.8,density:Sparse,register:Middle),\
+        (enabled:false,level:0.8,density:Sparse,register:Middle)),presence:Ambient,\
+        tempo:60,form:Endless,level:0.35,duck:true,seed:1),show_spectrograms:true,\
+        polish:(fade_in_seconds:1.0,fade_out_seconds:1.0,reverb:0.3),volume:0.3,muted:false,\
+        show_sets:true,show_inspector:true,click_plays:false)";
+
+    struct Saved(&'static str);
+
+    impl eframe::Storage for Saved {
+        fn get_string(&self, key: &str) -> Option<String> {
+            (key == KEY).then(|| self.0.to_owned())
+        }
+
+        fn set_string(&mut self, _key: &str, _value: String) {}
+
+        fn remove_string(&mut self, _key: &str) {}
+
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn preferences_saved_before_the_generator_load_with_their_ambience() {
+        use olio_audio::ambience::{Background, Instrument};
+        let prefs = Preferences::load(Some(&Saved(SAVED_BEFORE_THE_GENERATOR)));
+        assert_eq!(prefs.volume, 0.3, "the rest of the preferences survive");
+        assert!(prefs.ambience.enabled);
+        assert_eq!(prefs.ambience.background, Background::Winter);
+        assert!(prefs.ambience.layer(Instrument::Harp).enabled);
+        assert!(!prefs.ambience.layer(Instrument::Piano).enabled);
+        assert!(!prefs.show_generator);
+        assert_eq!(prefs.track_seconds, 120);
     }
 
     #[test]

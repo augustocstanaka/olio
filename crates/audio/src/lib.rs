@@ -1,6 +1,7 @@
 //! Olio's audio engine.
 //!
-//! - [`ambience`]: the generated weather-and-strings bed behind the sounds.
+//! - [`ambience`]: the generated bed behind the sounds (a background and
+//!   instruments in a scale), played live or rendered to a track.
 //! - [`clip`]: decode a sound file into a [`Clip`] held in memory, and write
 //!   one back out as WAV.
 //! - [`peaks`]: the waveform overview drawn on tiles.
@@ -23,7 +24,9 @@ pub mod peaks;
 pub mod reverb;
 pub mod spectrum;
 
-pub use ambience::{AmbienceSettings, Density, Mode, ROOT_NAMES, Weather};
+pub use ambience::{
+    AmbienceSettings, Background, Density, Mode, ROOT_NAMES, TRACK_RATE, render_track,
+};
 pub use clip::{
     AUDIO_EXTENSIONS, Clip, DecodeError, VIDEO_EXTENSIONS, WavFormat, decode_file, is_supported,
     is_video,

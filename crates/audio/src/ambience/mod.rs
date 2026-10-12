@@ -1,6 +1,9 @@
-//! Ambience: a quiet, endless, generated bed behind the sounds. Weather,
-//! and up to six instruments (a plucked bass, a harp, bells, strings, a
-//! pad and a drone) drawing on a scale you choose.
+//! Ambience: a quiet, endless, generated bed behind the sounds. A
+//! [`Background`] (rain, wind, waves, fire, thunder, a forest, a desert…)
+//! and up to nine instruments (a plucked bass, a harp, bells, strings, a
+//! pad, a drone, a piano, a plucked violin and soft hand drums) drawing on
+//! a scale you choose. The Generator in the app plays it live and renders
+//! it to tracks ([`render_track`]).
 //!
 //! The settings are built from independent parts, so each can grow on its
 //! own: the [`Scale`], the [`Layer`]s (one per [`Instrument`]), the
@@ -8,20 +11,27 @@
 //! with a shape), and [`Style`] presets that fill them all in.
 //!
 //! [`composer`] decides what plays when with no audio in it, so the musical
-//! rules are tested on their own; [`synth`] and [`weather`] make the sound
-//! on the audio thread, allocating nothing while rendering
+//! rules are tested on their own; [`synth`] and [`background`] make the
+//! sound on the audio thread, allocating nothing while rendering
 //! (`CODING_STANDARDS.md`).
 
+mod background;
 mod composer;
+mod dsp;
 mod synth;
-mod weather;
+mod track;
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::ops::{Index, IndexMut};
+
+use serde::de::{IgnoredAny, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::mixer::Ramp;
-pub use composer::{Composer, Event, Note};
+use background::Bed;
+pub use composer::{Composer, Event, Note, SHAKER};
 use synth::Synth;
-use weather::Bed;
+pub use track::{TRACK_RATE, render_track};
 
 // ----- scale -------------------------------------------------------------
 
@@ -205,27 +215,67 @@ impl Scale {
     }
 }
 
-// ----- weather -----------------------------------------------------------
+// ----- background ----------------------------------------------------------
 
+/// The sound under the music: weather or a place.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Weather {
+pub enum Background {
     None,
     #[default]
     Rain,
+    /// Distant rolls of thunder over soft rain.
+    Thunder,
     Wind,
     /// A thin, cold wind with a whistle in it.
     Winter,
+    /// Waves breaking on a shore, slowly.
+    Waves,
+    /// Leaves in a breeze and a bird now and then.
+    Forest,
+    /// A dry wind that lifts sand in its gusts and sometimes sings.
+    Desert,
+    /// A fire's low roar and its crackles.
+    Fire,
 }
 
-impl Weather {
-    pub const ALL: [Self; 4] = [Self::None, Self::Rain, Self::Wind, Self::Winter];
+impl Background {
+    pub const ALL: [Self; 9] = [
+        Self::None,
+        Self::Rain,
+        Self::Thunder,
+        Self::Wind,
+        Self::Winter,
+        Self::Waves,
+        Self::Forest,
+        Self::Desert,
+        Self::Fire,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::None => "None",
             Self::Rain => "Rain",
+            Self::Thunder => "Thunder",
             Self::Wind => "Wind",
             Self::Winter => "Winter",
+            Self::Waves => "Waves",
+            Self::Forest => "Forest",
+            Self::Desert => "Desert",
+            Self::Fire => "Fire",
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::None => "the music alone",
+            Self::Rain => "a soft hiss of rain with drops in it",
+            Self::Thunder => "soft rain and distant rolls of thunder, far apart",
+            Self::Wind => "a low wind that gusts",
+            Self::Winter => "a thin, cold wind with a whistle in it",
+            Self::Waves => "waves breaking on a shore, slowly",
+            Self::Forest => "leaves in a breeze and a bird now and then",
+            Self::Desert => "a dry wind that lifts sand and sometimes sings",
+            Self::Fire => "a fire's low roar and its crackles",
         }
     }
 }
@@ -247,16 +297,30 @@ pub enum Instrument {
     Pad,
     /// The root, low and continuous, breathing slowly.
     Drone,
+    /// Struck, in the middle: sparse notes, sometimes two together.
+    Piano,
+    /// Plucked (pizzicato), high: short, bright notes.
+    Violin,
+    /// Soft hand percussion: a low frame drum and a shaker.
+    Drums,
 }
 
 impl Instrument {
-    pub const ALL: [Self; 6] = [
+    /// How many there are.
+    pub const COUNT: usize = 9;
+
+    /// In the order of [`AmbienceSettings::layers`]; new instruments are
+    /// added at the end so saved settings keep their meaning.
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Bass,
         Self::Harp,
         Self::Bells,
         Self::Strings,
         Self::Pad,
         Self::Drone,
+        Self::Piano,
+        Self::Violin,
+        Self::Drums,
     ];
 
     pub fn name(self) -> &'static str {
@@ -267,6 +331,9 @@ impl Instrument {
             Self::Strings => "Strings",
             Self::Pad => "Pad",
             Self::Drone => "Drone",
+            Self::Piano => "Piano",
+            Self::Violin => "Violin",
+            Self::Drums => "Drums",
         }
     }
 
@@ -278,6 +345,9 @@ impl Instrument {
             Self::Strings => "one bowed note at a time, sustained",
             Self::Pad => "soft slow chords that follow the harmony",
             Self::Drone => "the root, low and continuous",
+            Self::Piano => "sparse struck notes in the middle, sometimes two together",
+            Self::Violin => "plucked (pizzicato): short, bright notes, now and then an answer",
+            Self::Drums => "soft hand percussion: a low frame drum and a shaker, very sparse",
         }
     }
 
@@ -295,6 +365,9 @@ impl Instrument {
             Self::Strings => 12.0,
             Self::Pad => 18.0,
             Self::Drone => 0.0,
+            Self::Piano => 8.0,
+            Self::Violin => 9.0,
+            Self::Drums => 11.0,
         }
     }
 
@@ -308,6 +381,10 @@ impl Instrument {
             Self::Strings => 12,
             Self::Pad => 12,
             Self::Drone => -12,
+            Self::Piano => 12,
+            Self::Violin => 24,
+            // The frame drum's pitch: the root, low.
+            Self::Drums => 0,
         }
     }
 }
@@ -404,6 +481,101 @@ impl Layer {
     }
 }
 
+/// One [`Layer`] per [`Instrument`], indexed by instrument.
+///
+/// Saved as a sequence in [`Instrument::ALL`]'s order. Reading accepts a
+/// shorter sequence, from before an instrument was added, filling the
+/// rest with switched-off layers, and ignores extra ones.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layers([Layer; Instrument::COUNT]);
+
+impl Default for Layers {
+    fn default() -> Self {
+        Self([Layer::default(); Instrument::COUNT])
+    }
+}
+
+impl Layers {
+    pub fn iter(&self) -> std::slice::Iter<'_, Layer> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Layer> {
+        self.0.iter_mut()
+    }
+}
+
+impl Index<Instrument> for Layers {
+    type Output = Layer;
+
+    fn index(&self, instrument: Instrument) -> &Layer {
+        &self.0[instrument.index()]
+    }
+}
+
+impl IndexMut<Instrument> for Layers {
+    fn index_mut(&mut self, instrument: Instrument) -> &mut Layer {
+        &mut self.0[instrument.index()]
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Layers {
+    type Item = &'a mut Layer;
+    type IntoIter = std::slice::IterMut<'a, Layer>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
+impl<'a> IntoIterator for &'a Layers {
+    type Item = &'a Layer;
+    type IntoIter = std::slice::Iter<'a, Layer>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl Serialize for Layers {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Layers {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct LayersVisitor;
+
+        impl<'de> Visitor<'de> for LayersVisitor {
+            type Value = Layers;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence of layers")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Layers, A::Error> {
+                let mut layers = Layers::default();
+                let mut index = 0;
+                while index < Instrument::COUNT {
+                    match seq.next_element::<Layer>()? {
+                        Some(layer) => layers.0[index] = layer,
+                        None => return Ok(layers),
+                    }
+                    index += 1;
+                }
+                // Layers for instruments this version does not know.
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(layers)
+            }
+        }
+
+        // A fixed-size array is saved as a tuple; asking for one reads
+        // both that and a plain list, whatever their length.
+        deserializer.deserialize_tuple(Instrument::COUNT, LayersVisitor)
+    }
+}
+
 // ----- presence and form ---------------------------------------------------
 
 /// How noticeable the bed is.
@@ -463,7 +635,7 @@ impl Presence {
 pub enum Form {
     #[default]
     Endless,
-    /// A piece this long, a pause with weather only, then another.
+    /// A piece this long, a pause with the background only, then another.
     Piece { minutes: f32, pause_seconds: f32 },
 }
 
@@ -485,9 +657,11 @@ pub struct AmbienceSettings {
     /// The preset these came from, if untouched since.
     pub style: Option<Style>,
     pub scale: Scale,
-    pub weather: Weather,
-    /// One per [`Instrument`], in [`Instrument::ALL`]'s order.
-    pub layers: [Layer; 6],
+    /// Called the weather before there were places in it.
+    #[serde(alias = "weather")]
+    pub background: Background,
+    /// One per [`Instrument`].
+    pub layers: Layers,
     pub presence: Presence,
     /// Beats per minute of the pulse, when there is one.
     pub tempo: u16,
@@ -542,12 +716,12 @@ impl AmbienceSettings {
     }
 
     pub fn layer(&self, instrument: Instrument) -> &Layer {
-        &self.layers[instrument.index()]
+        &self.layers[instrument]
     }
 
     pub fn layer_mut(&mut self, instrument: Instrument) -> &mut Layer {
         self.style = None;
-        &mut self.layers[instrument.index()]
+        &mut self.layers[instrument]
     }
 
     /// Instruments switched on.
@@ -589,16 +763,26 @@ pub enum Style {
     NightDrift,
     Affirmation,
     Pentatonic,
+    SeasidePiano,
+    ForestMorning,
+    Campfire,
+    DesertNight,
+    StormWatch,
 }
 
 impl Style {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 11] = [
         Self::RainStudy,
         Self::WinterHush,
         Self::NightDrift,
         Self::Cathedral,
         Self::Pentatonic,
         Self::Affirmation,
+        Self::SeasidePiano,
+        Self::ForestMorning,
+        Self::Campfire,
+        Self::DesertNight,
+        Self::StormWatch,
     ];
 
     pub fn name(self) -> &'static str {
@@ -609,6 +793,11 @@ impl Style {
             Self::NightDrift => "Night Drift",
             Self::Affirmation => "Affirmation",
             Self::Pentatonic => "Pentatonic Garden",
+            Self::SeasidePiano => "Seaside Piano",
+            Self::ForestMorning => "Forest Morning",
+            Self::Campfire => "Campfire",
+            Self::DesertNight => "Desert Night",
+            Self::StormWatch => "Storm Watch",
         }
     }
 
@@ -616,29 +805,36 @@ impl Style {
         match self {
             Self::WinterHush => "a cold wind, a bass note now and then, a harp far away",
             Self::RainStudy => "rain, harp and a bass string: the default",
-            Self::Cathedral => "no weather; a drone, a pad and sparse bells in a minor key",
+            Self::Cathedral => "no background; a drone, a pad and sparse bells in a minor key",
             Self::NightDrift => "wind, a drone and a slow pad in Lydian, barely there",
             Self::Affirmation => "strings, bass, pad and bells on a slow pulse, in pieces",
             Self::Pentatonic => "rain and harp on five notes: nothing can clash",
+            Self::SeasidePiano => "waves, a sparse piano and a low drone in Lydian",
+            Self::ForestMorning => "birds and leaves, a harp, a plucked violin and a bell or two",
+            Self::Campfire => "a crackling fire, plucked violin, a bass string, a soft drum",
+            Self::DesertNight => "a dry wind, a drone, a few piano notes and a shaker in Phrygian",
+            Self::StormWatch => "distant thunder, slow strings and a drone in harmonic minor",
         }
     }
 
     pub fn settings(self) -> AmbienceSettings {
         use Instrument::*;
-        let mut layers = [Layer::default(); 6];
+        let mut layers = Layers::default();
         let mut set = |instrument: Instrument, layer: Layer| {
-            layers[instrument.index()] = layer;
+            layers[instrument] = layer;
         };
-        let (scale, weather, presence, form, level) = match self {
+        let scale = |root: u8, kind: ScaleKind| Scale { root, kind };
+        let mode = |root: u8, mode: Mode| Scale {
+            root,
+            kind: ScaleKind::Mode(mode),
+        };
+        let (scale, background, presence, form, level) = match self {
             Self::RainStudy => {
                 set(Bass, Layer::on(0.8, Density::Sparse));
                 set(Harp, Layer::on(0.7, Density::Occasional));
                 (
-                    Scale {
-                        root: 2,
-                        kind: ScaleKind::Mode(Mode::Dorian),
-                    },
-                    Weather::Rain,
+                    mode(2, Mode::Dorian),
+                    Background::Rain,
                     Presence::Ambient,
                     Form::Endless,
                     0.35,
@@ -648,11 +844,8 @@ impl Style {
                 set(Bass, Layer::on(0.7, Density::Sparse));
                 set(Harp, Layer::on(0.5, Density::Sparse));
                 (
-                    Scale {
-                        root: 9,
-                        kind: ScaleKind::Mode(Mode::Aeolian),
-                    },
-                    Weather::Winter,
+                    mode(9, Mode::Aeolian),
+                    Background::Winter,
                     Presence::Background,
                     Form::Endless,
                     0.3,
@@ -662,11 +855,8 @@ impl Style {
                 set(Drone, Layer::on(0.6, Density::Sparse));
                 set(Pad, Layer::on(0.6, Density::Sparse));
                 (
-                    Scale {
-                        root: 5,
-                        kind: ScaleKind::Mode(Mode::Lydian),
-                    },
-                    Weather::Wind,
+                    mode(5, Mode::Lydian),
+                    Background::Wind,
                     Presence::Background,
                     Form::Endless,
                     0.3,
@@ -677,11 +867,8 @@ impl Style {
                 set(Pad, Layer::on(0.7, Density::Occasional));
                 set(Bells, Layer::on(0.5, Density::Sparse));
                 (
-                    Scale {
-                        root: 7,
-                        kind: ScaleKind::Mode(Mode::Aeolian),
-                    },
-                    Weather::None,
+                    mode(7, Mode::Aeolian),
+                    Background::None,
                     Presence::Ambient,
                     Form::Endless,
                     0.4,
@@ -692,11 +879,8 @@ impl Style {
                 set(Bells, Layer::on(0.4, Density::Sparse));
                 set(Bass, Layer::on(0.6, Density::Sparse));
                 (
-                    Scale {
-                        root: 7,
-                        kind: ScaleKind::MajorPentatonic,
-                    },
-                    Weather::Rain,
+                    scale(7, ScaleKind::MajorPentatonic),
+                    Background::Rain,
                     Presence::Ambient,
                     Form::Endless,
                     0.35,
@@ -708,11 +892,8 @@ impl Style {
                 set(Pad, Layer::on(0.6, Density::Occasional));
                 set(Bells, Layer::on(0.5, Density::Sparse));
                 (
-                    Scale {
-                        root: 0,
-                        kind: ScaleKind::Mode(Mode::Mixolydian),
-                    },
-                    Weather::None,
+                    mode(0, Mode::Mixolydian),
+                    Background::None,
                     Presence::Declarative,
                     Form::Piece {
                         minutes: 3.0,
@@ -721,12 +902,72 @@ impl Style {
                     0.5,
                 )
             }
+            Self::SeasidePiano => {
+                set(Piano, Layer::on(0.7, Density::Occasional));
+                set(Drone, Layer::on(0.45, Density::Sparse));
+                set(Bass, Layer::on(0.5, Density::Sparse));
+                (
+                    mode(2, Mode::Lydian),
+                    Background::Waves,
+                    Presence::Ambient,
+                    Form::Endless,
+                    0.4,
+                )
+            }
+            Self::ForestMorning => {
+                set(Harp, Layer::on(0.6, Density::Occasional));
+                set(Violin, Layer::on(0.5, Density::Sparse));
+                set(Bells, Layer::on(0.35, Density::Sparse));
+                (
+                    scale(4, ScaleKind::MajorPentatonic),
+                    Background::Forest,
+                    Presence::Ambient,
+                    Form::Endless,
+                    0.35,
+                )
+            }
+            Self::Campfire => {
+                set(Violin, Layer::on(0.6, Density::Occasional));
+                set(Bass, Layer::on(0.6, Density::Sparse));
+                set(Drums, Layer::on(0.55, Density::Sparse));
+                (
+                    mode(2, Mode::Mixolydian),
+                    Background::Fire,
+                    Presence::Ambient,
+                    Form::Endless,
+                    0.4,
+                )
+            }
+            Self::DesertNight => {
+                set(Drone, Layer::on(0.6, Density::Sparse));
+                set(Piano, Layer::on(0.45, Density::Sparse));
+                set(Drums, Layer::on(0.45, Density::Sparse));
+                (
+                    mode(4, Mode::Phrygian),
+                    Background::Desert,
+                    Presence::Background,
+                    Form::Endless,
+                    0.35,
+                )
+            }
+            Self::StormWatch => {
+                set(Strings, Layer::on(0.6, Density::Sparse));
+                set(Pad, Layer::on(0.5, Density::Sparse));
+                set(Drone, Layer::on(0.5, Density::Sparse));
+                (
+                    scale(9, ScaleKind::HarmonicMinor),
+                    Background::Thunder,
+                    Presence::Ambient,
+                    Form::Endless,
+                    0.35,
+                )
+            }
         };
         AmbienceSettings {
             enabled: false,
             style: Some(self),
             scale,
-            weather,
+            background,
             layers,
             presence,
             tempo: 60,
@@ -829,7 +1070,7 @@ impl Ambience {
         &self.settings
     }
 
-    /// Applies new settings: on and off fade over a second; the weather
+    /// Applies new settings: on and off fade over a second; the background
     /// crosses over; the key, layers and form take effect from the next
     /// event, and a new seed starts the music afresh.
     pub fn set(&mut self, settings: AmbienceSettings) {
@@ -844,10 +1085,10 @@ impl Ambience {
         } else if settings.seed != self.settings.seed || settings.form != self.settings.form {
             self.composer.reset(settings.seed);
         }
-        self.bed.set_weather(if settings.enabled {
-            settings.weather
+        self.bed.set_background(if settings.enabled {
+            settings.background
         } else {
-            self.settings.weather
+            self.settings.background
         });
         self.settings = settings;
     }
@@ -950,6 +1191,37 @@ mod tests {
     }
 
     #[test]
+    fn settings_saved_before_new_instruments_and_backgrounds_still_load() {
+        // Six layers and `weather`, as saved before there were nine
+        // instruments and backgrounds that are places.
+        let layer = r#"{"enabled":true,"level":0.7,"density":"Occasional","register":"High"}"#;
+        let off = r#"{"enabled":false}"#;
+        let old = format!(
+            r#"{{"enabled":true,"style":null,"weather":"Winter","layers":[{off},{layer},{off},{off},{off},{off}]}}"#
+        );
+        let settings: AmbienceSettings = serde_json::from_str(&old).unwrap();
+        assert_eq!(settings.background, Background::Winter);
+        let harp = settings.layer(Instrument::Harp);
+        assert!(harp.enabled && harp.register == Register::High);
+        for instrument in [Instrument::Piano, Instrument::Violin, Instrument::Drums] {
+            assert!(!settings.layer(instrument).enabled);
+        }
+
+        // More layers than this version knows are ignored.
+        let ten = [layer; 10].join(",");
+        let layers: Layers = serde_json::from_str(&format!("[{ten}]")).unwrap();
+        assert!(layers.iter().all(|layer| layer.enabled));
+
+        let settings = Style::Campfire.settings();
+        let saved = serde_json::to_string(&settings).unwrap();
+        assert!(saved.contains("\"background\":\"Fire\""));
+        assert_eq!(
+            serde_json::from_str::<AmbienceSettings>(&saved).unwrap(),
+            settings
+        );
+    }
+
+    #[test]
     fn the_same_seed_renders_the_same_sound() {
         let settings = AmbienceSettings {
             enabled: true,
@@ -971,7 +1243,7 @@ mod tests {
         for instrument in Instrument::ALL {
             let mut settings = Style::RainStudy.settings();
             settings.enabled = true;
-            settings.weather = Weather::None;
+            settings.background = Background::None;
             settings.level = 1.0;
             settings.presence = Presence::Declarative;
             for layer in &mut settings.layers {

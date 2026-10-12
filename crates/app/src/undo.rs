@@ -1,5 +1,6 @@
 //! Undo and redo for changes to the board: removing a tile or a set,
-//! duplicating a tile, and moving one to another slot.
+//! duplicating a tile, moving one to another slot, and generating a track
+//! onto one.
 //!
 //! A removal keeps the whole tile or set, so undoing it brings back its
 //! slot, title, emoji and settings exactly. Settings changed in the
@@ -21,6 +22,11 @@ pub enum Change {
     RemovedSet {
         index: usize,
         set: Set,
+    },
+    /// A track the Generator made, on a new tile.
+    Generated {
+        set: SetId,
+        tile: Box<Tile>,
     },
     /// A copy of the tile titled `source`.
     Duplicated {
@@ -62,6 +68,7 @@ impl Change {
             Self::RemovedTile { tile, .. } => format!("Remove “{}”", tile.title),
             Self::RemovedSet { set, .. } => format!("Remove Set “{}”", set.name),
             Self::Duplicated { source, .. } => format!("Duplicate “{source}”"),
+            Self::Generated { tile, .. } => format!("Generate “{}”", tile.title),
             Self::Moved { title, .. } => format!("Move “{title}”"),
             Self::Columns { name, to, .. } => format!("{to} Columns for “{name}”"),
             Self::ToSet {
@@ -82,6 +89,7 @@ impl Change {
             Self::RemovedTile { tile, .. } => Some(format!("Removed “{}”", tile.title)),
             Self::RemovedSet { set, .. } => Some(format!("Removed the set “{}”", set.name)),
             Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
+            Self::Generated { tile, .. } => Some(format!("Generated “{}”", tile.title)),
             // The tile is seen moving, the grid changing; no need to say so.
             Self::Moved { .. } | Self::Columns { .. } => None,
             // It leaves the grid, or lands out of sight: say where it went.
@@ -103,6 +111,7 @@ impl Change {
             Self::RemovedTile { tile, .. } => format!("Put back “{}”", tile.title),
             Self::RemovedSet { set, .. } => format!("Put back the set “{}”", set.name),
             Self::Duplicated { tile, .. } => format!("Removed the copy “{}”", tile.title),
+            Self::Generated { tile, .. } => format!("Removed the track “{}”", tile.title),
             Self::Moved { title, .. } => format!("Moved “{title}” back"),
             Self::Columns { name, from, .. } => format!("“{name}” is {from} columns wide again"),
             Self::ToSet {

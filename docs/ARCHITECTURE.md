@@ -11,18 +11,21 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
  │ sidebar.rs   sets                   │        └──────────────┬────────────────┘
  │ inspector.rs tile settings          │                       ▼
  │ import.rs    files, folders, boards │        crates/library (olio-library)
- │ cli.rs       `olio import`          │        ┌───────────────────────────────┐
+ │ cli.rs       import, generate       │        ┌───────────────────────────────┐
  │ clips.rs     background decoding    │───────►│ model.rs    Library/Set/Tile  │
- └──────────────┬──────────────────────┘        │ store.rs    folder, imports   │
-                │                               │ manifest.rs board JSON        │
-                ▼                               │ folder.rs   natural order     │
- crates/audio (olio-audio)                      └───────────────────────────────┘
+ │ generator.rs the Generator, tracks  │        │ store.rs    folder, imports   │
+ └──────────────┬──────────────────────┘        │ manifest.rs board JSON        │
+                │                               │ folder.rs   natural order     │
+                ▼                               └───────────────────────────────┘
+ crates/audio (olio-audio)
  ┌─────────────────────────────────────┐
  │ clip.rs     decode, trim, WAV out   │
  │ peaks.rs    waveform overview       │
  │ engine.rs   Engine + cpal stream ───┼──┐ ring buffers
  │ mixer.rs    voices, fades, bus  ◄───┼──┘ (audio thread)
  │ reverb.rs   room reverb             │
+ │ ambience/   composer, synth,        │
+ │             backgrounds, track.rs   │
  └─────────────────────────────────────┘
 ```
 
@@ -39,8 +42,15 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    Normalize) and spectrogram (`spectrum.rs`), and wakes the UI.
 3. **The audio thread** belongs to the output device (cpal). It calls
    `Mixer::render` for every buffer. The mixer also runs the ambience
-   (`ambience/`): its composer plans notes a buffer at a time and its
-   synth renders them under the voices, ducked while any voice plays.
+   (`ambience/`): its composer plans notes a buffer at a time, its synth
+   renders them and its bed the background, under the voices, ducked
+   while any voice plays.
+4. **The generator thread** (`generator.rs`), while a track is being
+   made: it renders the ambience through a mixer of its own
+   (`render_track`, `Engine::offline`), so the track sounds like the live
+   bed, reverb and all; brings it to one loudness with a limiter; writes
+   a WAV; imports it with `Store::import_sound`; and wakes the UI, which
+   puts it on a tile.
 
 The UI and audio threads share no locks. The engine sends `Message`s to the
 mixer over a wait-free ring buffer (`rtrb`); the mixer sends `Event`s back
@@ -91,3 +101,7 @@ import) unless forced.
   `Command`s and send them to `execute`; never call the engine directly.
 - A new import source: a function in `import.rs` that ends in
   `Store::import_sound` or `import_converted`, with tests in that file.
+- A new background or instrument for the Generator: a `Background` arm in
+  `ambience/background.rs`, or an `Instrument` added at the end of
+  `Instrument::ALL` (saved layers are read by position) with its voice in
+  `synth.rs` and its part in `composer.rs`; offline tests beside each.

@@ -87,6 +87,12 @@ On a generation bump, re-check every line below and update the versions.
   `request_repaint` itself, since a still pointer sends no events.
 - Long grids: `ScrollArea::show_rows(ui, row_height, rows, |ui, range|)`
   only lays out the visible rows (the emoji picker's 1,900 emoji).
+- A panel inside a panel: `Panel::bottom(id).frame(Frame::NONE).show(ui,
+  ..)` called in a side panel's `ui` pins a part to its bottom (the
+  Generator's Track section); `show_inside` is deprecated. Call it before
+  the scroll area that fills the rest. A scroll area's bar floats over
+  its content: `ui.set_max_width(ui.available_width() - 12.0)` inside
+  keeps buttons clear of it.
 - Persistence: the `persistence` feature of eframe stores egui's memory
   (panel widths), the window geometry and whatever `App::save` writes
   with `eframe::set_value`. `persistence_path` names the file; it must be
@@ -105,5 +111,8 @@ On a generation bump, re-check every line below and update the versions.
   built-in widget's response replaces its label (the mute button reads
   "Mute", not "🔊").
 - `harness.ctx.set_theme(egui::Theme::Light)` renders the light theme.
+- A widget scrolled out of a `ScrollArea` is still in the tree but a
+  click on it misses: call `node.scroll_to_me()`, step a few frames, and
+  query it again before clicking (the Generator tests do).
 - `.wgpu()` on the builder plus `harness.render()` gives an image; it needs
   a GPU adapter, so rendering tests are opt-in (`OLIO_RENDER=1`).

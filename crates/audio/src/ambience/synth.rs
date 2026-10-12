@@ -1,28 +1,12 @@
 //! The instruments. Each is a small pool of voices, all allocated when the
 //! synth is built; rendering a frame allocates nothing.
 
-use std::f32::consts::{FRAC_PI_4, TAU};
+use std::f32::consts::TAU;
 
-use super::composer::Event;
+use super::composer::{Event, SHAKER};
+use super::dsp::{BandPass, OnePole, coefficient, decay, hz, pan_gains};
 use super::{AmbienceSettings, Instrument, Rng};
 use crate::mixer::Ramp;
-
-/// Equal-power panning.
-#[inline]
-fn pan_gains(pan: f32) -> (f32, f32) {
-    let angle = (pan.clamp(-1.0, 1.0) + 1.0) * FRAC_PI_4;
-    (angle.cos(), angle.sin())
-}
-
-fn hz(midi: u8) -> f32 {
-    440.0 * 2f32.powf((f32::from(midi) - 69.0) / 12.0)
-}
-
-/// A one-pole low-pass coefficient for `hz` at `rate`.
-fn coefficient(hz: f32, rate: u32) -> f32 {
-    let x = (-TAU * hz / rate as f32).exp();
-    (1.0 - x).clamp(0.0, 1.0)
-}
 
 // ----- plucked ---------------------------------------------------------
 
@@ -75,6 +59,8 @@ impl Plucked {
         let (damp, tone, seconds, brightness) = match instrument {
             // Long, warm and round.
             Instrument::Bass => (0.99998, 0.25, 9.0, 0.35),
+            // Pizzicato: bright and short, the string stopped by the finger.
+            Instrument::Violin => (0.99975, 0.6, 1.5, 0.95),
             // Shorter and brighter, with a little ring.
             _ => (0.99996, 0.55, 5.0, 0.85),
         };
@@ -417,13 +403,216 @@ impl DroneVoice {
     }
 }
 
+// ----- piano -------------------------------------------------------------
+
+/// Five partials, slightly stretched as a piano string's are, plus a second
+/// string a hair sharp so the note beats gently.
+const PIANO_PARTIALS: usize = 6;
+const PIANO_AMPS: [f32; PIANO_PARTIALS] = [1.0, 0.45, 0.25, 0.12, 0.06, 0.7];
+const PIANO_SECONDS: [f32; PIANO_PARTIALS] = [6.0, 4.0, 2.5, 1.5, 0.9, 5.0];
+/// How out of tune the partials are: piano strings are stiff.
+const PIANO_STIFFNESS: f32 = 0.0004;
+
+/// A struck piano note: partials dying at their own rates, the high ones
+/// first, and a soft knock of the hammer.
+#[derive(Clone, Copy)]
+struct Piano {
+    phases: [f32; PIANO_PARTIALS],
+    steps: [f32; PIANO_PARTIALS],
+    amps: [f32; PIANO_PARTIALS],
+    decays: [f32; PIANO_PARTIALS],
+    knock: f32,
+    knock_decay: f32,
+    knock_tone: f32,
+    knock_filter: OnePole,
+    attack: f32,
+    attack_step: f32,
+    pan: f32,
+    active: bool,
+}
+
+impl Piano {
+    fn new() -> Self {
+        Self {
+            phases: [0.0; PIANO_PARTIALS],
+            steps: [0.0; PIANO_PARTIALS],
+            amps: [0.0; PIANO_PARTIALS],
+            decays: [1.0; PIANO_PARTIALS],
+            knock: 0.0,
+            knock_decay: 0.0,
+            knock_tone: 0.0,
+            knock_filter: OnePole::default(),
+            attack: 0.0,
+            attack_step: 0.0,
+            pan: 0.0,
+            active: false,
+        }
+    }
+
+    fn strike(&mut self, rate: u32, midi: u8, velocity: f32, pan: f32) {
+        let base = hz(midi);
+        // High notes die sooner.
+        let shorten = (1.0 - (f32::from(midi) - 48.0) / 60.0).clamp(0.4, 1.2);
+        for i in 0..PIANO_PARTIALS {
+            let (n, beat) = if i == PIANO_PARTIALS - 1 {
+                (1.0, 1.0015)
+            } else {
+                (i as f32 + 1.0, 1.0)
+            };
+            let stretch = (1.0 + PIANO_STIFFNESS * n * n).sqrt();
+            self.steps[i] = (base * n * stretch * beat / rate as f32).min(0.45);
+            self.phases[i] = 0.0;
+            // Played harder, the upper partials come out more.
+            let brightness = if (2..PIANO_PARTIALS - 1).contains(&i) {
+                0.4 + 0.6 * velocity
+            } else {
+                1.0
+            };
+            self.amps[i] = PIANO_AMPS[i] * velocity * brightness * 0.12;
+            self.decays[i] = decay(PIANO_SECONDS[i] * shorten, rate);
+        }
+        self.knock = velocity * 0.12;
+        self.knock_decay = decay(0.03, rate);
+        self.knock_tone = coefficient(1200.0 + 2000.0 * velocity, rate);
+        self.attack = 0.0;
+        self.attack_step = 1.0 / (0.002 * rate as f32);
+        self.pan = pan;
+        self.active = true;
+    }
+
+    #[inline]
+    fn next(&mut self, rng: &mut Rng) -> (f32, f32) {
+        let mut out = 0.0;
+        let mut loudest = 0.0f32;
+        for i in 0..PIANO_PARTIALS {
+            out += (self.phases[i] * TAU).sin() * self.amps[i];
+            self.phases[i] = (self.phases[i] + self.steps[i]).fract();
+            self.amps[i] *= self.decays[i];
+            loudest = loudest.max(self.amps[i]);
+        }
+        if self.knock > 1e-5 {
+            out += self.knock_filter.low(rng.signed(), self.knock_tone) * self.knock;
+            self.knock *= self.knock_decay;
+        }
+        self.attack = (self.attack + self.attack_step).min(1.0);
+        out *= self.attack;
+        if loudest < 1e-4 && self.knock <= 1e-5 {
+            self.active = false;
+        }
+        let (l, r) = pan_gains(self.pan);
+        (out * l, out * r)
+    }
+}
+
+// ----- drums -------------------------------------------------------------
+
+/// A soft hand drum. A frame drum is a sine whose pitch drops quickly to
+/// the note, with a short low slap of the hand; a shaker is a moment of
+/// high, band-passed noise.
+#[derive(Clone, Copy)]
+struct Drum {
+    shaker: bool,
+    phase: f32,
+    step: f32,
+    settle: f32,
+    glide: f32,
+    body: f32,
+    body_decay: f32,
+    slap: f32,
+    slap_decay: f32,
+    slap_tone: f32,
+    slap_filter: OnePole,
+    grains: BandPass,
+    rise: f32,
+    rise_step: f32,
+    pan: f32,
+    active: bool,
+}
+
+impl Drum {
+    fn new() -> Self {
+        Self {
+            shaker: false,
+            phase: 0.0,
+            step: 0.0,
+            settle: 0.0,
+            glide: 0.0,
+            body: 0.0,
+            body_decay: 0.0,
+            slap: 0.0,
+            slap_decay: 0.0,
+            slap_tone: 0.0,
+            slap_filter: OnePole::default(),
+            grains: BandPass::default(),
+            rise: 0.0,
+            rise_step: 0.0,
+            pan: 0.0,
+            active: false,
+        }
+    }
+
+    fn hit(&mut self, rate: u32, midi: u8, velocity: f32, pan: f32) {
+        self.shaker = midi >= SHAKER;
+        self.pan = pan;
+        self.active = true;
+        if self.shaker {
+            self.grains.tune(7000.0, 1.2, rate);
+            self.body = 0.0;
+            self.slap = velocity * 0.45;
+            self.slap_decay = decay(0.08, rate);
+            self.rise = 0.0;
+            self.rise_step = 1.0 / (0.006 * rate as f32);
+        } else {
+            self.settle = hz(midi) / rate as f32;
+            self.step = self.settle * 1.6;
+            self.glide = decay(0.08, rate);
+            self.phase = 0.0;
+            self.body = velocity * 0.4;
+            self.body_decay = decay(0.7, rate);
+            self.slap = velocity * 0.2;
+            self.slap_decay = decay(0.025, rate);
+            self.slap_tone = coefficient(900.0, rate);
+            self.rise = 1.0;
+        }
+    }
+
+    #[inline]
+    fn next(&mut self, rng: &mut Rng) -> (f32, f32) {
+        let out = if self.shaker {
+            self.rise = (self.rise + self.rise_step).min(1.0);
+            let sound = self.grains.next(rng.signed()) * self.slap * self.rise;
+            self.slap *= self.slap_decay;
+            if self.slap < 1e-4 {
+                self.active = false;
+            }
+            sound
+        } else {
+            self.step = self.settle + (self.step - self.settle) * self.glide;
+            self.phase = (self.phase + self.step).fract();
+            let tone = (self.phase * TAU).sin() * self.body;
+            let slap = self.slap_filter.low(rng.signed(), self.slap_tone) * self.slap;
+            self.body *= self.body_decay;
+            self.slap *= self.slap_decay;
+            if self.body < 1e-4 && self.slap < 1e-4 {
+                self.active = false;
+            }
+            tone + slap
+        };
+        let (l, r) = pan_gains(self.pan);
+        (out * l, out * r)
+    }
+}
+
 // ----- the synth ----------------------------------------------------------
 
 const BASS_STRINGS: usize = 3;
 const HARP_STRINGS: usize = 8;
+const VIOLIN_STRINGS: usize = 4;
 const BELLS: usize = 6;
 const STRINGS: usize = 4;
 const PAD_VOICES: usize = 6;
+const PIANO_VOICES: usize = 6;
+const DRUMS: usize = 3;
 /// The lowest plucked note, for the delay lines' length.
 const LOWEST_HZ: f32 = 24.0;
 
@@ -432,11 +621,14 @@ pub(super) struct Synth {
     rng: Rng,
     bass: Vec<Plucked>,
     harp: Vec<Plucked>,
+    violin: Vec<Plucked>,
     bells: [Bell; BELLS],
     strings: [Sustained; STRINGS],
     pad: [Sustained; PAD_VOICES],
     drone: [DroneVoice; 2],
     drone_live: usize,
+    piano: [Piano; PIANO_VOICES],
+    drums: [Drum; DRUMS],
 }
 
 impl Synth {
@@ -451,19 +643,30 @@ impl Synth {
             harp: (0..HARP_STRINGS)
                 .map(|_| Plucked::new(max_frames / 4))
                 .collect(),
+            violin: (0..VIOLIN_STRINGS)
+                .map(|_| Plucked::new(max_frames / 4))
+                .collect(),
             bells: [Bell::new(); BELLS],
             strings: [Sustained::new(Timbre::Strings); STRINGS],
             pad: [Sustained::new(Timbre::Pad); PAD_VOICES],
             drone: [DroneVoice::new(); 2],
             drone_live: 0,
+            piano: [Piano::new(); PIANO_VOICES],
+            drums: [Drum::new(); DRUMS],
         }
     }
 
     pub(super) fn is_sounding(&self) -> bool {
-        self.bass.iter().chain(&self.harp).any(|s| s.active)
+        self.bass
+            .iter()
+            .chain(&self.harp)
+            .chain(&self.violin)
+            .any(|s| s.active)
             || self.bells.iter().any(|b| b.active)
             || self.strings.iter().chain(&self.pad).any(|s| s.active)
             || self.drone.iter().any(|d| d.active)
+            || self.piano.iter().any(|p| p.active)
+            || self.drums.iter().any(|d| d.active)
     }
 
     /// Starts a note. A full pool takes the voice nearest its end.
@@ -475,11 +678,11 @@ impl Synth {
         }
         let velocity = (note.velocity * layer.level).clamp(0.0, 1.0);
         match note.instrument {
-            Instrument::Bass | Instrument::Harp => {
-                let pool = if note.instrument == Instrument::Bass {
-                    &mut self.bass
-                } else {
-                    &mut self.harp
+            Instrument::Bass | Instrument::Harp | Instrument::Violin => {
+                let pool = match note.instrument {
+                    Instrument::Bass => &mut self.bass,
+                    Instrument::Violin => &mut self.violin,
+                    _ => &mut self.harp,
                 };
                 let index = pool
                     .iter()
@@ -526,6 +729,24 @@ impl Synth {
                 self.drone_live = 1 - self.drone_live;
                 self.drone[self.drone_live].tune(self.rate, note.midi);
             }
+            Instrument::Piano => {
+                let index = self
+                    .piano
+                    .iter()
+                    .position(|p| !p.active)
+                    .unwrap_or_else(|| least(self.piano.iter().map(|p| (p.amps[0] * 1e6) as u64)));
+                self.piano[index].strike(self.rate, note.midi, velocity, note.pan);
+            }
+            Instrument::Drums => {
+                let index = self
+                    .drums
+                    .iter()
+                    .position(|d| !d.active)
+                    .unwrap_or_else(|| {
+                        least(self.drums.iter().map(|d| ((d.body + d.slap) * 1e6) as u64))
+                    });
+                self.drums[index].hit(self.rate, note.midi, velocity, note.pan);
+            }
         }
     }
 
@@ -533,7 +754,12 @@ impl Synth {
     #[inline]
     pub(super) fn next(&mut self, gain: f32) -> (f32, f32) {
         let (mut l, mut r) = (0.0, 0.0);
-        for string in self.bass.iter_mut().chain(self.harp.iter_mut()) {
+        for string in self
+            .bass
+            .iter_mut()
+            .chain(self.harp.iter_mut())
+            .chain(self.violin.iter_mut())
+        {
             if string.active {
                 let (sl, sr) = string.next();
                 l += sl;
@@ -559,6 +785,20 @@ impl Synth {
                 let d = drone.next();
                 l += d;
                 r += d;
+            }
+        }
+        for piano in &mut self.piano {
+            if piano.active {
+                let (pl, pr) = piano.next(&mut self.rng);
+                l += pl;
+                r += pr;
+            }
+        }
+        for drum in &mut self.drums {
+            if drum.active {
+                let (dl, dr) = drum.next(&mut self.rng);
+                l += dl;
+                r += dr;
             }
         }
         (l * gain, r * gain)
@@ -631,6 +871,57 @@ mod tests {
         assert!(level(1) > level(4), "fallen after the hold");
         assert!(!string.active, "silent by the end");
         assert!(out.iter().all(|s| s.abs() < 0.5));
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().map(|s| s.abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_piano_note_rings_in_tune_and_dies_away() {
+        let rate = 48_000;
+        let mut rng = Rng::new(1);
+        let mut piano = Piano::new();
+        piano.strike(rate, 69, 0.8, 0.0);
+        let out: Vec<f32> = (0..rate as usize * 8)
+            .map(|_| piano.next(&mut rng).0)
+            .collect();
+        // Once the upper partials have gone, the fundamental is left.
+        let tail = &out[rate as usize * 2..rate as usize * 2 + rate as usize / 10];
+        let cycles = cycles_in(tail);
+        assert!((cycles - 44.0).abs() <= 1.5, "{cycles} cycles in 100 ms");
+        assert!(peak(&out[..4800]) > peak(&out[rate as usize * 3..]) * 4.0);
+        assert!(peak(&out) < 0.5);
+        assert!(!piano.active, "silent after eight seconds");
+    }
+
+    #[test]
+    fn pizzicato_and_drums_are_short() {
+        let rate = 48_000;
+        let mut rng = Rng::new(3);
+        let mut string = Plucked::new(rate as usize / 24);
+        string.pluck(&mut rng, rate, 76, 1.0, 0.0, Instrument::Violin);
+        let out: Vec<f32> = (0..rate as usize * 2).map(|_| string.next().0).collect();
+        assert!(peak(&out[..2400]) > 0.05);
+        assert!(!string.active, "a pizzicato is over within two seconds");
+
+        let mut drum = Drum::new();
+        drum.hit(rate, 40, 1.0, 0.0);
+        let out: Vec<f32> = (0..rate as usize * 2)
+            .map(|_| drum.next(&mut rng).0)
+            .collect();
+        let start = peak(&out[..2400]);
+        assert!(start > 0.1, "a frame drum thumps: {start}");
+        assert!(peak(&out[rate as usize / 2..]) < start * 0.1);
+        assert!(!drum.active);
+
+        let mut shaker = Drum::new();
+        shaker.hit(rate, SHAKER, 1.0, 0.0);
+        let out: Vec<f32> = (0..rate as usize / 2)
+            .map(|_| shaker.next(&mut rng).0)
+            .collect();
+        assert!(peak(&out[..4800]) > 0.02);
+        assert!(!shaker.active, "a shake is over in half a second");
     }
 
     #[test]

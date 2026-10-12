@@ -14,17 +14,17 @@ use egui::{
     Align, CornerRadius, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo,
     WidgetType,
 };
-use olio_audio::{Engine, Mixer, PlayOptions, VoiceId, Weather};
+use olio_audio::{Engine, Mixer, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{
-    Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Store, Tile, TileColor, TileId,
+    Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Sound, Store, Tile, TileColor, TileId,
 };
 
 use crate::Options;
-use crate::ambience;
 use crate::clips::{ClipState, Clips};
 use crate::confirm::{self, Confirm, Pending, Reply};
 use crate::emoji::{self, EmojiImages};
+use crate::generator::{self, Generation};
 use crate::grid::{self, GridLayout, GridView, Progress};
 use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
@@ -151,7 +151,8 @@ pub struct OlioApp {
     confirm: Option<Confirm>,
     show_shortcuts: bool,
     show_polish: bool,
-    show_ambience: bool,
+    /// A track the Generator is rendering.
+    generation: Option<Generation>,
     history: History,
     /// The set in front when a dragged tile first opened another set by
     /// being held over it; the window goes back to it if the drag ends
@@ -229,7 +230,7 @@ impl OlioApp {
             confirm: None,
             show_shortcuts: false,
             show_polish: false,
-            show_ambience: false,
+            generation: None,
             history: History::default(),
             spring_origin: None,
             emoji_picker: None,
@@ -518,6 +519,7 @@ impl OlioApp {
             MenuAction::RenameTile => {
                 if self.selected.is_some() {
                     self.prefs.show_inspector = true;
+                    self.prefs.show_generator = false;
                     self.focus_title = true;
                 }
             }
@@ -539,7 +541,16 @@ impl OlioApp {
             }
             MenuAction::ToggleSets => self.prefs.show_sets = !self.prefs.show_sets,
             MenuAction::ToggleInspector => {
-                self.prefs.show_inspector = !self.prefs.show_inspector;
+                // From the Generator, it brings the inspector back.
+                if self.prefs.show_generator {
+                    self.prefs.show_generator = false;
+                    self.prefs.show_inspector = true;
+                } else {
+                    self.prefs.show_inspector = !self.prefs.show_inspector;
+                }
+            }
+            MenuAction::ToggleGenerator => {
+                self.prefs.show_generator = !self.prefs.show_generator;
             }
             MenuAction::TileStyle(style) => self.prefs.tile_style = style,
             MenuAction::TileSize(size) => self.prefs.tile_size = size,
@@ -597,7 +608,6 @@ impl OlioApp {
             }
             MenuAction::PolishSet => self.polish_set(),
             MenuAction::EditPolish => self.show_polish = true,
-            MenuAction::EditAmbience => self.show_ambience = true,
             MenuAction::ToggleAmbience => {
                 self.execute(Command::SetAmbience(!self.prefs.ambience.enabled));
                 let message = if self.prefs.ambience.enabled {
@@ -1053,6 +1063,10 @@ impl OlioApp {
                 Ok((set, tile)) => Ok(Change::Duplicated { set, tile, source }),
                 Err(tile) => Err(Change::Duplicated { set, tile, source }),
             },
+            Change::Generated { set, tile } => match self.insert_tile(set, tile) {
+                Ok((set, tile)) => Ok(Change::Generated { set, tile }),
+                Err(tile) => Err(Change::Generated { set, tile }),
+            },
             Change::Moved {
                 set,
                 tile,
@@ -1166,6 +1180,10 @@ impl OlioApp {
                 }
                 _ => Err(Change::Duplicated { set, tile, source }),
             },
+            Change::Generated { set, tile } => match self.take_tile(tile.id) {
+                Some(Change::RemovedTile { set, tile }) => Ok(Change::Generated { set, tile }),
+                _ => Err(Change::Generated { set, tile }),
+            },
             Change::Moved {
                 set,
                 tile,
@@ -1229,7 +1247,9 @@ impl OlioApp {
                 }
                 self.history.push_undo(change);
             }
-            Err(change @ Change::Duplicated { .. }) => self.history.push_redo(change),
+            Err(change @ (Change::Duplicated { .. } | Change::Generated { .. })) => {
+                self.history.push_redo(change);
+            }
             Err(change) => self.set_status(
                 format!("“{}” can no longer be redone", change.describe()),
                 true,
@@ -1360,6 +1380,84 @@ impl OlioApp {
         match pending {
             Pending::RemoveSet(id) => self.remove_set(id),
         }
+    }
+
+    // ----- generating -----------------------------------------------------
+
+    /// Starts rendering a track of the Generator's settings, for the front
+    /// set. One at a time.
+    fn start_generation(&mut self, ctx: &egui::Context) {
+        if self.generation.is_some() {
+            return;
+        }
+        let generation = Generation::start(
+            ctx.clone(),
+            self.store.clone(),
+            self.prefs.ambience,
+            self.prefs.track_seconds,
+            self.current,
+        );
+        self.set_status(format!("Generating “{}”…", generation.title), false);
+        self.generation = Some(generation);
+    }
+
+    /// True while a track is being generated.
+    pub fn is_generating(&self) -> bool {
+        self.generation.is_some()
+    }
+
+    /// Places a finished track on a tile, or says why not.
+    fn poll_generation(&mut self) {
+        let Some(result) = self.generation.as_ref().and_then(Generation::poll) else {
+            return;
+        };
+        let Some(generation) = self.generation.take() else {
+            return;
+        };
+        match result {
+            Ok(Some(sound)) => self.place_track(&generation, sound),
+            Ok(None) => {
+                self.set_status(format!("Stopped generating “{}”", generation.title), false)
+            }
+            Err(err) => self.set_status(
+                format!("Could not generate “{}”: {err}", generation.title),
+                true,
+            ),
+        }
+    }
+
+    fn place_track(&mut self, generation: &Generation, sound: Sound) {
+        let set = if self.library.set(generation.set).is_some() {
+            generation.set
+        } else {
+            self.current
+        };
+        let placed = self
+            .library
+            .set_mut(set)
+            .and_then(|target| target.place(sound, None));
+        let Some(id) = placed else {
+            self.set_status(
+                format!(
+                    "There is no free slot in this set for “{}”",
+                    generation.title
+                ),
+                true,
+            );
+            return;
+        };
+        if let Some(tile) = self.library.tile_mut(id) {
+            tile.emoji = generation.emoji.to_owned();
+        }
+        let Some((_, tile)) = self.library.tile(id) else {
+            return;
+        };
+        let tile = Box::new(tile.clone());
+        self.execute(Command::SelectSet(set));
+        self.selected = Some(id);
+        self.reveal_selected = true;
+        self.changed();
+        self.record(Change::Generated { set, tile });
     }
 
     // ----- importing ------------------------------------------------------
@@ -1726,14 +1824,9 @@ impl OlioApp {
                 ui.weak("Nothing playing");
             }
             if ambience.enabled {
-                // The ambience's own bubble: its weather and style; a click
-                // switches it off.
-                let emoji = match ambience.weather {
-                    Weather::Rain => "🌧️",
-                    Weather::Wind => "🌬️",
-                    Weather::Winter => "❄️",
-                    Weather::None => "🎵",
-                };
+                // The ambience's own bubble: its background and style; a
+                // click switches it off.
+                let emoji = generator::emoji(ambience.background);
                 let color = ui.visuals().weak_text_color();
                 let text = RichText::new(format!("■ {}", ambience.describe())).color(color);
                 let bubble = match self.images.texture(ui.ctx(), emoji) {
@@ -1753,7 +1846,7 @@ impl OlioApp {
                     .add(bubble)
                     .on_hover_text(format!(
                         "Ambience: {}, {}. Click to switch it off ({}).",
-                        ambience.weather.name().to_lowercase(),
+                        ambience.background.name().to_lowercase(),
                         ambience.scale.name(),
                         menu::shortcut_text(ui.ctx(), MenuAction::ToggleAmbience)
                     ))
@@ -1854,7 +1947,10 @@ impl OlioApp {
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .selectable_label(self.prefs.show_inspector, "Inspector")
+                    .selectable_label(
+                        self.prefs.show_inspector && !self.prefs.show_generator,
+                        "Inspector",
+                    )
                     .on_hover_text(format!(
                         "Show or hide the inspector ({})",
                         menu::shortcut_text(&ctx, MenuAction::ToggleInspector)
@@ -1862,6 +1958,16 @@ impl OlioApp {
                     .clicked()
                 {
                     actions.push(MenuAction::ToggleInspector);
+                }
+                if ui
+                    .selectable_label(self.prefs.show_generator, "Generator")
+                    .on_hover_text(format!(
+                        "Make music and backgrounds, live or as tracks ({})",
+                        menu::shortcut_text(&ctx, MenuAction::ToggleGenerator)
+                    ))
+                    .clicked()
+                {
+                    actions.push(MenuAction::ToggleGenerator);
                 }
                 ui.separator();
                 match &self.audio {
@@ -1928,6 +2034,7 @@ impl eframe::App for OlioApp {
         let ctx = ui.ctx().clone();
         self.drive_screenshot(&ctx);
         self.clips.poll();
+        self.poll_generation();
         self.maintain_audio(&ctx);
         self.update_meters(&ctx);
         self.request_clips();
@@ -2023,7 +2130,31 @@ impl eframe::App for OlioApp {
             Vec::new()
         };
 
-        let inspector_actions = if self.prefs.show_inspector {
+        let mut generator_actions = Vec::new();
+        let inspector_actions = if self.prefs.show_generator {
+            let set = self
+                .library
+                .set(self.current)
+                .unwrap_or(&self.library.sets[0]);
+            let view = generator::View {
+                images: &self.images,
+                busy: self
+                    .generation
+                    .as_ref()
+                    .map(|generation| (generation.title.as_str(), generation.progress())),
+                track_seconds: self.prefs.track_seconds,
+                set_name: &set.name,
+            };
+            generator_actions = egui::Panel::right("olio-generator")
+                .resizable(true)
+                .default_size(400.0)
+                .min_size(340.0)
+                .show(ui, |ui| {
+                    generator::show(ui, &mut self.prefs.ambience, &view)
+                })
+                .inner;
+            Vec::new()
+        } else if self.prefs.show_inspector {
             // Fields, not `current_set()`, so the draft can be borrowed too.
             let set = self
                 .library
@@ -2102,10 +2233,17 @@ impl eframe::App for OlioApp {
         if self.show_polish {
             polish::window(&ctx, &mut self.show_polish, &mut self.prefs.polish);
         }
-        if self.show_ambience
-            && ambience::window(&ctx, &mut self.show_ambience, &mut self.prefs.ambience)
-        {
-            self.apply_ambience();
+        for action in generator_actions {
+            match action {
+                generator::Action::Changed => self.apply_ambience(),
+                generator::Action::Length(seconds) => self.prefs.track_seconds = seconds,
+                generator::Action::Generate => self.start_generation(&ctx),
+                generator::Action::Cancel => {
+                    if let Some(generation) = &self.generation {
+                        generation.cancel();
+                    }
+                }
+            }
         }
 
         let acted = !commands.is_empty() || !actions.is_empty();

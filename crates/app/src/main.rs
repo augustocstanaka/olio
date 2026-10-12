@@ -5,9 +5,16 @@ use olio_library::Store;
 
 fn main() -> eframe::Result {
     let mut args = std::env::args().skip(1).peekable();
-    if args.peek().map(String::as_str) == Some("import") {
-        args.next();
-        std::process::exit(cli::import(args));
+    match args.peek().map(String::as_str) {
+        Some("import") => {
+            args.next();
+            std::process::exit(cli::import(args));
+        }
+        Some("generate") => {
+            args.next();
+            std::process::exit(cli::generate(args));
+        }
+        _ => {}
     }
     let options = match parse_args(args) {
         Ok(Some(options)) => options,
