@@ -36,6 +36,8 @@ pub struct View<'a> {
     pub polish: Polish,
     pub images: &'a EmojiImages,
     pub spectrograms: bool,
+    /// How many columns fit the window now.
+    pub fit_columns: u8,
     /// The tile's level meter, while it has one.
     pub level: Option<Meter>,
     pub now: f64,
@@ -59,7 +61,7 @@ pub fn show(
                     });
                     tile_settings(ui, tile, view, &mut actions);
                 }
-                None => set_summary(ui, view.set, &mut actions),
+                None => set_summary(ui, view.set, view.fit_columns, &mut actions),
             }
             ui.add_space(10.0);
         });
@@ -112,7 +114,7 @@ fn title_field(
     }
 }
 
-fn set_summary(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
+fn set_summary(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorAction>) {
     ui.label(RichText::new(&set.name).strong().size(16.0));
     ui.add_space(4.0);
     ui.weak(match set.tiles.len() {
@@ -120,7 +122,7 @@ fn set_summary(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
         count => format!("{count} tiles"),
     });
     ui.add_space(12.0);
-    columns_row(ui, set, actions);
+    columns_row(ui, set, fit, actions);
     ui.add_space(16.0);
     ui.label("Select a tile to change its title, colour, fades, reverb and how it plays.");
     ui.add_space(10.0);
@@ -129,7 +131,7 @@ fn set_summary(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
 
 /// The set's width, with buttons for one column fewer or more, and the
 /// keys its top row ends at.
-fn columns_row(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
+fn columns_row(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorAction>) {
     let (columns, narrowest) = (set.columns, set.min_columns());
     ui.horizontal(|ui| {
         ui.label("Columns");
@@ -166,6 +168,17 @@ fn columns_row(ui: &mut Ui, set: &Set, actions: &mut Vec<InspectorAction>) {
         });
         if more.clicked() {
             actions.push(InspectorAction::SetColumns(columns + 1));
+        }
+        let fits = fit.max(narrowest) == columns;
+        let button = ui
+            .add_enabled(!fits, Button::new("Fit to Window"))
+            .on_hover_text(format!(
+                "{fit} columns fit the window at this tile size ({})",
+                menu::shortcut_text(ui.ctx(), MenuAction::FitColumns)
+            ))
+            .on_disabled_hover_text("It already fits the window");
+        if button.clicked() {
+            actions.push(InspectorAction::SetColumns(fit));
         }
     });
     // "1 to 4, Q to R…": what the width means on the keyboard.

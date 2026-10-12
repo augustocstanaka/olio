@@ -8,7 +8,7 @@ use egui::{
     Ui, Vec2, WidgetInfo, WidgetType,
 };
 use olio_control::{Command, TileKey, TileSetting};
-use olio_library::{Set, SetId, Slot, Tile, TileId};
+use olio_library::{MAX_COLUMNS, Set, SetId, Slot, Tile, TileId};
 
 use crate::clips::{ClipState, Clips, Ready};
 use crate::emoji::EmojiImages;
@@ -191,6 +191,9 @@ pub struct GridLayout {
     origin: Pos2,
     cell: Vec2,
     gap: f32,
+    /// The width the grid had to fill, and the narrowest a tile may be.
+    available_width: f32,
+    min_width: f32,
     columns: u8,
     rows: u8,
 }
@@ -206,9 +209,18 @@ impl GridLayout {
             origin: Pos2::ZERO,
             cell: Vec2::new(width, height),
             gap,
+            available_width: available.x,
+            min_width: metrics.min.x,
             columns,
             rows,
         }
+    }
+
+    /// How many columns fit the width the grid had without scrolling
+    /// sideways, at this tile size: 1 to [`MAX_COLUMNS`].
+    pub fn fitting_columns(&self) -> u8 {
+        let fit = ((self.available_width + self.gap) / (self.min_width + self.gap)).floor();
+        (fit.max(1.0) as u8).min(MAX_COLUMNS)
     }
 
     fn size(&self) -> Vec2 {
@@ -1095,5 +1107,27 @@ fn empty_slot(ui: &Ui, rect: Rect, slot: Slot, view: &GridView, targeted: bool) 
             FontId::proportional(size),
             color,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fit(width: f32, size: TileSize) -> u8 {
+        GridLayout::new(Vec2::new(width, 600.0), 3, 4, &Metrics::of(size)).fitting_columns()
+    }
+
+    #[test]
+    fn as_many_columns_fit_as_minimum_tiles_and_gaps_allow() {
+        // Regular tiles: 120 wide with 12 between, so five take 648.
+        assert_eq!(fit(754.0, TileSize::Regular), 5);
+        assert_eq!(fit(659.0, TileSize::Regular), 5);
+        assert_eq!(fit(647.0, TileSize::Regular), 4);
+        // Compact tiles fit more; never more than ten keys in a row.
+        assert_eq!(fit(754.0, TileSize::Compact), 8);
+        assert_eq!(fit(2000.0, TileSize::Compact), 10);
+        // A sliver of a window still has one column.
+        assert_eq!(fit(40.0, TileSize::Large), 1);
     }
 }

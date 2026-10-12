@@ -49,6 +49,8 @@ pub enum MenuAction {
     /// One column more, or fewer.
     Wider,
     Narrower,
+    /// As many columns as fit the window at the current tile size.
+    FitColumns,
     PlaySelected,
     StopAll,
     FadeAll,
@@ -102,6 +104,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::Narrower,
         KeyboardShortcut::new(CMD, Key::OpenBracket),
+    ),
+    (
+        MenuAction::FitColumns,
+        KeyboardShortcut::new(CMD, Key::Backslash),
     ),
     (MenuAction::Undo, KeyboardShortcut::new(CMD, Key::Z)),
     (MenuAction::Redo, KeyboardShortcut::new(CMD_SHIFT, Key::Z)),
@@ -221,6 +227,8 @@ pub struct MenuState<'a> {
     /// The front set's width, and the narrowest its tiles allow.
     pub columns: u8,
     pub min_columns: u8,
+    /// How many columns fit the window now.
+    pub fit_columns: u8,
     /// What Undo and Redo would do: "Remove “Applause”".
     pub undo: Option<String>,
     pub redo: Option<String>,
@@ -305,8 +313,20 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 state.columns > state.min_columns,
                 &mut actions,
             );
+            item(
+                ui,
+                &format!("Fit to Window ({} Columns)", state.fit_columns),
+                MenuAction::FitColumns,
+                true,
+                &mut actions,
+            );
             ui.menu_button("Columns", |ui| {
-                if let Some(columns) = columns_menu(ui, state.columns, state.min_columns) {
+                let widths = Widths {
+                    columns: state.columns,
+                    min: state.min_columns,
+                    fit: state.fit_columns,
+                };
+                if let Some(columns) = columns_menu(ui, widths) {
                     actions.push(MenuAction::SetColumns(columns));
                 }
             });
@@ -492,10 +512,35 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
     actions
 }
 
-/// The choice of grid widths, 1 to 10, the current one ticked and those
-/// too narrow for the tiles disabled. Returns the width clicked.
-pub fn columns_menu(ui: &mut Ui, columns: u8, min_columns: u8) -> Option<u8> {
+/// A set's width, the narrowest its tiles allow, and how many columns fit
+/// the window.
+#[derive(Clone, Copy)]
+pub struct Widths {
+    pub columns: u8,
+    pub min: u8,
+    pub fit: u8,
+}
+
+/// The choice of grid widths: Fit to Window first, then 1 to 10, the
+/// current one ticked and those too narrow for the tiles disabled.
+/// Returns the width chosen.
+pub fn columns_menu(ui: &mut Ui, widths: Widths) -> Option<u8> {
+    let Widths {
+        columns,
+        min: min_columns,
+        fit,
+    } = widths;
     let mut chosen = None;
+    let fit_label = format!("Fit to Window ({fit})");
+    if ui
+        .button(fit_label)
+        .on_hover_text("As many columns as fit the window now, at this tile size")
+        .clicked()
+    {
+        chosen = Some(fit);
+        ui.close();
+    }
+    ui.separator();
     for width in 1..=MAX_COLUMNS {
         let label = if width == columns {
             format!("✔ {width}")
@@ -600,6 +645,7 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (MenuAction::DuplicateTile, "Duplicate the selected tile"),
                         (MenuAction::Wider, "One more column in this set"),
                         (MenuAction::Narrower, "One column fewer"),
+                        (MenuAction::FitColumns, "As many columns as fit the window"),
                         (
                             MenuAction::MoveTile(Direction::Left),
                             "Move the selected tile (with any arrow)",

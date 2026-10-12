@@ -187,7 +187,8 @@ _Avoid_: zoom (that scales the whole window), density
 **Columns**:
 How wide a set's grid is, 1 to 10: the keys of each keyboard row it
 uses (4 columns: 1–4, Q–R, A–F, Z–V). Never narrower than its
-right-most tile.
+right-most tile. Fit to Window sets it once to as many as fit the window
+at the tile size; it does not follow later resizes, so keys stay put.
 _Avoid_: width (alone), grid size
 
 **Tile style**:

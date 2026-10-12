@@ -783,6 +783,72 @@ fn compact_tiles_are_smaller_and_still_play() {
     assert_eq!(harness.state().playing_titles(), ["Applause"]);
 }
 
+/// How many columns the front set shows: the test board's three, plus any
+/// empty slots on the number row after them.
+fn columns_shown(harness: &Harness<'static, OlioApp>) -> usize {
+    3 + "4567890"
+        .chars()
+        .take_while(|key| {
+            harness
+                .query_all_by_label(&format!("Empty slot {key}"))
+                .count()
+                > 0
+        })
+        .count()
+}
+
+/// The left edge of the inspector: the right-most "Show" is its heading.
+fn inspector_left(harness: &Harness<'static, OlioApp>) -> f32 {
+    harness
+        .query_all_by_label("Show")
+        .map(|node| node.rect().left())
+        .fold(f32::MIN, f32::max)
+}
+
+#[test]
+fn fit_to_window_widens_the_grid_as_far_as_tiles_still_fit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Backslash);
+    harness.run_steps(2);
+    let columns = columns_shown(&harness);
+    assert!(columns > 3, "the window has room for more than three");
+    // No column hides under the inspector, and tiles keep their size.
+    let last = "4567890".chars().nth(columns - 4).unwrap();
+    let right = harness
+        .get_by_label(&format!("Empty slot {last}"))
+        .rect()
+        .right();
+    assert!(right <= inspector_left(&harness), "{right}");
+    assert!(harness.get_by_label("Applause").rect().width() >= 120.0);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Backslash);
+    harness.run_steps(2);
+    harness.get_by_label("“Show” already fits the window");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(columns_shown(&harness), 3);
+}
+
+#[test]
+fn compact_tiles_fit_more_columns_and_the_inspector_fits_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Fit to Window").click();
+    harness.run_steps(2);
+    let regular = columns_shown(&harness);
+
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Compact Tiles").click();
+    harness.run_steps(2);
+    harness.get_by_label("Fit to Window").click();
+    harness.run_steps(2);
+    let compact = columns_shown(&harness);
+    assert!(compact > regular, "{compact} vs {regular}");
+}
+
 /// Steps for a little longer than a dragged tile must be held over a set
 /// to open it (0.6 s at 60 steps a second).
 const HOLD_STEPS: usize = 45;

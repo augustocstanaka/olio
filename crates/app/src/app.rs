@@ -534,6 +534,16 @@ impl OlioApp {
                 let columns = self.current_set().columns.saturating_add(1);
                 self.set_columns(self.current, columns);
             }
+            MenuAction::FitColumns => {
+                let fit = self.fit_columns();
+                let set = self.current_set();
+                if fit.max(set.min_columns()) == set.columns {
+                    let message = format!("“{}” already fits the window", set.name);
+                    self.set_status(message, false);
+                } else {
+                    self.set_columns(self.current, fit);
+                }
+            }
             MenuAction::Narrower => {
                 let columns = self.current_set().columns.saturating_sub(1).max(1);
                 self.set_columns(self.current, columns);
@@ -795,6 +805,15 @@ impl OlioApp {
             to_name,
             copy: true,
         })
+    }
+
+    /// How many columns fit the grid's room as last drawn, at the current
+    /// tile size; the front set's width before the grid has been drawn.
+    fn fit_columns(&self) -> u8 {
+        self.grid_layout
+            .map_or(self.current_set().columns, |layout| {
+                layout.fitting_columns()
+            })
     }
 
     /// Makes a set's grid `columns` wide, as far as its tiles allow, and
@@ -1895,6 +1914,7 @@ impl eframe::App for OlioApp {
                 set_removable: self.library.sets.len() > 1,
                 columns: self.current_set().columns,
                 min_columns: self.current_set().min_columns(),
+                fit_columns: self.fit_columns(),
                 playing: !self.playing.is_empty(),
             };
             actions.extend(menu::bar(ui, &state));
@@ -1910,13 +1930,21 @@ impl eframe::App for OlioApp {
         });
 
         let sounding: HashSet<SetId> = self.playing.values().map(|playing| playing.set).collect();
+        let fit = self.fit_columns();
         let sidebar_actions = if self.prefs.show_sets {
             egui::Panel::left("olio-sets")
                 .resizable(true)
                 .default_size(210.0)
                 .min_size(150.0)
                 .show(ui, |ui| {
-                    sidebar::show(ui, &self.library, self.current, &sounding, &mut self.rename)
+                    sidebar::show(
+                        ui,
+                        &self.library,
+                        self.current,
+                        &sounding,
+                        &mut self.rename,
+                        fit,
+                    )
                 })
                 .inner
         } else {
@@ -1947,6 +1975,7 @@ impl eframe::App for OlioApp {
                         polish: self.prefs.polish,
                         images: &self.images,
                         spectrograms: self.prefs.show_spectrograms,
+                        fit_columns: fit,
                         level: tile.and_then(|tile| self.tile_meters.get(&tile.id).copied()),
                         now: self.meter_time,
                     };

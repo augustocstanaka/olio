@@ -65,6 +65,7 @@ pub fn show(
     current: SetId,
     sounding: &HashSet<SetId>,
     rename: &mut Option<Rename>,
+    fit: u8,
 ) -> Vec<SidebarAction> {
     let mut actions = Vec::new();
     // A tile being dragged, and the set it is in: every other set can
@@ -117,6 +118,7 @@ pub fn show(
                             number: index + 1,
                             selected: set.id == current,
                             sounding: sounding.contains(&set.id),
+                            fit,
                             drop: dragged
                                 .filter(|&(_, from)| from != set.id)
                                 .map(|(tile, _)| tile),
@@ -184,6 +186,8 @@ struct Row<'a> {
     /// While a tile is dragged and this set is not in front: how far the
     /// hold that opens it has got, 0 to 1.
     spring: Option<f32>,
+    /// How many columns fit the window now.
+    fit: u8,
 }
 
 const ROW_HEIGHT: f32 = 28.0;
@@ -297,7 +301,12 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
         }
         ui.menu_button("Columns", |ui| {
             let set = row.set;
-            if let Some(columns) = crate::menu::columns_menu(ui, set.columns, set.min_columns()) {
+            let widths = crate::menu::Widths {
+                columns: set.columns,
+                min: set.min_columns(),
+                fit: row.fit,
+            };
+            if let Some(columns) = crate::menu::columns_menu(ui, widths) {
                 actions.push(SidebarAction::SetColumns(set.id, columns));
             }
         });

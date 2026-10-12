@@ -40,8 +40,8 @@ are intentions, reordered as real use dictates.
   there in the same slot if free, or copied; held there, the set opens
   for a drop on a chosen slot), Duplicate (⌘D), Shift+arrows to
   move the selected tile; all undoable.
-- **Grid size**: columns per set (⌘] / ⌘[, Set ▸ Columns, the
-  inspector), never narrower than the tiles allow, undoable; Compact,
+- **Grid size**: columns per set (⌘] / ⌘[, Fit to Window ⌘\\, Set ▸
+  Columns, the inspector), never narrower than the tiles allow, undoable; Compact,
   Regular and Large tile sizes.
 - **Undo** for removing tiles and sets (⌘Z, ⇧⌘Z, an Undo button in the
   status bar); tiles are removed without a confirmation.

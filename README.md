@@ -52,8 +52,10 @@ Milestone 0, the playable skeleton, is done. Olio can:
   tile from the keyboard. ⌘Z undoes any of it.
 - **Fit more on screen.** Each set is 1 to 10 columns wide: ⌘] and ⌘[
   (Ctrl on Windows), Set ▸ Columns, or the stepper in the inspector when
-  no tile is selected. A set never gets narrower than its right-most
-  tile, so no sound loses its key. View ▸ Compact Tiles shows just the
+  no tile is selected. Fit to Window (⌘\\) picks as many columns as fit
+  the window at the current tile size without scrolling sideways. A set
+  never gets narrower than its right-most tile, so no sound loses its
+  key. View ▸ Compact Tiles shows just the
   title, key and time, so a full board of 80 fits on a laptop screen at
   full size or with the side panels hidden (⇧⌘S, ⇧⌘I); Large Tiles suit
   touch screens and reading from across a room.
