@@ -13,8 +13,9 @@
 //! sooner, and freer gaps. Concentration: the lines keep nearer the chord
 //! and the home note, in smaller steps and a narrower range. Chaos: notes
 //! a semitone or a tritone off, clashing doubles and clusters, chords from
-//! anywhere in the key, looser timing. Each at its rest draws nothing from
-//! the random source, so it leaves the rest of the music as it was.
+//! anywhere in the key, looser timing. Chaos at 0 and concentration in the
+//! middle draw nothing from the random source; variety in the middle
+//! still brings a motif back now and then.
 
 use super::{AmbienceSettings, Form, Instrument, Rng};
 
