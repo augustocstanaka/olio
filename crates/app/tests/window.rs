@@ -923,6 +923,12 @@ fn pick_style(harness: &mut Harness<'static, OlioApp>, name: &str) {
         .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Style")
         .click();
     harness.run_steps(2);
+    // The list scrolls once there are styles of one's own; and the
+    // pointer must be over the list a frame before it presses.
+    harness.get_by_label(name).scroll_to_me();
+    harness.run_steps(2);
+    harness.get_by_label(name).hover();
+    harness.run_steps(2);
     harness.get_by_label(name).click();
     harness.run_steps(2);
 }
@@ -1032,6 +1038,97 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!(settings.mood(), None);
     harness.get_by_label("Custom");
     harness.get_by_label_contains("Repeats a short motif, around the chord, with clashes");
+}
+
+/// Types `name` over whatever the focused field holds, then Return.
+fn type_name(harness: &mut Harness<'static, OlioApp>, name: &str) {
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text(name.to_owned()));
+    harness.run_steps(1);
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+}
+
+#[test]
+fn a_custom_style_is_saved_picked_renamed_and_removed() {
+    use olio_audio::ambience::{Instrument, Mode, ScaleKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    // A built-in style is not saved again.
+    assert_eq!(harness.query_all_by_label("Save Style…").count(), 0);
+    pick_style(&mut harness, "Cathedral");
+    click_in_generator(&mut harness, "Harp");
+
+    // Escape leaves nothing saved.
+    click_in_generator(&mut harness, "Save Style…");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert!(harness.state().preferences().styles.is_empty());
+    assert_eq!(
+        harness
+            .query_all_by_role(egui::accesskit::Role::TextInput)
+            .count(),
+        0
+    );
+
+    // Saved under a name, it is what the Generator plays.
+    click_in_generator(&mut harness, "Save Style…");
+    assert_eq!(
+        harness
+            .get_by_role(egui::accesskit::Role::TextInput)
+            .value()
+            .as_deref(),
+        Some("G Aeolian"),
+        "the key to start from"
+    );
+    type_name(&mut harness, "Night Harp");
+    harness.get_by_label("Saved the style “Night Harp”");
+    let prefs = harness.state().preferences();
+    assert_eq!(prefs.styles.len(), 1);
+    assert_eq!(prefs.styles[0].name, "Night Harp");
+    assert_eq!(prefs.style_name(), "Night Harp");
+    harness.get_by_label_contains("Your style: G Aeolian, no background;");
+    click_in_generator(&mut harness, "New variation");
+    assert_eq!(harness.state().preferences().saved_style(), Some(0));
+
+    // Away to a built-in style and back from the list.
+    pick_style(&mut harness, "Rain Study");
+    assert_eq!(harness.state().preferences().saved_style(), None);
+    pick_style(&mut harness, "Night Harp");
+    let prefs = harness.state().preferences();
+    assert_eq!(prefs.saved_style(), Some(0));
+    assert!(prefs.ambience.layer(Instrument::Harp).enabled);
+    assert_eq!(prefs.ambience.scale.kind, ScaleKind::Mode(Mode::Aeolian));
+
+    // Renamed; a built-in name is refused.
+    click_in_generator(&mut harness, "Rename…");
+    type_name(&mut harness, "Cathedral");
+    harness.get_by_label("That is a built-in style");
+    type_name(&mut harness, "Night Harp 2");
+    harness.get_by_label("Renamed the style to “Night Harp 2”");
+    assert_eq!(harness.state().preferences().styles[0].name, "Night Harp 2");
+
+    // Removed once confirmed; Undo puts it back, Redo takes it again.
+    click_in_generator(&mut harness, "Remove Style");
+    // The dialog takes a few frames to size and place itself.
+    harness.run_steps(10);
+    harness.get_by_label("Remove the style “Night Harp 2”?");
+    harness.get_by_label("Remove").click();
+    harness.run_steps(3);
+    harness.get_by_label("Removed the style “Night Harp 2”");
+    assert!(harness.state().preferences().styles.is_empty());
+    harness.get_by_label("Save Style…");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(3);
+    harness.get_by_label("Put back the style “Night Harp 2”");
+    assert_eq!(harness.state().preferences().saved_style(), Some(0));
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    harness.run_steps(3);
+    assert!(harness.state().preferences().styles.is_empty());
 }
 
 #[test]

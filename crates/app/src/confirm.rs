@@ -9,6 +9,8 @@ use crate::palette;
 
 pub enum Pending {
     RemoveSet(SetId),
+    /// A saved style, by its place in the list.
+    RemoveStyle(usize),
 }
 
 pub struct Confirm {

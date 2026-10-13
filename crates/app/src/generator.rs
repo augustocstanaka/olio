@@ -3,7 +3,8 @@
 //! on tiles. It shows the essentials (style, mood, background,
 //! instruments); Details adds every setting (the character's amounts,
 //! each instrument's level, density and register, the key, presence and
-//! form) under the essential it belongs to.
+//! form) under the essential it belongs to. Custom settings can be saved
+//! as a style of one's own, listed after the built-in styles.
 //!
 //! The settings live in the preferences and go to the engine when they
 //! change. A track is rendered on a thread of its own ([`Generation`]),
@@ -15,7 +16,7 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{Align, Key, Layout, RichText, Ui};
 use olio_audio::ambience::{
     AmbienceSettings, Background, Density, Form, Instrument, Mood, Presence, ROOT_NAMES, Register,
     ScaleKind, Style,
@@ -24,6 +25,7 @@ use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
+use crate::prefs::{UserStyle, style_name_problem, style_named};
 use crate::{inspector, menu};
 
 /// The lengths a track can be, in seconds, and how they read.
@@ -85,14 +87,28 @@ pub fn character_words(settings: &AmbienceSettings) -> String {
     format!("{variety}, {concentration}, {chaos}.")
 }
 
-/// A track's title: its style, or its key when Custom, and its length:
-/// "Rain Study 2 min", "D Dorian 30 s".
-pub fn track_title(settings: &AmbienceSettings, seconds: u32) -> String {
-    let name = match settings.style {
-        Some(style) => style.name().to_owned(),
-        None => settings.scale.name(),
-    };
+/// A track's title: its name (its style, saved or built-in, or its key
+/// when Custom) and its length: "Rain Study 2 min", "D Dorian 30 s".
+pub fn track_title(name: &str, seconds: u32) -> String {
     format!("{name} {}", length_name(seconds))
+}
+
+/// The settings in a line: "G Aeolian, rain; harp and bass."
+fn summary(settings: &AmbienceSettings) -> String {
+    let instruments: Vec<String> = settings
+        .playing()
+        .map(|instrument| instrument.name().to_lowercase())
+        .collect();
+    let instruments = match instruments.as_slice() {
+        [] => "no instruments".to_owned(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let background = match settings.background {
+        Background::None => "no background".to_owned(),
+        background => background.name().to_lowercase(),
+    };
+    format!("{}, {background}; {instruments}.", settings.scale.name())
 }
 
 // ----- generating a track -------------------------------------------------
@@ -111,15 +127,16 @@ pub struct Generation {
 
 impl Generation {
     /// Starts rendering `seconds` of the ambience with `settings` into the
-    /// library in `store`, for the set `set`.
+    /// library in `store`, for the set `set`, titled after `name`.
     pub fn start(
         ctx: egui::Context,
         store: Store,
         settings: AmbienceSettings,
+        name: &str,
         seconds: u32,
         set: olio_library::SetId,
     ) -> Self {
-        let title = track_title(&settings, seconds);
+        let title = track_title(name, seconds);
         let progress = Arc::new(AtomicU32::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
         let (sender, done) = mpsc::channel();
@@ -220,6 +237,24 @@ impl Job {
 
 // ----- the panel -----------------------------------------------------------
 
+/// A style's name being typed: for a new style (`of` is `None`), or for a
+/// saved one being renamed.
+pub struct Naming {
+    pub text: String,
+    pub of: Option<usize>,
+    focused: bool,
+}
+
+impl Naming {
+    pub fn new(text: String, of: Option<usize>) -> Self {
+        Self {
+            text,
+            of,
+            focused: false,
+        }
+    }
+}
+
 /// What the panel shows besides the settings.
 pub struct View<'a> {
     pub images: &'a EmojiImages,
@@ -230,6 +265,9 @@ pub struct View<'a> {
     pub set_name: &'a str,
     /// Every setting, not only the essentials.
     pub details: bool,
+    /// Styles of one's own, and the one the settings are, if any.
+    pub styles: &'a [UserStyle],
+    pub saved: Option<usize>,
 }
 
 /// What the person did in the panel.
@@ -244,9 +282,23 @@ pub enum Action {
     Cancel,
     /// Show every setting, or only the essentials.
     Details(bool),
+    /// Start naming the settings as a new style of one's own.
+    SaveStyle,
+    /// Start renaming the saved style.
+    RenameStyle(usize),
+    /// Save or rename with the name typed.
+    NameStyle,
+    CancelNaming,
+    /// Remove the saved style, once confirmed.
+    RemoveStyle(usize),
 }
 
-pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Action> {
+pub fn show(
+    ui: &mut Ui,
+    settings: &mut AmbienceSettings,
+    view: &View,
+    naming: &mut Option<Naming>,
+) -> Vec<Action> {
     let before = *settings;
     let mut actions = Vec::new();
     let details = view.details;
@@ -278,7 +330,16 @@ pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Ac
             ui.add_space(8.0);
             live(ui, settings, details);
             let title = section(ui, "Style");
-            style(ui, settings, &title);
+            // One scope whatever it holds, so the widgets below keep
+            // their ids (and a focused slider its focus) when the settings
+            // turn Custom and Save Style… appears.
+            ui.scope(|ui| {
+                style(ui, settings, &title, view);
+                match naming {
+                    Some(naming) => naming_row(ui, naming, view.styles, &mut actions),
+                    None => own_style(ui, settings, view, &mut actions),
+                }
+            });
             section(ui, "Mood");
             mood(ui, settings, details);
             section(ui, "Background");
@@ -305,12 +366,7 @@ pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Ac
 
     // Anything but picking a style, switching on or a new variation makes
     // the settings Custom.
-    let touched = AmbienceSettings {
-        enabled: before.enabled,
-        seed: before.seed,
-        style: before.style,
-        ..*settings
-    } != before;
+    let touched = !settings.same_music(&before);
     if touched && settings.style == before.style {
         settings.style = None;
     }
@@ -351,16 +407,24 @@ fn live(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
     }
 }
 
-/// The style to start from, a new variation of it, and what it is.
-fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response) {
+/// The style to start from, built-in or one's own, a new variation of
+/// it, and what it is.
+fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, view: &View) {
+    let saved = view.saved.and_then(|index| view.styles.get(index));
     ui.horizontal(|ui| {
         let width = (ui.available_width() - 112.0).max(120.0);
-        let chosen_name = settings.style.map_or("Custom", Style::name);
+        let chosen_name = match (settings.style, saved) {
+            (Some(style), _) => style.name(),
+            (None, Some(style)) => style.name.as_str(),
+            (None, None) => "Custom",
+        };
         let combo = egui::ComboBox::from_id_salt("olio-generator-style")
             .selected_text(chosen_name)
             .width(width)
-            .height(400.0)
+            .height(560.0)
             .show_ui(ui, |ui| {
+                // Whether it plays stays as it was, whichever is picked.
+                let enabled = settings.enabled;
                 for style in Style::ALL {
                     let chosen = settings.style == Some(style);
                     if ui
@@ -369,10 +433,27 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response) {
                         .clicked()
                         && !chosen
                     {
-                        // Everything from the style; whether it plays stays.
-                        let enabled = settings.enabled;
-                        *settings = style.settings();
-                        settings.enabled = enabled;
+                        *settings = AmbienceSettings {
+                            enabled,
+                            ..style.settings()
+                        };
+                    }
+                }
+                if !view.styles.is_empty() {
+                    ui.separator();
+                }
+                for (index, style) in view.styles.iter().enumerate() {
+                    let chosen = settings.style.is_none() && view.saved == Some(index);
+                    if ui
+                        .selectable_label(chosen, &style.name)
+                        .on_hover_text(summary(&style.settings))
+                        .clicked()
+                        && !chosen
+                    {
+                        *settings = AmbienceSettings {
+                            enabled,
+                            ..style.settings
+                        };
                     }
                 }
             });
@@ -387,19 +468,88 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response) {
             }
         });
     });
-    ui.weak(match settings.style {
-        Some(style) => {
+    ui.weak(match (settings.style, saved) {
+        (Some(style), _) => {
             let describe = style.describe();
             let mut chars = describe.chars();
             let first = chars.next().map(|c| c.to_uppercase().to_string());
             format!("{}{}.", first.unwrap_or_default(), chars.as_str())
         }
-        None => format!(
+        (None, Some(_)) => format!("Your style: {}", summary(settings)),
+        (None, None) => format!(
             "{}: {}.",
             settings.scale.name(),
             settings.scale.kind.character()
         ),
     });
+}
+
+/// Custom settings can be saved as a style; a saved one renamed or
+/// removed.
+fn own_style(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions: &mut Vec<Action>) {
+    if settings.style.is_some() {
+        return;
+    }
+    ui.horizontal(|ui| match view.saved {
+        Some(index) => {
+            if ui.button("Rename…").clicked() {
+                actions.push(Action::RenameStyle(index));
+            }
+            if ui
+                .button("Remove Style")
+                .on_hover_text("Tracks made from it stay")
+                .clicked()
+            {
+                actions.push(Action::RemoveStyle(index));
+            }
+        }
+        None => {
+            if ui
+                .button("Save Style…")
+                .on_hover_text("Keep these settings as a style of your own, in the Style list")
+                .clicked()
+            {
+                actions.push(Action::SaveStyle);
+            }
+        }
+    });
+}
+
+/// The name being typed: Return or Save keeps it, Escape or Cancel
+/// doesn't.
+fn naming_row(ui: &mut Ui, naming: &mut Naming, styles: &[UserStyle], actions: &mut Vec<Action>) {
+    let problem = style_name_problem(styles, &naming.text, naming.of);
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - 130.0).max(100.0);
+        let edit = egui::TextEdit::singleline(&mut naming.text)
+            .hint_text("Style name")
+            .desired_width(width);
+        let response = ui.add(edit);
+        if !naming.focused {
+            response.request_focus();
+            naming.focused = true;
+        }
+        let entered = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+        let save = ui
+            .add_enabled(problem.is_none(), egui::Button::new("Save"))
+            .clicked();
+        let cancel = ui.button("Cancel").clicked();
+        if cancel || ui.input(|input| input.key_pressed(Key::Escape)) {
+            actions.push(Action::CancelNaming);
+        } else if (entered || save) && problem.is_none() {
+            actions.push(Action::NameStyle);
+        } else if entered {
+            // Not a name it can have: keep typing.
+            response.request_focus();
+        }
+    });
+    if let Some(problem) = problem {
+        ui.weak(problem);
+    } else if naming.of.is_none()
+        && let Some(style) = style_named(styles, &naming.text).and_then(|index| styles.get(index))
+    {
+        ui.weak(format!("Replaces the style “{}”", style.name));
+    }
 }
 
 /// The moods; with details, the three amounts behind them.
@@ -752,10 +902,10 @@ mod tests {
 
     #[test]
     fn tracks_are_titled_by_style_or_key_and_length() {
-        let mut settings = Style::RainStudy.settings();
-        assert_eq!(track_title(&settings, 120), "Rain Study 2 min");
-        settings.style = None;
-        assert_eq!(track_title(&settings, 30), "D Dorian 30 s");
+        assert_eq!(track_title("Rain Study", 120), "Rain Study 2 min");
+        assert_eq!(track_title("D Dorian", 30), "D Dorian 30 s");
+        let settings = Style::RainStudy.settings();
+        assert_eq!(summary(&settings), "D Dorian, rain; bass and harp.");
         assert_eq!(length_name(180), "3 min");
         for background in Background::ALL {
             assert!(!emoji(background).is_empty());

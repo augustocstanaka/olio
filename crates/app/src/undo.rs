@@ -1,12 +1,15 @@
 //! Undo and redo for changes to the board: removing a tile or a set,
 //! duplicating a tile, moving one to another slot, and generating a track
-//! onto one.
+//! onto one; and removing a style saved in the Generator.
 //!
-//! A removal keeps the whole tile or set, so undoing it brings back its
-//! slot, title, emoji and settings exactly. Settings changed in the
-//! inspector are not recorded: they are small and made in plain sight.
+//! A removal keeps the whole tile, set or style, so undoing it brings back
+//! its slot, title, emoji and settings exactly. Settings changed in the
+//! inspector or the Generator are not recorded: they are small and made in
+//! plain sight.
 
 use olio_library::{Set, SetId, Slot, Tile, TileId};
+
+use crate::prefs::UserStyle;
 
 /// The most changes remembered.
 const LIMIT: usize = 50;
@@ -59,6 +62,11 @@ pub enum Change {
         from: Slot,
         to: Slot,
     },
+    /// A saved style, from its place in the list.
+    RemovedStyle {
+        index: usize,
+        style: Box<UserStyle>,
+    },
 }
 
 impl Change {
@@ -71,6 +79,7 @@ impl Change {
             Self::Generated { tile, .. } => format!("Generate “{}”", tile.title),
             Self::Moved { title, .. } => format!("Move “{title}”"),
             Self::Columns { name, to, .. } => format!("{to} Columns for “{name}”"),
+            Self::RemovedStyle { style, .. } => format!("Remove Style “{}”", style.name),
             Self::ToSet {
                 tile,
                 to_name,
@@ -90,6 +99,7 @@ impl Change {
             Self::RemovedSet { set, .. } => Some(format!("Removed the set “{}”", set.name)),
             Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
             Self::Generated { tile, .. } => Some(format!("Generated “{}”", tile.title)),
+            Self::RemovedStyle { style, .. } => Some(format!("Removed the style “{}”", style.name)),
             // The tile is seen moving, the grid changing; no need to say so.
             Self::Moved { .. } | Self::Columns { .. } => None,
             // It leaves the grid, or lands out of sight: say where it went.
@@ -114,6 +124,7 @@ impl Change {
             Self::Generated { tile, .. } => format!("Removed the track “{}”", tile.title),
             Self::Moved { title, .. } => format!("Moved “{title}” back"),
             Self::Columns { name, from, .. } => format!("“{name}” is {from} columns wide again"),
+            Self::RemovedStyle { style, .. } => format!("Put back the style “{}”", style.name),
             Self::ToSet {
                 tile,
                 to_name,

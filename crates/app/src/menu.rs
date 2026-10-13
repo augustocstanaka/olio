@@ -32,6 +32,8 @@ pub enum MenuAction {
     ToggleAmbience,
     /// The Generator panel, in place of the inspector, shown or hidden.
     ToggleGenerator,
+    /// Name the Generator's Custom settings as a style of one's own.
+    SaveStyle,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
     /// Copy the selected tile into the next free slot.
@@ -281,6 +283,9 @@ pub struct MenuState<'a> {
     pub redo: Option<String>,
     pub set_removable: bool,
     pub playing: bool,
+    /// The Generator's settings are Custom: neither a built-in style nor a
+    /// saved one.
+    pub custom_style: bool,
 }
 
 pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
@@ -473,6 +478,13 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 "Generator…",
                 MenuAction::ToggleGenerator,
                 !state.prefs.show_generator,
+                &mut actions,
+            );
+            item(
+                ui,
+                "Save Style…",
+                MenuAction::SaveStyle,
+                state.custom_style,
                 &mut actions,
             );
             ui.separator();

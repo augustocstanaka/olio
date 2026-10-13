@@ -1,4 +1,5 @@
-//! Window preferences: theme, master volume, which panels are shown.
+//! Window preferences: theme, master volume, which panels are shown, the
+//! Generator's settings and the styles saved from them.
 //!
 //! They are not part of the library format. eframe keeps them, with the
 //! window's size and the panel widths, in `preferences.ron` beside the
@@ -6,6 +7,7 @@
 
 use egui::ThemePreference;
 use olio_audio::AmbienceSettings;
+use olio_audio::ambience::Style;
 use olio_control::TileSetting;
 use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
@@ -175,6 +177,60 @@ fn seconds(value: f32) -> String {
     format!("{text} s")
 }
 
+/// A style of one's own: Generator settings saved under a name.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserStyle {
+    pub name: String,
+    /// Off, with no built-in style: picking it keeps whether the ambience
+    /// plays.
+    pub settings: AmbienceSettings,
+}
+
+impl UserStyle {
+    pub fn new(name: String, settings: AmbienceSettings) -> Self {
+        Self {
+            name,
+            settings: AmbienceSettings {
+                enabled: false,
+                style: None,
+                ..settings
+            },
+        }
+    }
+}
+
+/// Names compare ignoring case and the spaces around them.
+fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Why `name` cannot name a saved style (the one at `of`, or a new one
+/// when `None`), if it cannot. A new style may take a saved one's name:
+/// it replaces it.
+pub fn style_name_problem(
+    styles: &[UserStyle],
+    name: &str,
+    of: Option<usize>,
+) -> Option<&'static str> {
+    if name.trim().is_empty() {
+        return Some("Give it a name");
+    }
+    if Style::ALL.iter().any(|style| same_name(style.name(), name)) {
+        return Some("That is a built-in style");
+    }
+    let taken = styles
+        .iter()
+        .enumerate()
+        .any(|(index, style)| Some(index) != of && same_name(&style.name, name));
+    (of.is_some() && taken).then_some("Another style has that name")
+}
+
+/// The saved style called `name`, ignoring case.
+pub fn style_named(styles: &[UserStyle], name: &str) -> Option<usize> {
+    styles.iter().position(|style| same_name(&style.name, name))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -197,6 +253,8 @@ pub struct Preferences {
     pub show_generator: bool,
     /// The Generator shows every setting, not only the essentials.
     pub generator_details: bool,
+    /// Styles of one's own, listed after the built-in ones.
+    pub styles: Vec<UserStyle>,
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
@@ -218,6 +276,7 @@ impl Default for Preferences {
             show_inspector: true,
             show_generator: false,
             generator_details: false,
+            styles: Vec::new(),
             click_plays: false,
         }
     }
@@ -237,6 +296,11 @@ impl Preferences {
         };
         prefs.polish = prefs.polish.clamped();
         prefs.ambience = prefs.ambience.clamped();
+        prefs.styles.retain(|style| !style.name.trim().is_empty());
+        for style in &mut prefs.styles {
+            style.name = style.name.trim().to_owned();
+            style.settings = UserStyle::new(String::new(), style.settings.clamped()).settings;
+        }
         if !crate::generator::TRACK_LENGTHS
             .iter()
             .any(|(seconds, _)| *seconds == prefs.track_seconds)
@@ -248,6 +312,49 @@ impl Preferences {
 
     pub fn store(&self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, KEY, self);
+    }
+
+    /// The saved style the Generator's settings are, if they are one and
+    /// not a built-in style.
+    pub fn saved_style(&self) -> Option<usize> {
+        if self.ambience.style.is_some() {
+            return None;
+        }
+        self.styles
+            .iter()
+            .position(|style| style.settings.same_music(&self.ambience))
+    }
+
+    /// What the Generator plays: "Rain Study", a saved style's name, or
+    /// "Custom: D Dorian".
+    pub fn style_name(&self) -> String {
+        match self.saved_style() {
+            Some(index) => self.styles[index].name.clone(),
+            None => self.ambience.describe(),
+        }
+    }
+
+    /// What a track of it is called, before its length: the style, saved
+    /// or built-in, or the key.
+    pub fn track_name(&self) -> String {
+        match (self.ambience.style, self.saved_style()) {
+            (Some(style), _) => style.name().to_owned(),
+            (None, Some(index)) => self.styles[index].name.clone(),
+            (None, None) => self.ambience.scale.name(),
+        }
+    }
+
+    /// A name for saving the Generator's settings: their key, numbered
+    /// while it is taken.
+    pub fn suggested_style_name(&self) -> String {
+        let base = self.ambience.scale.name();
+        (1..)
+            .map(|n| match n {
+                1 => base.clone(),
+                n => format!("{base} {n}"),
+            })
+            .find(|name| style_named(&self.styles, name).is_none())
+            .unwrap_or(base)
     }
 
     /// The gain the master volume sets on the mixer. A square law, so the
@@ -336,7 +443,71 @@ mod tests {
         assert!(!prefs.ambience.layer(Instrument::Piano).enabled);
         assert!(!prefs.show_generator);
         assert!(!prefs.generator_details, "the essentials first");
+        assert!(prefs.styles.is_empty());
         assert_eq!(prefs.track_seconds, 120);
+    }
+
+    #[test]
+    fn saved_styles_keep_their_name_and_music_and_are_found_again() {
+        use olio_audio::ambience::Instrument;
+        let mut prefs = Preferences::default();
+        prefs.ambience.enabled = true;
+        prefs.ambience.layer_mut(Instrument::Piano).enabled = true;
+        assert_eq!(prefs.style_name(), "Custom: D Dorian");
+        assert_eq!(prefs.track_name(), "D Dorian");
+        assert_eq!(prefs.suggested_style_name(), "D Dorian");
+        prefs
+            .styles
+            .push(UserStyle::new("Rainy Desk".to_owned(), prefs.ambience));
+        assert!(!prefs.styles[0].settings.enabled);
+
+        // Stored and loaded again, it is still what the Generator plays.
+        #[derive(Default)]
+        struct Kept(String);
+        impl eframe::Storage for Kept {
+            fn get_string(&self, key: &str) -> Option<String> {
+                (key == KEY).then(|| self.0.clone())
+            }
+            fn set_string(&mut self, key: &str, value: String) {
+                if key == KEY {
+                    self.0 = value;
+                }
+            }
+            fn remove_string(&mut self, _key: &str) {}
+            fn flush(&mut self) {}
+        }
+        let mut kept = Kept::default();
+        prefs.store(&mut kept);
+        let mut prefs = Preferences::load(Some(&kept));
+        assert_eq!(prefs.saved_style(), Some(0));
+        assert_eq!(prefs.style_name(), "Rainy Desk");
+        assert_eq!(prefs.track_name(), "Rainy Desk");
+        prefs.ambience.seed += 1;
+        assert_eq!(prefs.saved_style(), Some(0), "a new variation is still it");
+        prefs.ambience.chaos = 0.5;
+        assert_eq!(prefs.saved_style(), None);
+
+        prefs.styles[0].name = "D Dorian".to_owned();
+        assert_eq!(prefs.suggested_style_name(), "D Dorian 2");
+        let styles = &prefs.styles;
+        assert_eq!(
+            style_name_problem(styles, "  ", None),
+            Some("Give it a name")
+        );
+        assert_eq!(
+            style_name_problem(styles, "rain study", None),
+            Some("That is a built-in style")
+        );
+        assert_eq!(style_name_problem(styles, "d dorian", None), None);
+        assert_eq!(style_name_problem(styles, "d dorian", Some(0)), None);
+        prefs
+            .styles
+            .push(UserStyle::new("Other".to_owned(), prefs.ambience));
+        assert_eq!(
+            style_name_problem(&prefs.styles, "OTHER", Some(0)),
+            Some("Another style has that name")
+        );
+        assert_eq!(style_named(&prefs.styles, " other "), Some(1));
     }
 
     #[test]

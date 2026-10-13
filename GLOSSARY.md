@@ -163,7 +163,9 @@ _Avoid_: weather (only some are), noise, ambience (that is the whole)
 **Style**:
 A named preset of Generator settings (Rain Study, Seaside Piano,
 Campfire…). Picking one fills everything in; changing anything makes the
-settings Custom.
+settings Custom. Custom settings can be saved as a style of one's own
+(Save Style…), listed after the built-in ones, renamed or removed, and
+kept in the preferences; tracks made from it are titled after it.
 _Avoid_: preset (that is Polish), theme
 
 **Presence**:
@@ -249,6 +251,6 @@ _Avoid_: theme (that is light or dark), skin
 
 **Preferences**:
 Window settings kept beside the library in `preferences.ron`: theme,
-master volume, which panels show, single-click playback, tile style and
-the Polish preset.
+master volume, which panels show, single-click playback, tile style, the
+Polish preset, and the Generator's settings and saved styles.
 _Avoid_: settings (reserved for the planned Settings window), config

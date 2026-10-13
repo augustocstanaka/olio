@@ -30,7 +30,7 @@ use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
-use crate::prefs::{Polish, Preferences, TileStyle};
+use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
 use crate::{keys, palette, polish};
@@ -153,6 +153,8 @@ pub struct OlioApp {
     show_polish: bool,
     /// A track the Generator is rendering.
     generation: Option<Generation>,
+    /// A style's name being typed in the Generator.
+    naming: Option<generator::Naming>,
     history: History,
     /// The set in front when a dragged tile first opened another set by
     /// being held over it; the window goes back to it if the drag ends
@@ -231,6 +233,7 @@ impl OlioApp {
             show_shortcuts: false,
             show_polish: false,
             generation: None,
+            naming: None,
             history: History::default(),
             spring_origin: None,
             emoji_picker: None,
@@ -552,6 +555,12 @@ impl OlioApp {
             MenuAction::ToggleGenerator => {
                 self.prefs.show_generator = !self.prefs.show_generator;
             }
+            MenuAction::SaveStyle => {
+                if self.prefs.ambience.style.is_none() && self.prefs.saved_style().is_none() {
+                    self.prefs.show_generator = true;
+                    self.start_naming(None);
+                }
+            }
             MenuAction::TileStyle(style) => self.prefs.tile_style = style,
             MenuAction::TileSize(size) => self.prefs.tile_size = size,
             MenuAction::NextTileSize => {
@@ -611,7 +620,7 @@ impl OlioApp {
             MenuAction::ToggleAmbience => {
                 self.execute(Command::SetAmbience(!self.prefs.ambience.enabled));
                 let message = if self.prefs.ambience.enabled {
-                    format!("Ambience: {}", self.prefs.ambience.describe())
+                    format!("Ambience: {}", self.prefs.style_name())
                 } else {
                     "Ambience off".to_owned()
                 };
@@ -1067,6 +1076,15 @@ impl OlioApp {
                 Ok((set, tile)) => Ok(Change::Generated { set, tile }),
                 Err(tile) => Err(Change::Generated { set, tile }),
             },
+            Change::RemovedStyle { index, style } => {
+                match prefs::style_named(&self.prefs.styles, &style.name) {
+                    Some(at) => {
+                        let style = Box::new(self.prefs.styles.remove(at));
+                        Ok(Change::RemovedStyle { index: at, style })
+                    }
+                    None => Err(Change::RemovedStyle { index, style }),
+                }
+            }
             Change::Moved {
                 set,
                 tile,
@@ -1184,6 +1202,16 @@ impl OlioApp {
                 Some(Change::RemovedTile { set, tile }) => Ok(Change::Generated { set, tile }),
                 _ => Err(Change::Generated { set, tile }),
             },
+            Change::RemovedStyle { index, style } => {
+                // Not over a style saved since under the same name.
+                if prefs::style_named(&self.prefs.styles, &style.name).is_some() {
+                    Err(Change::RemovedStyle { index, style })
+                } else {
+                    let index = index.min(self.prefs.styles.len());
+                    self.prefs.styles.insert(index, (*style).clone());
+                    Ok(Change::RemovedStyle { index, style })
+                }
+            }
             Change::Moved {
                 set,
                 tile,
@@ -1379,6 +1407,78 @@ impl OlioApp {
     fn resolve(&mut self, pending: Pending) {
         match pending {
             Pending::RemoveSet(id) => self.remove_set(id),
+            Pending::RemoveStyle(index) => self.remove_style(index),
+        }
+    }
+
+    // ----- saved styles ---------------------------------------------------
+
+    /// Starts typing a name: for the Custom settings as a new style, or
+    /// for the saved style at `of`.
+    fn start_naming(&mut self, of: Option<usize>) {
+        let text = match of {
+            Some(index) => match self.prefs.styles.get(index) {
+                Some(style) => style.name.clone(),
+                None => return,
+            },
+            None => self.prefs.suggested_style_name(),
+        };
+        self.naming = Some(generator::Naming::new(text, of));
+    }
+
+    /// Saves the Generator's settings under the name typed (replacing a
+    /// saved style of that name), or renames the saved style.
+    fn name_style(&mut self) {
+        let Some(naming) = self.naming.take() else {
+            return;
+        };
+        let name = naming.text.trim().to_owned();
+        if prefs::style_name_problem(&self.prefs.styles, &name, naming.of).is_some() {
+            self.naming = Some(naming);
+            return;
+        }
+        let message = match naming.of {
+            Some(index) => {
+                let Some(style) = self.prefs.styles.get_mut(index) else {
+                    return;
+                };
+                style.name = name.clone();
+                format!("Renamed the style to “{name}”")
+            }
+            None => {
+                let style = UserStyle::new(name.clone(), self.prefs.ambience);
+                match prefs::style_named(&self.prefs.styles, &name) {
+                    Some(index) => {
+                        self.prefs.styles[index] = style;
+                        format!("Updated the style “{name}”")
+                    }
+                    None => {
+                        self.prefs.styles.push(style);
+                        format!("Saved the style “{name}”")
+                    }
+                }
+            }
+        };
+        self.set_status(message, false);
+    }
+
+    fn ask_remove_style(&mut self, index: usize) {
+        let Some(style) = self.prefs.styles.get(index) else {
+            return;
+        };
+        self.confirm = Some(Confirm {
+            title: format!("Remove the style “{}”?", style.name),
+            body: "Its settings go with it; tracks made from it stay.".to_owned(),
+            verb: "Remove",
+            pending: Pending::RemoveStyle(index),
+        });
+    }
+
+    /// Removes a saved style; Undo puts it back.
+    fn remove_style(&mut self, index: usize) {
+        if index < self.prefs.styles.len() {
+            let style = Box::new(self.prefs.styles.remove(index));
+            self.record(Change::RemovedStyle { index, style });
         }
     }
 
@@ -1394,6 +1494,7 @@ impl OlioApp {
             ctx.clone(),
             self.store.clone(),
             self.prefs.ambience,
+            &self.prefs.track_name(),
             self.prefs.track_seconds,
             self.current,
         );
@@ -1819,6 +1920,7 @@ impl OlioApp {
                 .collect();
             playing.sort_by(|a, b| a.0.cmp(b.0));
             let ambience = &self.prefs.ambience;
+            let style_name = self.prefs.style_name();
             if playing.is_empty() && !ambience.enabled {
                 ui.weak("Nothing playing");
             }
@@ -1827,7 +1929,7 @@ impl OlioApp {
                 // click switches it off.
                 let emoji = generator::emoji(ambience.background);
                 let color = ui.visuals().weak_text_color();
-                let text = RichText::new(format!("■ {}", ambience.describe())).color(color);
+                let text = RichText::new(format!("■ {style_name}")).color(color);
                 let bubble = match self.images.texture(ui.ctx(), emoji) {
                     Some(texture) => {
                         let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
@@ -1835,7 +1937,7 @@ impl OlioApp {
                             egui::vec2(16.0, 16.0),
                         ));
                         let stop = RichText::new("■").color(color);
-                        let name = RichText::new(ambience.describe()).color(color);
+                        let name = RichText::new(&style_name).color(color);
                         egui::Button::new((stop, picture, name))
                     }
                     None => egui::Button::new(text),
@@ -2094,6 +2196,8 @@ impl eframe::App for OlioApp {
                 min_columns: self.current_set().min_columns(),
                 fit_columns: self.fit_columns(),
                 playing: !self.playing.is_empty(),
+                custom_style: self.prefs.ambience.style.is_none()
+                    && self.prefs.saved_style().is_none(),
             };
             actions.extend(menu::bar(ui, &state));
             ui.separator();
@@ -2144,13 +2248,15 @@ impl eframe::App for OlioApp {
                 track_seconds: self.prefs.track_seconds,
                 set_name: &set.name,
                 details: self.prefs.generator_details,
+                styles: &self.prefs.styles,
+                saved: self.prefs.saved_style(),
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
                 .default_size(380.0)
                 .min_size(320.0)
                 .show(ui, |ui| {
-                    generator::show(ui, &mut self.prefs.ambience, &view)
+                    generator::show(ui, &mut self.prefs.ambience, &view, &mut self.naming)
                 })
                 .inner;
             Vec::new()
@@ -2244,6 +2350,23 @@ impl eframe::App for OlioApp {
                         generation.cancel();
                     }
                 }
+                generator::Action::SaveStyle => self.start_naming(None),
+                generator::Action::RenameStyle(index) => self.start_naming(Some(index)),
+                generator::Action::NameStyle => self.name_style(),
+                generator::Action::CancelNaming => self.naming = None,
+                generator::Action::RemoveStyle(index) => self.ask_remove_style(index),
+            }
+        }
+        // A name being typed is for the settings it was started for.
+        if let Some(naming) = &self.naming {
+            let saved = self.prefs.saved_style();
+            let still = self.prefs.show_generator
+                && match naming.of {
+                    None => self.prefs.ambience.style.is_none() && saved.is_none(),
+                    Some(index) => saved == Some(index),
+                };
+            if !still {
+                self.naming = None;
             }
         }
 

@@ -104,6 +104,13 @@ On a generation bump, re-check every line below and update the versions.
   set, or the default `olio/app.ron` lands in the library folder on
   case-insensitive file systems.
 
+- Widgets without an explicit id take one from their place among their
+  siblings, so a widget that appears only sometimes (a button shown once
+  settings turn Custom) changes the ids of every widget after it, and a
+  focused slider below loses its focus. Wrap the part that varies in
+  `ui.scope`, which takes one id whatever it holds (the Generator's Style
+  block does).
+
 ## egui_kittest 0.36
 
 - `Harness::builder().build_eframe(|cc| App::new(cc, ...))` runs the real
@@ -124,5 +131,9 @@ On a generation bump, re-check every line below and update the versions.
   `get_by_role_and_label(Role::ComboBox, "Style")`, click it, step, then
   click the entry by label in the popup (`pick_style` in the window
   tests). Sliders in a grid are named the same way.
+- A popup's entry is only clicked if the pointer was over the popup the
+  frame before: `hover()`, step, then `click()`. A long list scrolls
+  inside the popup, so `scroll_to_me()` first. A `Modal` needs about ten
+  frames to place itself before its buttons can be clicked.
 - `.wgpu()` on the builder plus `harness.render()` gives an image; it needs
   a GPU adapter, so rendering tests are opt-in (`OLIO_RENDER=1`).

@@ -801,6 +801,17 @@ impl AmbienceSettings {
         (self.variety, self.concentration, self.chaos) = mood.character();
     }
 
+    /// True when the music is the same: everything but whether it plays,
+    /// the variation and the style it came from.
+    pub fn same_music(&self, other: &Self) -> bool {
+        Self {
+            enabled: other.enabled,
+            seed: other.seed,
+            style: other.style,
+            ..*self
+        } == *other
+    }
+
     pub fn layer(&self, instrument: Instrument) -> &Layer {
         &self.layers[instrument]
     }
@@ -1328,6 +1339,21 @@ mod tests {
         }
         settings.chaos += 0.01;
         assert_eq!(settings.mood(), None);
+    }
+
+    #[test]
+    fn the_same_music_ignores_playing_the_variation_and_the_style() {
+        let rain = Style::RainStudy.settings();
+        let mut other = AmbienceSettings {
+            enabled: true,
+            seed: 9,
+            style: None,
+            ..rain
+        };
+        assert!(rain.same_music(&other));
+        other.chaos = 0.3;
+        assert!(!rain.same_music(&other));
+        assert!(!rain.same_music(&Style::Campfire.settings()));
     }
 
     #[test]
