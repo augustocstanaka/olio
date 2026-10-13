@@ -1,5 +1,6 @@
 //! The Generator: a panel in place of the inspector where the ambience is
-//! shaped (style, key, background, instruments, presence, form), played
+//! shaped (style, key, character, background, instruments, presence,
+//! form), played
 //! live under the sounds, and rendered to tracks that land on tiles.
 //!
 //! The settings live in the preferences and go to the engine when they
@@ -56,6 +57,29 @@ pub fn emoji(background: Background) -> &'static str {
         Background::Desert => "🏜️",
         Background::Fire => "🔥",
     }
+}
+
+/// The character in words: "Comes back to a motif now and then, around
+/// the chord, in the key."
+pub fn character_words(settings: &AmbienceSettings) -> String {
+    let variety = match settings.variety {
+        v if v < 0.2 => "Repeats a short motif",
+        v if v < 0.45 => "Comes back to a motif often",
+        v if v < 0.7 => "Comes back to a motif now and then",
+        _ => "Always finding new melodies",
+    };
+    let concentration = match settings.concentration {
+        c if c < 0.3 => "wandering wide",
+        c if c < 0.7 => "around the chord",
+        _ => "close to the home note",
+    };
+    let chaos = match settings.chaos {
+        c if c <= 0.0 => "in the key",
+        c if c < 0.35 => "a note outside the key now and then",
+        c if c < 0.7 => "with clashes and notes outside the key",
+        _ => "dissonant and unsettled",
+    };
+    format!("{variety}, {concentration}, {chaos}.")
 }
 
 /// A track's title: its style, or its key when Custom, and its length:
@@ -254,6 +278,7 @@ pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Ac
             );
             ui.add_space(4.0);
             section(ui, "Key", |ui| key(ui, settings));
+            section(ui, "Character", |ui| character(ui, settings));
             section(ui, "Background", |ui| background(ui, settings, view.images));
             section(ui, "Instruments", |ui| instruments(ui, settings));
             section(ui, "Presence", |ui| presence(ui, settings));
@@ -394,6 +419,56 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
         ScaleKind::name,
         ScaleKind::character,
     );
+}
+
+fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    egui::Grid::new("olio-generator-character")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.spacing_mut().slider_width = 150.0;
+            amount(
+                ui,
+                "Variety",
+                &mut settings.variety,
+                "Low: a short motif comes back again and again, on few chords, in an even \
+                 rhythm. High: new melodies, more chords, freer rhythm",
+            );
+            amount(
+                ui,
+                "Concentration",
+                &mut settings.concentration,
+                "High: the notes gather around the chord and the home note, in small steps \
+                 and a narrow range. Low: they wander wide",
+            );
+            amount(
+                ui,
+                "Chaos",
+                &mut settings.chaos,
+                "Dissonance: notes from outside the key, clashing seconds and tritones, \
+                 chords from anywhere and looser timing, more as it rises",
+            );
+        });
+    ui.weak(character_words(settings));
+}
+
+/// A grid row: `name` and a slider showing the 0-to-1 `value` in percent.
+fn amount(ui: &mut Ui, name: &str, value: &mut f32, hint: &str) {
+    let label = ui.label(name).on_hover_text(hint);
+    let mut percent = *value * 100.0;
+    if ui
+        .add(
+            egui::Slider::new(&mut percent, 0.0..=100.0)
+                .suffix(" %")
+                .max_decimals(0),
+        )
+        .labelled_by(label.id)
+        .on_hover_text(hint)
+        .changed()
+    {
+        *value = percent / 100.0;
+    }
+    ui.end_row();
 }
 
 fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages) {
@@ -617,5 +692,21 @@ mod tests {
         for background in Background::ALL {
             assert!(!emoji(background).is_empty());
         }
+    }
+
+    #[test]
+    fn the_character_reads_in_words() {
+        let mut settings = Style::RainStudy.settings();
+        assert_eq!(
+            character_words(&settings),
+            "Comes back to a motif now and then, around the chord, in the key."
+        );
+        settings.variety = 0.0;
+        settings.concentration = 1.0;
+        settings.chaos = 0.9;
+        assert_eq!(
+            character_words(&settings),
+            "Repeats a short motif, close to the home note, dissonant and unsettled."
+        );
     }
 }

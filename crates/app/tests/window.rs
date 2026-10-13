@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use olio_app::import::Importer;
 use olio_app::prefs::{TileSize, TileStyle};
 use olio_app::{OlioApp, Options};
@@ -961,6 +961,43 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
 }
 
 #[test]
+fn the_generator_character_sliders_move_and_make_the_settings_custom() {
+    use egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    click_in_generator(&mut harness, "Campfire");
+    let before = harness.state().preferences().ambience;
+    assert_eq!(before.chaos, 0.0);
+    harness.get_by_label_contains("in the key.");
+
+    // Set as a screen reader would: the window's arrow keys move between
+    // tiles.
+    let set = |harness: &mut Harness<'static, OlioApp>, name: &str, percent: f64| {
+        let slider = harness.get_by_role_and_label(Role::Slider, name);
+        slider.scroll_to_me();
+        let (target_node, target_tree) = slider.accesskit_node().locate();
+        harness.event(egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                target_node,
+                target_tree,
+                action: egui::accesskit::Action::SetValue,
+                data: Some(egui::accesskit::ActionData::NumericValue(percent)),
+            },
+        ));
+        harness.run_steps(3);
+    };
+    set(&mut harness, "Chaos", 40.0);
+    set(&mut harness, "Variety", 10.0);
+
+    let settings = harness.state().preferences().ambience;
+    assert_eq!((settings.chaos, settings.variety), (0.4, 0.1));
+    assert_eq!(settings.concentration, before.concentration);
+    assert_eq!(settings.describe(), "Custom: D Mixolydian");
+    harness.get_by_label_contains("Repeats a short motif, around the chord, with clashes");
+}
+
+#[test]
 fn the_generator_takes_the_inspectors_place_and_gives_it_back() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
@@ -1232,8 +1269,10 @@ fn render_the_window_to_a_png() {
     harness.run_steps(2);
     harness.get_by_label("Play live").click();
     harness.run_steps(5);
-    // Down to the backgrounds and instruments.
-    harness.get_by_label("Bass").scroll_to_me();
+    // Down to the character and the backgrounds.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "Chaos")
+        .scroll_to_me();
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-generator.png")).unwrap();

@@ -6,6 +6,15 @@
 //! Declarative presence puts the notes on a pulse and walks a cadence; the
 //! other presences drift. Pieces have an intro, a close that thins out and
 //! lands on the root, and a pause.
+//!
+//! The character shapes the lines. Variety: the harp, piano and violin
+//! each remember a short motif and come back to it, and its rhythm, more
+//! often as variety falls; as it rises there are more chords, changing
+//! sooner, and freer gaps. Concentration: the lines keep nearer the chord
+//! and the home note, in smaller steps and a narrower range. Chaos: notes
+//! a semitone or a tritone off, clashing doubles and clusters, chords from
+//! anywhere in the key, looser timing. Each at its rest draws nothing from
+//! the random source, so it leaves the rest of the music as it was.
 
 use super::{AmbienceSettings, Form, Instrument, Rng};
 
@@ -43,6 +52,74 @@ fn frames(rate: u32, seconds: f32) -> u64 {
     (seconds.max(0.0) * rate as f32) as u64
 }
 
+/// The most notes a motif holds.
+const MOTIF: usize = 8;
+
+/// How many notes a motif has: three when variety is lowest, eight at
+/// the most.
+fn motif_length(variety: f32) -> usize {
+    3 + (variety * 5.0).round() as usize
+}
+
+/// How often a line plays its motif through again rather than new notes.
+fn repeat_chance(variety: f32) -> f32 {
+    (1.0 - variety).powi(2) * 0.85
+}
+
+/// How far gaps spread around their middle: 1 at the middle variety.
+fn spread(variety: f32) -> f32 {
+    0.3 + 1.4 * variety
+}
+
+/// The degrees a line keeps between, above its register: two octaves at
+/// the middle concentration, one when concentrated, three when not.
+fn span(concentration: f32, len: i32) -> (i32, i32) {
+    let low = (len as f32 * (concentration - 0.5).max(0.0)).round() as i32;
+    let high = low + (len as f32 * (3.0 - 2.0 * concentration)).round() as i32;
+    (low, high)
+}
+
+/// A melodic instrument's memory: its last degree, and a short motif
+/// (degrees above the chord, and the gaps after them) it comes back to.
+#[derive(Clone, Copy, Debug)]
+struct Line {
+    degree: i32,
+    motif: [(i32, f32); MOTIF],
+    /// Notes written into the motif, up to [`MOTIF`].
+    written: usize,
+    /// The motif's next note and its last; whether this time through
+    /// the motif repeats, and whether the last note was the motif's.
+    next: usize,
+    slot: usize,
+    repeating: bool,
+    again: bool,
+}
+
+impl Line {
+    fn new(degree: i32) -> Self {
+        Self {
+            degree,
+            motif: [(0, 1.0); MOTIF],
+            written: 0,
+            next: 0,
+            slot: 0,
+            repeating: false,
+            again: false,
+        }
+    }
+}
+
+/// How a melodic instrument picks its new notes, at the middle
+/// concentration.
+struct Shape<'a> {
+    /// How often a chord tone rather than a step.
+    chord: f32,
+    /// The chord tones it reaches for, as degrees above the chord.
+    tones: &'a [i32],
+    /// Its widest step, in degrees.
+    widest: i32,
+}
+
 /// Where a piece is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
@@ -62,12 +139,11 @@ pub struct Composer {
     queued: usize,
     /// When each instrument next plays, by [`Instrument::ALL`] index.
     next: [u64; Instrument::COUNT],
-    /// The harp's last scale degree and how many notes of a phrase are left.
-    harp_degree: i32,
+    /// The melodic lines, and how many notes of a harp phrase are left.
+    harp: Line,
     phrase_left: u8,
-    /// The piano's and violin's last scale degrees.
-    piano_degree: i32,
-    violin_degree: i32,
+    piano: Line,
+    violin: Line,
     /// The harmony: a chord on this scale degree, until this frame.
     chord: i32,
     next_harmony: u64,
@@ -100,10 +176,10 @@ impl Composer {
             queue: [None; QUEUE],
             queued: 0,
             next: [0; Instrument::COUNT],
-            harp_degree: 4,
+            harp: Line::new(4),
             phrase_left: 0,
-            piano_degree: 4,
-            violin_degree: 2,
+            piano: Line::new(4),
+            violin: Line::new(2),
             chord: 0,
             next_harmony: 0,
             cadence_step: 0,
@@ -138,10 +214,10 @@ impl Composer {
         self.chord = 0;
         self.cadence_step = 0;
         self.next_harmony = now + self.harmony_span(settings);
-        self.harp_degree = 4;
+        self.harp = Line::new(4);
         self.phrase_left = 0;
-        self.piano_degree = 4;
-        self.violin_degree = 2;
+        self.piano = Line::new(4);
+        self.violin = Line::new(2);
         self.home = false;
         self.ended_on_root = false;
         for instrument in Instrument::ALL {
@@ -161,13 +237,20 @@ impl Composer {
         (60.0 / f32::from(settings.tempo.max(1)) * self.rate as f32) as u64
     }
 
-    /// How long the harmony stays put.
+    /// How long the harmony stays put: in free time, longer as variety
+    /// falls.
     fn harmony_span(&mut self, settings: &AmbienceSettings) -> u64 {
         if settings.presence.pulsed() {
             self.beat(settings) * 8
         } else {
-            frames(self.rate, self.rng.range(18.0, 45.0))
+            let seconds = self.rng.range(18.0, 45.0) * (1.6 - 1.2 * settings.variety);
+            frames(self.rate, seconds)
         }
+    }
+
+    /// True with `probability`, drawing nothing when it is 0 or less.
+    fn maybe(&mut self, probability: f32) -> bool {
+        probability > 0.0 && self.rng.chance(probability)
     }
 
     /// The gain the instruments play at now: 1, or less as a piece closes.
@@ -282,19 +365,21 @@ impl Composer {
         }
         self.chord = if settings.presence.pulsed() {
             self.cadence_step = (self.cadence_step + 1) % CADENCE.len();
-            CADENCE[self.cadence_step]
+            let mut chord = CADENCE[self.cadence_step];
+            // Variety stands in the supertonic, submediant or mediant now
+            // and then; chaos any chord.
+            if self.maybe((settings.variety - 0.5) * 0.6) {
+                chord = [1, 5, 2][self.rng.below(3) as usize];
+            }
+            if self.maybe(settings.chaos * 0.5) {
+                chord = self.rng.below(settings.scale.degrees() as u32) as i32;
+            }
+            chord
         } else {
-            // Mostly home, with the subdominant, submediant and supertonic
-            // for colour; never the same chord twice running.
+            // Never the same chord twice running.
             let mut chord = self.chord;
             while chord == self.chord {
-                chord = match self.rng.below(10) {
-                    0..=3 => 0,
-                    4..=5 => 3,
-                    6..=7 => 5,
-                    8 => 1,
-                    _ => 4,
-                };
+                chord = self.pick_chord(settings);
             }
             chord
         };
@@ -302,6 +387,33 @@ impl Composer {
         // The pad voices the new chord soon.
         let pad = Instrument::Pad.index();
         self.next[pad] = self.next[pad].min(now + frames(self.rate, self.rng.range(0.3, 1.5)));
+    }
+
+    /// A chord in free time: mostly home (more so with concentration, less
+    /// with variety), the subdominant, submediant and dominant for colour,
+    /// the supertonic and mediant as variety rises; with chaos, any.
+    fn pick_chord(&mut self, settings: &AmbienceSettings) -> i32 {
+        if self.maybe(settings.chaos * 0.5) {
+            return self.rng.below(settings.scale.degrees() as u32) as i32;
+        }
+        let variety = settings.variety;
+        let weights = [
+            (0, 4.0 * (1.5 - variety) * (0.5 + settings.concentration)),
+            (3, 2.0),
+            (5, 2.0),
+            (1, 2.0 * variety),
+            (4, 1.0),
+            (2, 2.0 * (2.0 * variety - 1.0).max(0.0)),
+        ];
+        let total: f32 = weights.iter().map(|(_, weight)| weight).sum();
+        let mut roll = self.rng.unit() * total;
+        for (chord, weight) in weights {
+            if roll < weight {
+                return chord;
+            }
+            roll -= weight;
+        }
+        0
     }
 
     /// Keeps the drone on the root, retuning it when the key changes.
@@ -364,7 +476,7 @@ impl Composer {
                 self.next[index] = to;
                 return;
             }
-            let next_gap = match instrument {
+            let mut next_gap = match instrument {
                 Instrument::Bass => self.bass(settings, at, spacing),
                 Instrument::Harp => self.harp(settings, at, spacing),
                 Instrument::Bells => self.bells(settings, at, spacing),
@@ -375,6 +487,13 @@ impl Composer {
                 Instrument::Drums => self.drums(settings, at, spacing),
                 Instrument::Drone => 0,
             };
+            // Chaos loosens free time: a note early or late. The pad keeps
+            // to the harmony.
+            let chaos = settings.chaos;
+            if instrument != Instrument::Pad && !settings.presence.pulsed() && self.maybe(chaos) {
+                let stretch = self.rng.range(1.0 - 0.6 * chaos, 1.0 + 0.6 * chaos);
+                next_gap = (next_gap as f32 * stretch) as u64;
+            }
             self.next[index] = at + next_gap.max(1);
         }
     }
@@ -406,6 +525,103 @@ impl Composer {
         }
     }
 
+    /// A gap factor somewhere in `low..high`: nearer the middle when
+    /// variety is low, further out when high.
+    fn gap_factor(&mut self, settings: &AmbienceSettings, low: f32, high: f32) -> f32 {
+        let middle = (low + high) / 2.0;
+        let half = (high - low) / 2.0 * spread(settings.variety);
+        self.rng.range((middle - half).max(0.1), middle + half)
+    }
+
+    /// A line's next degree. Each time through, the motif may repeat
+    /// (more often as variety falls), a note of it changing now and then
+    /// (more often as it rises). Otherwise a new note: the home note or a
+    /// chord tone, more often as concentration rises, else a step from the
+    /// last, wider as it falls. Kept to the line's span.
+    fn melody(&mut self, settings: &AmbienceSettings, line: &mut Line, shape: &Shape) -> i32 {
+        let len = settings.scale.degrees();
+        let concentration = settings.concentration;
+        let length = motif_length(settings.variety);
+        let slot = line.next % length;
+        line.slot = slot;
+        line.next = (slot + 1) % length;
+        if slot == 0 {
+            line.repeating = line.written >= length && self.maybe(repeat_chance(settings.variety));
+        }
+        line.again = line.repeating && !self.maybe(settings.variety * 0.5);
+        let degree = if line.again {
+            self.chord + line.motif[slot].0
+        } else if self.maybe(concentration - 0.5) {
+            // The home note, in the octave nearest the last note.
+            (line.degree as f32 / len as f32).round() as i32 * len
+        } else if self
+            .rng
+            .chance((shape.chord + (concentration - 0.5) * 0.8).clamp(0.1, 0.97))
+        {
+            self.chord + shape.tones[self.rng.below(shape.tones.len() as u32) as usize]
+        } else {
+            let widest = (shape.widest as f32 * 2.0 * (1.0 - concentration))
+                .round()
+                .max(1.0) as i32;
+            let mut step = 0;
+            while step == 0 {
+                step = self.rng.below(2 * widest as u32 + 1) as i32 - widest;
+            }
+            line.degree + step
+        };
+        let (low, high) = span(concentration, len);
+        line.degree = degree.clamp(low, high);
+        if !line.again {
+            line.motif[slot].0 = line.degree - self.chord;
+            line.written = (line.written + 1).min(MOTIF);
+        }
+        line.degree
+    }
+
+    /// The gap after a line's note, `spacing` times a factor in
+    /// `low..high`: the motif's own when the note was the motif again, so
+    /// a motif keeps its rhythm; else a new one, remembered.
+    fn line_gap(
+        &mut self,
+        settings: &AmbienceSettings,
+        line: &mut Line,
+        spacing: f32,
+        low: f32,
+        high: f32,
+    ) -> u64 {
+        let factor = if line.again {
+            line.motif[line.slot].1
+        } else {
+            let factor = self.gap_factor(settings, low, high);
+            line.motif[line.slot].1 = factor;
+            factor
+        };
+        frames(self.rate, spacing * factor)
+    }
+
+    /// Under chaos, now and then a note a semitone off, out of the key
+    /// when it can be; at high chaos, sometimes a tritone away instead.
+    fn unsettle(&mut self, settings: &AmbienceSettings, midi: u8, chance: f32) -> u8 {
+        let chaos = settings.chaos;
+        if !self.maybe(chaos * chance) {
+            return midi;
+        }
+        if self.maybe(chaos - 0.6) {
+            return if midi >= 66 { midi - 6 } else { midi + 6 };
+        }
+        let (up, down) = (midi.saturating_add(1).min(127), midi.saturating_sub(1));
+        let (first, second) = if self.rng.chance(0.5) {
+            (up, down)
+        } else {
+            (down, up)
+        };
+        if settings.scale.contains(first) && !settings.scale.contains(second) {
+            second
+        } else {
+            first
+        }
+    }
+
     fn note(
         &mut self,
         at: u64,
@@ -427,133 +643,162 @@ impl Composer {
         });
     }
 
-    /// The root of the chord, its fifth, the third now and then, and the
-    /// root an octave down for weight, rarely. Returns the gap to the next.
+    /// The root of the chord (more often with concentration), its fifth,
+    /// the third now and then, and the root an octave down for weight,
+    /// rarely; with chaos, a tritone above the root. Returns the gap to
+    /// the next.
     fn bass(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
+        let root = (0.5 + (settings.concentration - 0.5) * 0.8).clamp(0.1, 0.9);
+        let rest = 1.0 - root;
         let roll = self.rng.unit();
         let degree = self.chord
-            + if roll < 0.5 {
+            + if roll < root {
                 0
-            } else if roll < 0.75 {
+            } else if roll < root + rest * 0.5 {
                 4
-            } else if roll < 0.9 {
+            } else if roll < root + rest * 0.8 {
                 2
             } else {
                 -settings.scale.degrees()
             };
-        let midi = settings.note(Instrument::Bass, degree);
+        let mut midi = settings.note(Instrument::Bass, degree);
+        if self.maybe(settings.chaos * 0.3) {
+            midi = settings.note(Instrument::Bass, self.chord) + 6;
+        }
         let velocity = self.rng.range(0.55, 0.95);
         let pan = self.rng.range(-0.15, 0.15);
         self.note(at, Instrument::Bass, midi, velocity, pan, 0);
-        frames(self.rate, spacing * self.rng.range(0.55, 1.6))
+        frames(self.rate, spacing * self.gap_factor(settings, 0.55, 1.6))
     }
 
     /// Mostly the chord's tones, else a small step; now and then a short
-    /// rising phrase.
+    /// rising phrase, more often with variety.
     fn harp(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
-        let degree = if self.phrase_left > 0 {
-            self.harp_degree + 1 + self.rng.below(2) as i32
-        } else if self.rng.chance(0.6) {
-            let tones = [0, 2, 4, len, len + 2];
-            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
+        let mut line = self.harp;
+        if self.phrase_left > 0 {
+            let (low, high) = span(settings.concentration, len);
+            line.degree = (line.degree + 1 + self.rng.below(2) as i32).clamp(low, high);
         } else {
-            let mut step = 0;
-            while step == 0 {
-                step = self.rng.below(7) as i32 - 3;
-            }
-            self.harp_degree + step
-        };
-        self.harp_degree = degree.clamp(0, 2 * len);
-        let midi = settings.note(Instrument::Harp, self.harp_degree);
+            let shape = Shape {
+                chord: 0.6,
+                tones: &[0, 2, 4, len, len + 2],
+                widest: 3,
+            };
+            self.melody(settings, &mut line, &shape);
+        }
+        let midi = settings.note(Instrument::Harp, line.degree);
+        let midi = self.unsettle(settings, midi, 0.4);
         let velocity = self.rng.range(0.35, 0.8);
         let pan = self.rng.range(-0.65, 0.65);
         self.note(at, Instrument::Harp, midi, velocity, pan, 0);
-        if self.phrase_left > 0 {
+        let gap = if self.phrase_left > 0 {
             self.phrase_left -= 1;
-            return frames(self.rate, self.rng.range(0.13, 0.24));
-        }
-        if self.rng.chance(0.22) {
+            frames(self.rate, self.rng.range(0.13, 0.24))
+        } else if self.rng.chance(0.22 * spread(settings.variety)) {
             self.phrase_left = 1 + self.rng.below(2) as u8;
-            return frames(self.rate, self.rng.range(0.13, 0.24));
-        }
-        frames(self.rate, spacing * self.rng.range(0.5, 1.7))
+            frames(self.rate, self.rng.range(0.13, 0.24))
+        } else {
+            self.line_gap(settings, &mut line, spacing, 0.5, 1.7)
+        };
+        self.harp = line;
+        gap
     }
 
-    /// Chord tones high up, one at a time, far apart.
+    /// Chord tones high up, one at a time, far apart; the home note
+    /// more often with concentration.
     fn bells(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
-        let tones = [0, 2, 4, len, len + 2, len + 4];
-        let degree = self.chord + tones[self.rng.below(tones.len() as u32) as usize];
+        let degree = if self.maybe(settings.concentration - 0.5) {
+            len
+        } else {
+            let tones = [0, 2, 4, len, len + 2, len + 4];
+            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
+        };
         let midi = settings.note(Instrument::Bells, degree);
+        let midi = self.unsettle(settings, midi, 0.4);
         let velocity = self.rng.range(0.3, 0.7);
         let pan = self.rng.range(-0.7, 0.7);
         self.note(at, Instrument::Bells, midi, velocity, pan, 0);
-        frames(self.rate, spacing * self.rng.range(0.4, 2.0))
+        frames(self.rate, spacing * self.gap_factor(settings, 0.4, 2.0))
     }
 
-    /// One long bowed note at a time: the chord's root, third or fifth.
+    /// One long bowed note at a time: the chord's root, third or fifth;
+    /// the home note more often with concentration.
     fn strings(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
-        let degree = self.chord + [0, 2, 4, 0][self.rng.below(4) as usize];
+        let degree = if self.maybe(settings.concentration - 0.5) {
+            0
+        } else {
+            self.chord + [0, 2, 4, 0][self.rng.below(4) as usize]
+        };
         let midi = settings.note(Instrument::Strings, degree);
+        let midi = self.unsettle(settings, midi, 0.25);
         let seconds = self.rng.range(4.0, 9.0);
         let duration = frames(self.rate, seconds);
         let velocity = self.rng.range(0.4, 0.8);
         let pan = self.rng.range(-0.3, 0.3);
         self.note(at, Instrument::Strings, midi, velocity, pan, duration);
-        frames(
-            self.rate,
-            (seconds * self.rng.range(0.8, 1.3)).max(spacing * 0.5),
-        )
+        let factor = self.gap_factor(settings, 0.8, 1.3);
+        frames(self.rate, (seconds * factor).max(spacing * 0.5))
     }
 
     /// A struck note, mostly a chord tone, else a step from the last; a
-    /// third or a sixth below it now and then, softer.
+    /// third or a sixth below it now and then, softer, or with chaos a
+    /// second or a tritone.
     fn piano(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
-        let degree = if self.rng.chance(0.55) {
-            let tones = [0, 2, 4, len];
-            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
-        } else {
-            let step = [-2, -1, 1, 2][self.rng.below(4) as usize];
-            self.piano_degree + step
+        let mut line = self.piano;
+        let shape = Shape {
+            chord: 0.55,
+            tones: &[0, 2, 4, len],
+            widest: 2,
         };
-        self.piano_degree = degree.clamp(0, 2 * len);
-        let midi = settings.note(Instrument::Piano, self.piano_degree);
+        let degree = self.melody(settings, &mut line, &shape);
+        let midi = settings.note(Instrument::Piano, degree);
+        let midi = self.unsettle(settings, midi, 0.35);
         let velocity = self.rng.range(0.3, 0.65);
         let pan = self.rng.range(-0.35, 0.35);
         self.note(at, Instrument::Piano, midi, velocity, pan, 0);
         if self.rng.chance(0.3) {
-            let below = [2, 5][self.rng.below(2) as usize];
-            let low = settings.note(Instrument::Piano, self.piano_degree - below);
+            let low = if self.maybe(settings.chaos * 0.7) {
+                midi.saturating_sub([1, 2, 6][self.rng.below(3) as usize])
+            } else {
+                let below = [2, 5][self.rng.below(2) as usize];
+                settings.note(Instrument::Piano, degree - below)
+            };
             self.note(at, Instrument::Piano, low, velocity * 0.7, pan - 0.1, 0);
         }
-        frames(self.rate, spacing * self.rng.range(0.5, 1.7))
+        let gap = self.line_gap(settings, &mut line, spacing, 0.5, 1.7);
+        self.piano = line;
+        gap
     }
 
     /// A short pluck high up on a chord tone or a step away; a quarter of
     /// the time a neighbour answers it.
     fn violin(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
-        let degree = if self.rng.chance(0.6) {
-            let tones = [0, 2, 4, len, len + 2];
-            self.chord + tones[self.rng.below(tones.len() as u32) as usize]
-        } else {
-            let step = [-2, -1, 1, 2][self.rng.below(4) as usize];
-            self.violin_degree + step
+        let mut line = self.violin;
+        let shape = Shape {
+            chord: 0.6,
+            tones: &[0, 2, 4, len, len + 2],
+            widest: 2,
         };
-        self.violin_degree = degree.clamp(0, 2 * len);
-        let midi = settings.note(Instrument::Violin, self.violin_degree);
+        let degree = self.melody(settings, &mut line, &shape);
+        let midi = settings.note(Instrument::Violin, degree);
+        let midi = self.unsettle(settings, midi, 0.45);
         let velocity = self.rng.range(0.35, 0.7);
         let pan = self.rng.range(-0.5, 0.5);
         self.note(at, Instrument::Violin, midi, velocity, pan, 0);
         if self.rng.chance(0.25) {
             let step = if self.rng.chance(0.5) { 1 } else { -1 };
-            let answer = settings.note(Instrument::Violin, (self.violin_degree + step).max(0));
+            let answer = settings.note(Instrument::Violin, (degree + step).max(0));
+            let answer = self.unsettle(settings, answer, 0.45);
             let later = at + self.answer(settings, 0.25, 0.4);
             self.note(later, Instrument::Violin, answer, velocity * 0.8, pan, 0);
         }
-        frames(self.rate, spacing * self.rng.range(0.5, 1.8))
+        let gap = self.line_gap(settings, &mut line, spacing, 0.5, 1.8);
+        self.violin = line;
+        gap
     }
 
     /// A soft frame drum on the root, or a shaker; now and then two
@@ -573,19 +818,38 @@ impl Composer {
             let velocity = self.rng.range(0.2, 0.4);
             self.note(later, Instrument::Drums, SHAKER, velocity, -pan, 0);
         }
-        frames(self.rate, spacing * self.rng.range(0.7, 1.8))
+        frames(self.rate, spacing * self.gap_factor(settings, 0.7, 1.8))
     }
 
-    /// The chord as three slow notes, a little staggered.
+    /// The chord as three slow notes, a little staggered; with chaos, a
+    /// note bent off now and then and a fourth that rubs against them: the
+    /// second, or at high chaos a semitone above the root.
     fn pad(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let seconds = self.rng.range(12.0, 22.0);
         let duration = frames(self.rate, seconds);
         let velocity = self.rng.range(0.5, 0.7);
         for (i, tone) in [0, 2, 4].into_iter().enumerate() {
             let midi = settings.note(Instrument::Pad, self.chord + tone);
+            let midi = self.unsettle(settings, midi, 0.2);
             let stagger = frames(self.rate, 0.35 * i as f32);
             let pan = (i as f32 - 1.0) * 0.4;
             self.note(at + stagger, Instrument::Pad, midi, velocity, pan, duration);
+        }
+        if self.maybe(settings.chaos * 0.8) {
+            let midi = if self.maybe(settings.chaos - 0.5) {
+                settings.note(Instrument::Pad, self.chord) + 1
+            } else {
+                settings.note(Instrument::Pad, self.chord + 1)
+            };
+            let stagger = frames(self.rate, 1.05);
+            self.note(
+                at + stagger,
+                Instrument::Pad,
+                midi,
+                velocity * 0.8,
+                0.0,
+                duration,
+            );
         }
         // Until the chord changes, or the notes die away.
         let gap = frames(self.rate, seconds * 0.9).min(self.next_harmony.saturating_sub(at).max(1));
@@ -795,6 +1059,152 @@ mod tests {
         assert!(
             drums.iter().any(|e| e.at % (beat / 2) != 0),
             "free time, not on a grid"
+        );
+    }
+
+    /// The piano alone, lively, at a character; its main notes (not the
+    /// doubles under them) in order.
+    fn piano_line(variety: f32, concentration: f32, chaos: f32, seed: u64) -> Vec<Event> {
+        let mut settings = Style::SeasidePiano.settings();
+        settings.enabled = true;
+        for instrument in Instrument::ALL {
+            settings.layer_mut(instrument).enabled = false;
+        }
+        *settings.layer_mut(Instrument::Piano) = Layer::on(0.7, Density::Lively);
+        settings.variety = variety;
+        settings.concentration = concentration;
+        settings.chaos = chaos;
+        let mut events: Vec<Event> = Vec::new();
+        for event in play(&settings, seed, 6) {
+            if events.last().is_none_or(|last| last.at != event.at) {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    /// The share of four-note figures, as steps through the scale (so a
+    /// motif moved to another chord is still the same figure), that
+    /// already came before.
+    fn repeated_figures(settings: &AmbienceSettings, events: &[Event]) -> f32 {
+        let intervals = settings.scale.kind.intervals();
+        let degree = |midi: u8| {
+            let above = i32::from(midi) - i32::from(settings.scale.root);
+            let class = above.rem_euclid(12) as u8;
+            let index = intervals.iter().position(|i| *i == class).unwrap() as i32;
+            above.div_euclid(12) * intervals.len() as i32 + index
+        };
+        let figures: Vec<[i32; 3]> = events
+            .windows(4)
+            .map(|w| {
+                let d: Vec<i32> = w.iter().map(|e| degree(e.note.midi)).collect();
+                [d[1] - d[0], d[2] - d[1], d[3] - d[2]]
+            })
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        let repeats = figures.iter().filter(|f| !seen.insert(**f)).count();
+        repeats as f32 / figures.len().max(1) as f32
+    }
+
+    #[test]
+    fn low_variety_comes_back_to_a_motif_and_high_variety_keeps_changing() {
+        let settings = Style::SeasidePiano.settings();
+        let measure = |variety| {
+            let line = piano_line(variety, 0.5, 0.0, 3);
+            // How unevenly the notes come: the spread of the gaps over
+            // their mean.
+            let gaps: Vec<f32> = line
+                .windows(2)
+                .map(|pair| (pair[1].at - pair[0].at) as f32)
+                .collect();
+            let mean = gaps.iter().sum::<f32>() / gaps.len() as f32;
+            let deviation = gaps.iter().map(|gap| (gap - mean).powi(2)).sum::<f32>();
+            let uneven = (deviation / gaps.len() as f32).sqrt() / mean;
+            (repeated_figures(&settings, &line), uneven)
+        };
+        let (still, middle, restless) = (measure(0.0), measure(0.5), measure(1.0));
+        assert!(
+            still.0 > 0.3 && still.0 > restless.0 * 3.0,
+            "figures come back: {still:?} {restless:?}"
+        );
+        assert!(
+            still.1 < 0.15 && still.1 < middle.1 && middle.1 < restless.1 && restless.1 > 0.4,
+            "and keep their rhythm: {still:?} {middle:?} {restless:?}"
+        );
+    }
+
+    #[test]
+    fn concentration_gathers_the_notes_around_home() {
+        let root = Style::SeasidePiano.settings().scale.root;
+        let measure = |concentration| {
+            let line = piano_line(0.5, concentration, 0.0, 5);
+            let low = line.iter().map(|e| e.note.midi).min().unwrap();
+            let high = line.iter().map(|e| e.note.midi).max().unwrap();
+            let home = line.iter().filter(|e| e.note.midi % 12 == root).count();
+            (high - low, home as f32 / line.len() as f32)
+        };
+        let (wide, middle, close) = (measure(0.0), measure(0.5), measure(1.0));
+        assert!(
+            wide.0 >= 30 && middle.0 < wide.0 && close.0 <= 12,
+            "the range narrows: {wide:?} {middle:?} {close:?}"
+        );
+        assert!(
+            close.1 > 0.35 && close.1 > wide.1 + 0.1,
+            "and keeps to the home note: {wide:?} {close:?}"
+        );
+    }
+
+    #[test]
+    fn chaos_brings_notes_from_outside_the_key_and_clusters() {
+        let measure = |chaos| {
+            let mut settings = Style::RainStudy.settings();
+            settings.enabled = true;
+            for layer in &mut settings.layers {
+                *layer = Layer::on(0.8, Density::Lively);
+            }
+            settings.chaos = chaos;
+            let events = play(&settings, 7, 4);
+            let pitched: Vec<&Event> = events
+                .iter()
+                .filter(|e| !(e.note.instrument == Instrument::Drums && e.note.midi == SHAKER))
+                .collect();
+            let outside = pitched
+                .iter()
+                .filter(|e| !settings.scale.contains(e.note.midi))
+                .count();
+            // The pad's chords: a chord's notes are all held as long. A
+            // cluster has two a semitone or a tone apart.
+            let mut chords: Vec<(u64, Vec<u8>)> = Vec::new();
+            for pad in of(&events, Instrument::Pad) {
+                let (duration, midi) = (pad.note.duration, pad.note.midi);
+                match chords.iter_mut().find(|(held, _)| *held == duration) {
+                    Some((_, chord)) => chord.push(midi),
+                    None => chords.push((duration, vec![midi])),
+                }
+            }
+            let rubs = |(_, chord): &&(u64, Vec<u8>)| {
+                chord.iter().any(|a| {
+                    chord.iter().any(|b| {
+                        let class = a.abs_diff(*b) % 12;
+                        matches!(class, 1 | 2 | 10 | 11)
+                    })
+                })
+            };
+            let clusters = chords.iter().filter(rubs).count();
+            (
+                outside as f32 / pitched.len() as f32,
+                clusters as f32 / chords.len() as f32,
+            )
+        };
+        let (calm, some, wild) = (measure(0.0), measure(0.25), measure(1.0));
+        assert_eq!(calm, (0.0, 0.0), "in the key, and no clusters");
+        assert!(
+            some.0 > 0.02 && wild.0 > some.0 && wild.0 > 0.2,
+            "notes from outside the key: {some:?} {wild:?}"
+        );
+        assert!(
+            wild.1 > 0.4 && wild.1 > some.1,
+            "the pad rubs: {some:?} {wild:?}"
         );
     }
 

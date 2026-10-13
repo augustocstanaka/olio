@@ -8,7 +8,8 @@
 //! The settings are built from independent parts, so each can grow on its
 //! own: the [`Scale`], the [`Layer`]s (one per [`Instrument`]), the
 //! [`Presence`] (how noticeable it is), the [`Form`] (endless, or pieces
-//! with a shape), and [`Style`] presets that fill them all in.
+//! with a shape), the character (variety, concentration and chaos), and
+//! [`Style`] presets that fill them all in.
 //!
 //! [`composer`] decides what plays when with no audio in it, so the musical
 //! rules are tested on their own; [`synth`] and [`background`] make the
@@ -650,6 +651,10 @@ impl Form {
 
 // ----- the settings and styles ---------------------------------------------
 
+/// Where variety and concentration sit unless moved: the middle.
+pub const DEFAULT_VARIETY: f32 = 0.5;
+pub const DEFAULT_CONCENTRATION: f32 = 0.5;
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AmbienceSettings {
@@ -666,6 +671,16 @@ pub struct AmbienceSettings {
     /// Beats per minute of the pulse, when there is one.
     pub tempo: u16,
     pub form: Form,
+    /// 0 to 1: how much the music keeps changing. Low comes back to a
+    /// short motif and stays on few chords; high keeps finding new
+    /// melodies, more chords and freer rhythms.
+    pub variety: f32,
+    /// 0 to 1: how closely the notes gather. High keeps to the chord and
+    /// the home note in a narrow range; low wanders wide in leaps.
+    pub concentration: f32,
+    /// 0 to 1: dissonance. Above 0, notes from outside the key, clashing
+    /// seconds and tritones, unexpected chords and looser timing.
+    pub chaos: f32,
     /// The whole bed, 0 to 1; even 1 is well under the sounds.
     pub level: f32,
     /// Quieter while any sound plays.
@@ -692,6 +707,9 @@ impl AmbienceSettings {
             }
         };
         self.level = unit(self.level, 0.35);
+        self.variety = unit(self.variety, DEFAULT_VARIETY);
+        self.concentration = unit(self.concentration, DEFAULT_CONCENTRATION);
+        self.chaos = unit(self.chaos, 0.0);
         for layer in &mut self.layers {
             layer.level = unit(layer.level, 0.8);
         }
@@ -972,6 +990,9 @@ impl Style {
             presence,
             tempo: 60,
             form,
+            variety: DEFAULT_VARIETY,
+            concentration: DEFAULT_CONCENTRATION,
+            chaos: 0.0,
             level,
             duck: true,
             seed: 1,
@@ -1201,6 +1222,11 @@ mod tests {
         );
         let settings: AmbienceSettings = serde_json::from_str(&old).unwrap();
         assert_eq!(settings.background, Background::Winter);
+        assert_eq!(
+            (settings.variety, settings.concentration, settings.chaos),
+            (DEFAULT_VARIETY, DEFAULT_CONCENTRATION, 0.0),
+            "saved before the character, in the middle and in the key"
+        );
         let harp = settings.layer(Instrument::Harp);
         assert!(harp.enabled && harp.register == Register::High);
         for instrument in [Instrument::Piano, Instrument::Violin, Instrument::Drums] {

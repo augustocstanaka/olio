@@ -44,7 +44,8 @@ are intentions, reordered as real use dictates.
   the inspector (⇧⌘G): a background (rain, thunder, wind, winter, waves,
   forest, desert, fire) and nine instruments (bass, harp, bells,
   strings, pad, drone, piano, plucked violin, hand drums) in a chosen
-  mode or scale, with styles, presence, endless or pieces. It plays live
+  mode or scale, with styles, a character (variety, concentration,
+  chaos), presence, endless or pieces. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, undoable; `olio generate` and `cargo xtask

@@ -140,7 +140,7 @@ _Avoid_: main volume, output level
 
 **Generator**:
 The panel, in place of the inspector, where gentle music is made up: a
-key, a background, instruments, presence and form. It plays the
+key, a character, a background, instruments, presence and form. It plays the
 ambience live and generates tracks.
 _Avoid_: composer (that is the code that picks the notes), synth
 
@@ -169,6 +169,14 @@ _Avoid_: preset (that is Polish), theme
 **Presence**:
 How noticeable the ambience is: Background, Ambient or Declarative.
 _Avoid_: intensity, volume (that is level)
+
+**Character**:
+How the Generator's lines move, as three amounts from 0 to 100 %:
+**Variety** (how often a motif comes back, against new melodies and
+chords), **Concentration** (how closely the notes gather around the chord
+and the home note) and **Chaos** (dissonance: notes outside the key,
+clashes and clusters).
+_Avoid_: mood, complexity, randomness (for chaos)
 
 **Bubble**:
 A playing tile's button in the toolbar, which stops it.

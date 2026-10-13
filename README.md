@@ -77,6 +77,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
     and register;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone;
+  - **character**: *Variety* (a short motif that keeps coming back, up to
+    ever-new melodies and chords), *Concentration* (notes wandering wide,
+    down to gathered close around the chord and the home note) and
+    *Chaos* (from in the key to notes outside it, clashing seconds,
+    tritones and clusters);
   - **presence**, from *Background* (barely there) to *Declarative*
     (louder, on a slow pulse, with cadences), and **form**: endless, or
     pieces that close on the root and pause.
