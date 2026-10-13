@@ -3,6 +3,7 @@
 use egui::{Align2, RichText};
 
 use crate::inspector::fade_slider;
+use crate::menu;
 use crate::prefs::Polish;
 
 /// Shows the window while `open` is true. Edits `polish` in place; it is
@@ -19,17 +20,17 @@ pub fn window(ctx: &egui::Context, open: &mut bool, polish: &mut Polish) {
             ui.add_space(10.0);
             ui.spacing_mut().slider_width = 220.0;
             ui.label("Fade in");
-            ui.add(fade_slider(&mut polish.fade_in_seconds));
+            menu::keeps_arrows(ui.add(fade_slider(&mut polish.fade_in_seconds)));
             ui.add_space(4.0);
             ui.label("Fade out");
-            ui.add(fade_slider(&mut polish.fade_out_seconds));
+            menu::keeps_arrows(ui.add(fade_slider(&mut polish.fade_out_seconds)));
             ui.add_space(4.0);
             ui.label("Reverb");
             let mut percent = polish.reverb * 100.0;
             let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
                 .suffix(" %")
                 .max_decimals(0);
-            if ui.add(slider).changed() {
+            if menu::keeps_arrows(ui.add(slider)).changed() {
                 polish.reverb = percent / 100.0;
             }
             ui.add_space(12.0);

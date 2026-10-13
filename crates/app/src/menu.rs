@@ -204,9 +204,11 @@ pub fn shortcut_text(ctx: &egui::Context, action: MenuAction) -> String {
 
 /// The actions whose shortcuts were pressed this frame, consuming the key
 /// presses. While a text field has focus only shortcuts with Command
-/// (Ctrl) count, so typing never plays, moves or removes anything.
+/// (Ctrl) count, so typing never plays, moves or removes anything; while
+/// a slider has focus the arrows are its own.
 pub fn pressed(ctx: &egui::Context) -> Vec<MenuAction> {
     let typing = ctx.text_edit_focused();
+    let sliding = arrows_kept(ctx);
     ctx.input_mut(|input| {
         checking_order()
             .into_iter()
@@ -215,10 +217,37 @@ pub fn pressed(ctx: &egui::Context) -> Vec<MenuAction> {
                 !(typing && matches!(action, MenuAction::Undo | MenuAction::Redo))
             })
             .filter(|(_, shortcut)| !typing || shortcut.modifiers.command)
+            .filter(|(action, _)| {
+                !(sliding && matches!(action, MenuAction::Move(_) | MenuAction::MoveTile(_)))
+            })
             .filter(|(_, shortcut)| input.consume_shortcut(shortcut))
             .map(|(action, _)| action)
             .collect()
     })
+}
+
+/// Leaves the arrow keys to a slider while it has keyboard focus (Tab
+/// gives it; a click does not), so they nudge it rather than move the
+/// selection or the selected tile. egui keeps a slider's claim on the
+/// arrows to itself, so pass every slider's response through here.
+pub fn keeps_arrows(response: egui::Response) -> egui::Response {
+    if response.has_focus() {
+        response
+            .ctx
+            .data_mut(|data| data.insert_temp(arrows_id(), response.id));
+    }
+    response
+}
+
+/// Does the widget with focus take the arrow keys?
+fn arrows_kept(ctx: &egui::Context) -> bool {
+    let focused = ctx.memory(|memory| memory.focused());
+    focused.is_some() && focused == ctx.data(|data| data.get_temp::<egui::Id>(arrows_id()))
+}
+
+/// Where [`keeps_arrows`] notes the last slider that had focus.
+fn arrows_id() -> egui::Id {
+    egui::Id::new("olio-arrows-kept")
 }
 
 /// The shortcuts with the most modifiers first. egui lets ⌘Z also match a

@@ -971,8 +971,7 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!(before.chaos, 0.0);
     harness.get_by_label_contains("in the key.");
 
-    // Set as a screen reader would: the window's arrow keys move between
-    // tiles.
+    // Set to exact values, as a screen reader would.
     let set = |harness: &mut Harness<'static, OlioApp>, name: &str, percent: f64| {
         let slider = harness.get_by_role_and_label(Role::Slider, name);
         slider.scroll_to_me();
@@ -995,6 +994,48 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!(settings.concentration, before.concentration);
     assert_eq!(settings.describe(), "Custom: D Mixolydian");
     harness.get_by_label_contains("Repeats a short motif, around the chord, with clashes");
+}
+
+#[test]
+fn a_focused_slider_takes_the_arrow_keys_from_the_tiles() {
+    use egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    open_generator(&mut harness);
+    click_in_generator(&mut harness, "Campfire");
+    assert_eq!(harness.state().preferences().ambience.chaos, 0.0);
+
+    // As Tab would leave it.
+    harness
+        .get_by_role_and_label(Role::Slider, "Chaos")
+        .scroll_to_me();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(Role::Slider, "Chaos").focus();
+    harness.run_steps(2);
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Slider, "Chaos")
+            .is_focused()
+    );
+
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert!(harness.state().preferences().ambience.chaos > 0.0);
+    assert_eq!(harness.state().selected_title(), Some("Big Game"));
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(slot_of(&harness), (0, 1), "the tile stays put");
+
+    // A click on a tile takes the focus, and the arrows, back.
+    harness.get_by_label("Big Game").click();
+    harness.run_steps(2);
+    let chaos = harness.state().preferences().ambience.chaos;
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(harness.state().selected_title(), Some("Country Rock"));
+    assert_eq!(harness.state().preferences().ambience.chaos, chaos);
 }
 
 #[test]

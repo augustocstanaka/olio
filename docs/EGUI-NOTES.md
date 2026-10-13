@@ -71,6 +71,11 @@ On a generation bump, re-check every line below and update the versions.
   and counts as a click outside.
 - Shortcut matching ignores extra Shift and Alt: ⌘Z also matches a
   press of ⇧⌘Z. `menu.rs` checks shortcuts with more modifiers first.
+- A focused `Slider` reads the arrows with `num_presses`, so a consumed
+  arrow shortcut never reaches it, and egui keeps its claim on them
+  (`set_focus_lock_filter`) private. Wrap every slider in
+  `menu::keeps_arrows(ui.add(..))`: while it has focus, the tile arrows
+  leave the keys to it. Sliders take focus from Tab, never from a click.
 - Drag and drop: give the source `Sense::click_and_drag()` (clicks and
   double-clicks still work under the drag threshold) and call
   `response.dnd_set_drag_payload(id)` every frame; read it anywhere with

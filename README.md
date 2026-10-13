@@ -112,7 +112,8 @@ Milestone 0, the playable skeleton, is done. Olio can:
 - **Script boards.** `olio import board.json` builds sets from a JSON file
   without opening a window; see [docs/BOARD-JSON.md](docs/BOARD-JSON.md).
   `olio generate --style "Rain Study" --seconds 120` renders Generator
-  styles to WAV files the same way.
+  styles to WAV files the same way; `--variety`, `--concentration` and
+  `--chaos` (0 to 100) set their character.
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 

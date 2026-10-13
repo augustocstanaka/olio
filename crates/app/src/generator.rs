@@ -22,6 +22,7 @@ use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
+use crate::menu;
 
 /// The lengths a track can be, in seconds, and how they read.
 pub const TRACK_LENGTHS: [(u32, &str); 5] = [
@@ -332,12 +333,10 @@ fn live(ui: &mut Ui, settings: &mut AmbienceSettings) {
         ui.label("Level");
         let mut percent = settings.level * 100.0;
         ui.spacing_mut().slider_width = 100.0;
-        if ui
-            .add(
-                egui::Slider::new(&mut percent, 0.0..=100.0)
-                    .suffix(" %")
-                    .max_decimals(0),
-            )
+        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix(" %")
+            .max_decimals(0);
+        if menu::keeps_arrows(ui.add(slider))
             .on_hover_text("Even at full level the ambience stays well under the sounds")
             .changed()
         {
@@ -456,12 +455,10 @@ fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
 fn amount(ui: &mut Ui, name: &str, value: &mut f32, hint: &str) {
     let label = ui.label(name).on_hover_text(hint);
     let mut percent = *value * 100.0;
-    if ui
-        .add(
-            egui::Slider::new(&mut percent, 0.0..=100.0)
-                .suffix(" %")
-                .max_decimals(0),
-        )
+    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+        .suffix(" %")
+        .max_decimals(0);
+    if menu::keeps_arrows(ui.add(slider))
         .labelled_by(label.id)
         .on_hover_text(hint)
         .changed()
@@ -507,12 +504,10 @@ fn instruments(ui: &mut Ui, settings: &mut AmbienceSettings) {
             ui.add_enabled_ui(layer.enabled, |ui| {
                 let mut percent = layer.level * 100.0;
                 ui.spacing_mut().slider_width = (ui.available_width() - 8.0).clamp(60.0, 200.0);
-                if ui
-                    .add(
-                        egui::Slider::new(&mut percent, 0.0..=100.0)
-                            .show_value(false)
-                            .trailing_fill(true),
-                    )
+                let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+                    .show_value(false)
+                    .trailing_fill(true);
+                if menu::keeps_arrows(ui.add(slider))
                     .on_hover_text(format!("Level {percent:.0} %"))
                     .changed()
                 {
@@ -569,14 +564,10 @@ fn presence(ui: &mut Ui, settings: &mut AmbienceSettings) {
             ui.label("Pulse");
             let mut tempo = f32::from(settings.tempo);
             ui.spacing_mut().slider_width = 160.0;
-            if ui
-                .add(
-                    egui::Slider::new(&mut tempo, 30.0..=120.0)
-                        .suffix(" BPM")
-                        .max_decimals(0),
-                )
-                .changed()
-            {
+            let slider = egui::Slider::new(&mut tempo, 30.0..=120.0)
+                .suffix(" BPM")
+                .max_decimals(0);
+            if menu::keeps_arrows(ui.add(slider)).changed() {
                 settings.tempo = tempo.round() as u16;
             }
         });
@@ -613,18 +604,16 @@ fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {
             .show(ui, |ui| {
                 ui.spacing_mut().slider_width = 160.0;
                 ui.label("Length");
-                ui.add(
-                    egui::Slider::new(minutes, 0.5..=30.0)
-                        .suffix(" min")
-                        .max_decimals(1),
-                );
+                let length = egui::Slider::new(minutes, 0.5..=30.0)
+                    .suffix(" min")
+                    .max_decimals(1);
+                menu::keeps_arrows(ui.add(length));
                 ui.end_row();
                 ui.label("Pause");
-                ui.add(
-                    egui::Slider::new(pause_seconds, 0.0..=120.0)
-                        .suffix(" s")
-                        .max_decimals(0),
-                );
+                let pause = egui::Slider::new(pause_seconds, 0.0..=120.0)
+                    .suffix(" s")
+                    .max_decimals(0);
+                menu::keeps_arrows(ui.add(pause));
                 ui.end_row();
             });
     }

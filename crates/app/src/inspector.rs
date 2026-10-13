@@ -295,14 +295,14 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     fill_with_slider(ui);
     ui.label("Fade in");
     let mut fade_in = tile.fade_in_seconds;
-    if ui.add(fade_slider(&mut fade_in)).changed() {
+    if menu::keeps_arrows(ui.add(fade_slider(&mut fade_in))).changed() {
         actions.push(set(TileSetting::FadeIn(fade_in)));
     }
     ui.add_space(4.0);
     ui.label("Fade out")
         .on_hover_text("Before the end, and when you stop the tile");
     let mut fade_out = tile.fade_out_seconds;
-    if ui.add(fade_slider(&mut fade_out)).changed() {
+    if menu::keeps_arrows(ui.add(fade_slider(&mut fade_out))).changed() {
         actions.push(set(TileSetting::FadeOut(fade_out)));
     }
 
@@ -312,7 +312,7 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
     let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
         .suffix(" %")
         .max_decimals(0);
-    if ui.add(slider).changed() {
+    if menu::keeps_arrows(ui.add(slider)).changed() {
         actions.push(set(TileSetting::Reverb(percent / 100.0)));
     }
 

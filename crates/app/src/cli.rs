@@ -113,6 +113,8 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut styles: Vec<Style> = Style::ALL.to_vec();
     let mut seconds = 30.0f32;
     let mut seed = None;
+    // Variety, concentration and chaos, in percent, when asked for.
+    let mut character: [Option<f32>; 3] = [None; 3];
     let mut out = PathBuf::from("previews");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -147,6 +149,19 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                         .ok_or("--seed needs a whole number")?,
                 );
             }
+            "--variety" | "--concentration" | "--chaos" => {
+                let index = match arg.as_str() {
+                    "--variety" => 0,
+                    "--concentration" => 1,
+                    _ => 2,
+                };
+                character[index] = Some(
+                    args.next()
+                        .and_then(|value| value.parse().ok())
+                        .filter(|value: &f32| (0.0..=100.0).contains(value))
+                        .ok_or_else(|| format!("{arg} needs a percentage from 0 to 100"))?,
+                );
+            }
             "--out" => out = PathBuf::from(args.next().ok_or("--out needs a directory")?),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -157,8 +172,25 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         if let Some(seed) = seed {
             settings.seed = seed;
         }
+        // Named for what was asked: "Campfire (chaos 90).wav".
+        let mut asked = Vec::new();
+        let fields = [
+            ("variety", &mut settings.variety),
+            ("concentration", &mut settings.concentration),
+            ("chaos", &mut settings.chaos),
+        ];
+        for ((name, field), percent) in fields.into_iter().zip(character) {
+            if let Some(percent) = percent {
+                *field = percent / 100.0;
+                asked.push(format!("{name} {percent}"));
+            }
+        }
+        let name = match asked.is_empty() {
+            true => style.name().to_owned(),
+            false => format!("{} ({})", style.name(), asked.join(", ")),
+        };
         let clip = render_track(&settings, seconds, |_| true).ok_or("the render stopped")?;
-        let path = out.join(format!("{}.wav", style.name()));
+        let path = out.join(format!("{name}.wav"));
         clip.write_wav(&path, WavFormat::Int16)
             .map_err(|err| format!("{}: {err}", path.display()))?;
         println!("wrote {}", path.display());
@@ -186,7 +218,28 @@ mod tests {
         assert_eq!(clip.channels(), 2);
         assert_eq!(clip.frames(), 4 * olio_audio::TRACK_RATE as usize);
 
+        let args = [
+            "--style",
+            "campfire",
+            "--seconds",
+            "3",
+            "--variety",
+            "20",
+            "--chaos",
+            "90",
+            "--out",
+            dir.path().to_str().unwrap(),
+        ];
+        assert_eq!(generate(args.iter().map(|arg| (*arg).to_owned())), 0);
+        assert!(
+            dir.path()
+                .join("Campfire (variety 20, chaos 90).wav")
+                .exists()
+        );
+
         let unknown = ["--style", "Polka"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(unknown), 2);
+        let wild = ["--chaos", "150"].iter().map(|arg| (*arg).to_owned());
+        assert_eq!(generate(wild), 2);
     }
 }

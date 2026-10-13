@@ -1789,8 +1789,7 @@ impl OlioApp {
             let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
                 .show_value(false)
                 .trailing_fill(true);
-            let slider = ui
-                .add_enabled(!self.prefs.muted, slider)
+            let slider = menu::keeps_arrows(ui.add_enabled(!self.prefs.muted, slider))
                 .on_hover_text(format!("Master volume: {percent:.0}%"));
             if slider.changed() {
                 actions.push(MenuAction::SetVolume(percent / 100.0));
