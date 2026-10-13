@@ -175,8 +175,19 @@ How the Generator's lines move, as three amounts from 0 to 100 %:
 **Variety** (how often a motif comes back, against new melodies and
 chords), **Concentration** (how closely the notes gather around the chord
 and the home note) and **Chaos** (dissonance: notes outside the key,
-clashes and clusters).
-_Avoid_: mood, complexity, randomness (for chaos)
+clashes and clusters). A **Mood** names a place for all three.
+_Avoid_: complexity, randomness (for chaos)
+
+**Mood**:
+A named character: Still, Gentle (where every style starts), Wandering,
+Restless or Unsettled. Picking one sets Variety, Concentration and Chaos;
+moving any of them leaves the mood Custom.
+_Avoid_: feel, vibe, character preset
+
+**Details**:
+The Generator's switch between the essentials (style, mood, background,
+which instruments play) and every setting.
+_Avoid_: advanced, expert mode
 
 **Bubble**:
 A playing tile's button in the toolbar, which stops it.

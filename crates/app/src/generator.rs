@@ -1,7 +1,9 @@
 //! The Generator: a panel in place of the inspector where the ambience is
-//! shaped (style, key, character, background, instruments, presence,
-//! form), played
-//! live under the sounds, and rendered to tracks that land on tiles.
+//! shaped, played live under the sounds, and rendered to tracks that land
+//! on tiles. It shows the essentials (style, mood, background,
+//! instruments); Details adds every setting (the character's amounts,
+//! each instrument's level, density and register, the key, presence and
+//! form) under the essential it belongs to.
 //!
 //! The settings live in the preferences and go to the engine when they
 //! change. A track is rendered on a thread of its own ([`Generation`]),
@@ -15,14 +17,14 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Layout, RichText, Ui};
 use olio_audio::ambience::{
-    AmbienceSettings, Background, Density, Form, Instrument, Presence, ROOT_NAMES, Register,
+    AmbienceSettings, Background, Density, Form, Instrument, Mood, Presence, ROOT_NAMES, Register,
     ScaleKind, Style,
 };
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
-use crate::menu;
+use crate::{inspector, menu};
 
 /// The lengths a track can be, in seconds, and how they read.
 pub const TRACK_LENGTHS: [(u32, &str); 5] = [
@@ -226,6 +228,8 @@ pub struct View<'a> {
     pub track_seconds: u32,
     /// The set a track would go to.
     pub set_name: &'a str,
+    /// Every setting, not only the essentials.
+    pub details: bool,
 }
 
 /// What the person did in the panel.
@@ -238,22 +242,28 @@ pub enum Action {
     /// Generate a track of the picked length.
     Generate,
     Cancel,
+    /// Show every setting, or only the essentials.
+    Details(bool),
 }
 
 pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Action> {
     let before = *settings;
     let mut actions = Vec::new();
+    let details = view.details;
 
-    ui.add_space(6.0);
-    ui.label(RichText::new("Generator").strong().size(15.0));
-    ui.label(
-        RichText::new(
-            "Gentle music and backgrounds, made up as they go. Play them live under \
-             your sounds, or generate a track onto a tile.",
-        )
-        .weak(),
-    );
-    ui.add_space(6.0);
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Generator").strong().size(16.0));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui
+                .selectable_label(details, "Details")
+                .on_hover_text("Show every setting, not only the essentials")
+                .clicked()
+            {
+                actions.push(Action::Details(!details));
+            }
+        });
+    });
 
     // The track: pinned to the bottom, always in reach.
     egui::Panel::bottom("olio-generator-track")
@@ -265,26 +275,32 @@ pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Ac
         .show(ui, |ui| {
             // Clear of the scroll bar.
             ui.set_max_width(ui.available_width() - 12.0);
-            live(ui, settings);
-            ui.add_space(6.0);
-            styles(ui, settings);
-            ui.add_space(2.0);
-            ui.label(
-                RichText::new(format!(
-                    "{}: {}.",
-                    settings.scale.name(),
-                    settings.scale.kind.character()
-                ))
-                .weak(),
-            );
-            ui.add_space(4.0);
-            section(ui, "Key", |ui| key(ui, settings));
-            section(ui, "Character", |ui| character(ui, settings));
-            section(ui, "Background", |ui| background(ui, settings, view.images));
-            section(ui, "Instruments", |ui| instruments(ui, settings));
-            section(ui, "Presence", |ui| presence(ui, settings));
-            section(ui, "Form", |ui| form(ui, settings));
             ui.add_space(8.0);
+            live(ui, settings, details);
+            let title = section(ui, "Style");
+            style(ui, settings, &title);
+            section(ui, "Mood");
+            mood(ui, settings, details);
+            section(ui, "Background");
+            background(ui, settings, view.images);
+            section(ui, "Instruments");
+            if details {
+                instrument_rows(ui, settings);
+            } else {
+                instrument_chips(ui, settings);
+            }
+            if settings.layers.iter().all(|layer| !layer.enabled) {
+                ui.weak("No instruments: the background only.");
+            }
+            if details {
+                section(ui, "Key");
+                key(ui, settings);
+                section(ui, "Presence");
+                presence(ui, settings);
+                section(ui, "Form");
+                form(ui, settings);
+            }
+            ui.add_space(10.0);
         });
 
     // Anything but picking a style, switching on or a new variation makes
@@ -304,21 +320,63 @@ pub fn show(ui: &mut Ui, settings: &mut AmbienceSettings, view: &View) -> Vec<Ac
     actions
 }
 
-fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
-    egui::CollapsingHeader::new(RichText::new(title).strong())
-        .id_salt(("olio-generator", title))
-        .default_open(true)
-        .show(ui, |ui| {
-            ui.add_space(2.0);
-            body(ui);
-            ui.add_space(4.0);
-        });
+/// A section's title, spaced as in the inspector.
+fn section(ui: &mut Ui, title: &str) -> egui::Response {
+    ui.add_space(16.0);
+    let response = ui.label(RichText::new(title).strong());
+    ui.add_space(6.0);
+    response
 }
 
-fn live(ui: &mut Ui, settings: &mut AmbienceSettings) {
+/// Play live and the level; with details, ducking.
+fn live(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut settings.enabled, "Play live")
             .on_hover_text("Play the ambience now, under your sounds");
+        ui.add_space(8.0);
+        let mut percent = settings.level * 100.0;
+        inspector::fill_with_slider(ui);
+        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix(" %")
+            .max_decimals(0);
+        if menu::keeps_arrows(ui.add(slider))
+            .on_hover_text("Level. Even at full level the ambience stays well under the sounds")
+            .changed()
+        {
+            settings.level = percent / 100.0;
+        }
+    });
+    if details {
+        ui.checkbox(&mut settings.duck, "Quieter while sounds play");
+    }
+}
+
+/// The style to start from, a new variation of it, and what it is.
+fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response) {
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - 112.0).max(120.0);
+        let chosen_name = settings.style.map_or("Custom", Style::name);
+        let combo = egui::ComboBox::from_id_salt("olio-generator-style")
+            .selected_text(chosen_name)
+            .width(width)
+            .height(400.0)
+            .show_ui(ui, |ui| {
+                for style in Style::ALL {
+                    let chosen = settings.style == Some(style);
+                    if ui
+                        .selectable_label(chosen, style.name())
+                        .on_hover_text(style.describe())
+                        .clicked()
+                        && !chosen
+                    {
+                        // Everything from the style; whether it plays stays.
+                        let enabled = settings.enabled;
+                        *settings = style.settings();
+                        settings.enabled = enabled;
+                    }
+                }
+            });
+        let _ = combo.response.labelled_by(title.id);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .button("New variation")
@@ -329,47 +387,48 @@ fn live(ui: &mut Ui, settings: &mut AmbienceSettings) {
             }
         });
     });
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Level");
-        let mut percent = settings.level * 100.0;
-        ui.spacing_mut().slider_width = 100.0;
-        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-            .suffix(" %")
-            .max_decimals(0);
-        if menu::keeps_arrows(ui.add(slider))
-            .on_hover_text("Even at full level the ambience stays well under the sounds")
-            .changed()
-        {
-            settings.level = percent / 100.0;
+    ui.weak(match settings.style {
+        Some(style) => {
+            let describe = style.describe();
+            let mut chars = describe.chars();
+            let first = chars.next().map(|c| c.to_uppercase().to_string());
+            format!("{}{}.", first.unwrap_or_default(), chars.as_str())
         }
-        ui.checkbox(&mut settings.duck, "Quieter while sounds play");
+        None => format!(
+            "{}: {}.",
+            settings.scale.name(),
+            settings.scale.kind.character()
+        ),
     });
 }
 
-fn styles(ui: &mut Ui, settings: &mut AmbienceSettings) {
+/// The moods; with details, the three amounts behind them.
+fn mood(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
+    let now = settings.mood();
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label("Style");
-        for style in Style::ALL {
-            let chosen = settings.style == Some(style);
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().button_padding.x = 6.0;
+        for mood in Mood::ALL {
             if ui
-                .selectable_label(chosen, style.name())
-                .on_hover_text(style.describe())
+                .selectable_label(now == Some(mood), mood.name())
+                .on_hover_text(mood.describe())
                 .clicked()
-                && !chosen
             {
-                // Everything from the style; whether it plays stays.
-                let enabled = settings.enabled;
-                *settings = style.settings();
-                settings.enabled = enabled;
+                settings.set_mood(mood);
             }
         }
-        if settings.style.is_none() {
+        if now.is_none() {
             let _ = ui
                 .selectable_label(true, "Custom")
-                .on_hover_text("Pick a style to start over from one");
+                .on_hover_text("Pick a mood to start over from one");
         }
     });
+    if details {
+        ui.add_space(4.0);
+        character(ui, settings);
+    }
+    ui.add_space(2.0);
+    ui.weak(character_words(settings));
 }
 
 /// A row of choices, wrapping; true when one was picked.
@@ -396,28 +455,33 @@ fn choose<T: Copy + PartialEq>(
 }
 
 fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        ui.spacing_mut().button_padding.x = 5.0;
-        ui.label("Root");
-        for (index, name) in ROOT_NAMES.iter().enumerate() {
-            let root = index as u8;
-            if ui
-                .selectable_label(settings.scale.root == root, *name)
-                .clicked()
-            {
-                settings.scale.root = root;
-            }
-        }
+    ui.horizontal(|ui| {
+        let root = ui.label("Root");
+        let combo = egui::ComboBox::from_id_salt("olio-generator-root")
+            .selected_text(ROOT_NAMES[usize::from(settings.scale.root % 12)])
+            .width(56.0)
+            .show_ui(ui, |ui| {
+                for (index, name) in ROOT_NAMES.iter().enumerate() {
+                    let index = index as u8;
+                    ui.selectable_value(&mut settings.scale.root, index, *name);
+                }
+            });
+        let _ = combo.response.labelled_by(root.id);
+        ui.add_space(8.0);
+        let scale = ui.label("Scale");
+        let width = (ui.available_width() - 8.0).max(120.0);
+        let combo = egui::ComboBox::from_id_salt("olio-generator-scale")
+            .selected_text(settings.scale.kind.name())
+            .width(width)
+            .show_ui(ui, |ui| {
+                for kind in ScaleKind::all() {
+                    let _ = ui
+                        .selectable_value(&mut settings.scale.kind, kind, kind.name())
+                        .on_hover_text(kind.character());
+                }
+            });
+        let _ = combo.response.labelled_by(scale.id);
     });
-    ui.add_space(4.0);
-    choose(
-        ui,
-        &mut settings.scale.kind,
-        &ScaleKind::all(),
-        ScaleKind::name,
-        ScaleKind::character,
-    );
 }
 
 fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
@@ -425,7 +489,7 @@ fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
         .num_columns(2)
         .spacing([10.0, 6.0])
         .show(ui, |ui| {
-            ui.spacing_mut().slider_width = 150.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - 170.0).max(100.0);
             amount(
                 ui,
                 "Variety",
@@ -448,7 +512,6 @@ fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
                  chords from anywhere and looser timing, more as it rises",
             );
         });
-    ui.weak(character_words(settings));
 }
 
 /// A grid row: `name` and a slider showing the 0-to-1 `value` in percent.
@@ -491,7 +554,26 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
     ui.weak(settings.background.describe());
 }
 
-fn instruments(ui: &mut Ui, settings: &mut AmbienceSettings) {
+/// Each instrument on or off, side by side.
+fn instrument_chips(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for instrument in Instrument::ALL {
+            let layer = &mut settings.layers[instrument];
+            if ui
+                .selectable_label(layer.enabled, instrument.name())
+                .on_hover_text(instrument.describe())
+                .clicked()
+            {
+                layer.enabled = !layer.enabled;
+            }
+        }
+    });
+}
+
+/// Each instrument on or off with its level; an instrument that is on
+/// also shows its density and register.
+fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
     for instrument in Instrument::ALL {
         let layer = &mut settings.layers[instrument];
         ui.horizontal(|ui| {
@@ -527,9 +609,6 @@ fn instruments(ui: &mut Ui, settings: &mut AmbienceSettings) {
             });
             ui.add_space(2.0);
         }
-    }
-    if settings.layers.iter().all(|layer| !layer.enabled) {
-        ui.weak("No instruments: the background only.");
     }
 }
 
@@ -649,19 +728,19 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
             });
         }
         None => {
-            ui.horizontal(|ui| {
-                if ui
-                    .button("Generate Track")
-                    .on_hover_text(
-                        "Renders this ambience to a sound in the library and puts it on a \
-                         tile, to play, loop and polish like any other",
-                    )
-                    .clicked()
-                {
-                    actions.push(Action::Generate);
-                }
-                ui.weak(format!("onto a tile in “{}”", view.set_name));
-            });
+            let generate = egui::Button::new("Generate Track")
+                .min_size(egui::vec2(ui.available_width(), 28.0));
+            if ui
+                .add(generate)
+                .on_hover_text(
+                    "Renders this ambience to a sound in the library and puts it on a tile, \
+                     to play, loop and polish like any other",
+                )
+                .clicked()
+            {
+                actions.push(Action::Generate);
+            }
+            ui.weak(format!("onto a tile in “{}”", view.set_name));
         }
     }
     ui.add_space(6.0);

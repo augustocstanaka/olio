@@ -917,6 +917,23 @@ fn click_in_generator(harness: &mut Harness<'static, OlioApp>, label: &str) {
     harness.run_steps(2);
 }
 
+/// Picks a style from the Generator's dropdown.
+fn pick_style(harness: &mut Harness<'static, OlioApp>, name: &str) {
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Style")
+        .click();
+    harness.run_steps(2);
+    harness.get_by_label(name).click();
+    harness.run_steps(2);
+}
+
+/// Shows every setting in the Generator.
+fn show_details(harness: &mut Harness<'static, OlioApp>) {
+    harness.get_by_label("Details").click();
+    harness.run_steps(3);
+    assert!(harness.state().preferences().generator_details);
+}
+
 #[test]
 fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
     use olio_audio::ambience::{Background, Form, Instrument};
@@ -924,8 +941,10 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
     harness.get_by_label("Generate Track");
+    // The essentials only, to begin with.
+    assert_eq!(harness.query_all_by_label("Declarative").count(), 0);
 
-    click_in_generator(&mut harness, "Cathedral");
+    pick_style(&mut harness, "Cathedral");
     let settings = harness.state().preferences().ambience;
     assert_eq!(settings.describe(), "Cathedral");
     assert!(settings.layer(Instrument::Drone).enabled);
@@ -935,7 +954,7 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
     let settings = harness.state().preferences().ambience;
     assert!(settings.layer(Instrument::Harp).enabled);
     assert_eq!(settings.describe(), "Custom: G Aeolian");
-    harness.get_by_label("Custom");
+    harness.get_by_label_contains("G Aeolian: ");
 
     click_in_generator(&mut harness, "Waves");
     assert_eq!(
@@ -951,6 +970,9 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
             .layer(Instrument::Piano)
             .enabled
     );
+    show_details(&mut harness);
+    // Each instrument's level, density and register come with details.
+    assert!(harness.query_all_by_label("Occasional").count() >= 2);
     click_in_generator(&mut harness, "Declarative");
     harness.get_by_label("Pulse");
     click_in_generator(&mut harness, "Pieces");
@@ -963,13 +985,27 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
 #[test]
 fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     use egui::accesskit::Role;
+    use olio_audio::ambience::Mood;
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
-    click_in_generator(&mut harness, "Campfire");
+    pick_style(&mut harness, "Campfire");
+    harness.get_by_label_contains("in the key.");
+    assert_eq!(
+        harness.state().preferences().ambience.mood(),
+        Some(Mood::Gentle)
+    );
+
+    // A mood sets all three amounts; the amounts come with details.
+    click_in_generator(&mut harness, "Unsettled");
+    let settings = harness.state().preferences().ambience;
+    assert_eq!(settings.mood(), Some(Mood::Unsettled));
+    assert_eq!(settings.chaos, 0.8);
+    assert_eq!(harness.query_all_by_label("Chaos").count(), 0);
+    click_in_generator(&mut harness, "Gentle");
+    show_details(&mut harness);
     let before = harness.state().preferences().ambience;
     assert_eq!(before.chaos, 0.0);
-    harness.get_by_label_contains("in the key.");
 
     // Set to exact values, as a screen reader would.
     let set = |harness: &mut Harness<'static, OlioApp>, name: &str, percent: f64| {
@@ -993,6 +1029,8 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!((settings.chaos, settings.variety), (0.4, 0.1));
     assert_eq!(settings.concentration, before.concentration);
     assert_eq!(settings.describe(), "Custom: D Mixolydian");
+    assert_eq!(settings.mood(), None);
+    harness.get_by_label("Custom");
     harness.get_by_label_contains("Repeats a short motif, around the chord, with clashes");
 }
 
@@ -1004,7 +1042,8 @@ fn a_focused_slider_takes_the_arrow_keys_from_the_tiles() {
     harness.get_by_label("Big Game").click();
     harness.run_steps(2);
     open_generator(&mut harness);
-    click_in_generator(&mut harness, "Campfire");
+    pick_style(&mut harness, "Campfire");
+    show_details(&mut harness);
     assert_eq!(harness.state().preferences().ambience.chaos, 0.0);
 
     // As Tab would leave it.
@@ -1306,15 +1345,19 @@ fn render_the_window_to_a_png() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), true);
     open_generator(&mut harness);
-    harness.get_by_label("Seaside Piano").click();
-    harness.run_steps(2);
+    pick_style(&mut harness, "Seaside Piano");
     harness.get_by_label("Play live").click();
-    harness.run_steps(5);
-    // Down to the character and the backgrounds.
+    harness.run_steps(20);
+    let image = harness.render().expect("a GPU adapter to render with");
+    image.save(out.join("window-generator.png")).unwrap();
+    // And with every setting, down to the mood's amounts.
+    show_details(&mut harness);
     harness
         .get_by_role_and_label(egui::accesskit::Role::Slider, "Chaos")
         .scroll_to_me();
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
-    image.save(out.join("window-generator.png")).unwrap();
+    image
+        .save(out.join("window-generator-details.png"))
+        .unwrap();
 }

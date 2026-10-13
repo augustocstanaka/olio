@@ -631,6 +631,59 @@ impl Presence {
     }
 }
 
+/// A named character: where Variety, Concentration and Chaos sit
+/// together. The Generator offers these first and the three amounts in
+/// its details. Not saved: read back from the amounts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Mood {
+    Still,
+    Gentle,
+    Wandering,
+    Restless,
+    Unsettled,
+}
+
+impl Mood {
+    pub const ALL: [Self; 5] = [
+        Self::Still,
+        Self::Gentle,
+        Self::Wandering,
+        Self::Restless,
+        Self::Unsettled,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Still => "Still",
+            Self::Gentle => "Gentle",
+            Self::Wandering => "Wandering",
+            Self::Restless => "Restless",
+            Self::Unsettled => "Unsettled",
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Still => "a short motif that keeps coming back, close to home",
+            Self::Gentle => "now and then a motif returns; around the chord, in the key",
+            Self::Wandering => "always new melodies, wandering wide, in the key",
+            Self::Restless => "new melodies and chords, with a note outside the key now and then",
+            Self::Unsettled => "dissonant: clashes, clusters and notes outside the key",
+        }
+    }
+
+    /// Variety, concentration and chaos.
+    pub fn character(self) -> (f32, f32, f32) {
+        match self {
+            Self::Still => (0.15, 0.75, 0.0),
+            Self::Gentle => (DEFAULT_VARIETY, DEFAULT_CONCENTRATION, 0.0),
+            Self::Wandering => (0.8, 0.25, 0.0),
+            Self::Restless => (0.85, 0.4, 0.35),
+            Self::Unsettled => (0.7, 0.3, 0.8),
+        }
+    }
+}
+
 /// Endless, or pieces with a beginning and an end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Form {
@@ -731,6 +784,21 @@ impl AmbienceSettings {
             };
         }
         self
+    }
+
+    /// The mood the character is at, if it is at one.
+    pub fn mood(&self) -> Option<Mood> {
+        let near = |a: f32, b: f32| (a - b).abs() < 0.005;
+        Mood::ALL.into_iter().find(|mood| {
+            let (variety, concentration, chaos) = mood.character();
+            near(self.variety, variety)
+                && near(self.concentration, concentration)
+                && near(self.chaos, chaos)
+        })
+    }
+
+    pub fn set_mood(&mut self, mood: Mood) {
+        (self.variety, self.concentration, self.chaos) = mood.character();
     }
 
     pub fn layer(&self, instrument: Instrument) -> &Layer {
@@ -1245,6 +1313,21 @@ mod tests {
             serde_json::from_str::<AmbienceSettings>(&saved).unwrap(),
             settings
         );
+    }
+
+    #[test]
+    fn each_mood_reads_back_and_a_nudge_makes_the_character_its_own() {
+        let mut settings = Style::RainStudy.settings();
+        for style in Style::ALL {
+            assert_eq!(style.settings().mood(), Some(Mood::Gentle), "{style:?}");
+        }
+        for mood in Mood::ALL {
+            settings.set_mood(mood);
+            assert_eq!(settings.mood(), Some(mood));
+            assert_eq!(settings.clamped().mood(), Some(mood), "within range");
+        }
+        settings.chaos += 0.01;
+        assert_eq!(settings.mood(), None);
     }
 
     #[test]

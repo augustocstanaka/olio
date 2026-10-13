@@ -2143,11 +2143,12 @@ impl eframe::App for OlioApp {
                     .map(|generation| (generation.title.as_str(), generation.progress())),
                 track_seconds: self.prefs.track_seconds,
                 set_name: &set.name,
+                details: self.prefs.generator_details,
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
-                .default_size(400.0)
-                .min_size(340.0)
+                .default_size(380.0)
+                .min_size(320.0)
                 .show(ui, |ui| {
                     generator::show(ui, &mut self.prefs.ambience, &view)
                 })
@@ -2236,6 +2237,7 @@ impl eframe::App for OlioApp {
             match action {
                 generator::Action::Changed => self.apply_ambience(),
                 generator::Action::Length(seconds) => self.prefs.track_seconds = seconds,
+                generator::Action::Details(details) => self.prefs.generator_details = details,
                 generator::Action::Generate => self.start_generation(&ctx),
                 generator::Action::Cancel => {
                     if let Some(generation) = &self.generation {

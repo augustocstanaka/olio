@@ -119,5 +119,10 @@ On a generation bump, re-check every line below and update the versions.
 - A widget scrolled out of a `ScrollArea` is still in the tree but a
   click on it misses: call `node.scroll_to_me()`, step a few frames, and
   query it again before clicking (the Generator tests do).
+- A `ComboBox` has no name of its own (its value is the selected text):
+  name it with `combo.response.labelled_by(label.id)`, find it with
+  `get_by_role_and_label(Role::ComboBox, "Style")`, click it, step, then
+  click the entry by label in the popup (`pick_style` in the window
+  tests). Sliders in a grid are named the same way.
 - `.wgpu()` on the builder plus `harness.render()` gives an image; it needs
   a GPU adapter, so rendering tests are opt-in (`OLIO_RENDER=1`).

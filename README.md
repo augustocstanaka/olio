@@ -17,7 +17,7 @@ raised buttons that press in while they play:
 The Generator makes gentle music and backgrounds, live or as tracks on
 tiles:
 
-![The Generator panel: a background of waves, a piano, a drone and a bass in D Lydian](docs/images/window-generator.png)
+![The Generator panel: Seaside Piano playing live, with its style, mood, background and instruments](docs/images/window-generator.png)
 
 > *Olio* is a medley, the same meaning as *farrago*.
 
@@ -67,7 +67,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
   and Large.
 - **Generate gentle music.** The Generator (⇧⌘G, or the Generator
   button in the status bar) makes up sparse, quiet music as it goes, in
-  place of the inspector:
+  place of the inspector. It shows the essentials (a style, a mood, a
+  background, which instruments play); **Details** adds every setting
+  for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
     crackling fire;
@@ -183,7 +185,8 @@ Windows. Enable the pre-commit hook once per clone with
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
 offscreen in both themes and both tile styles to `target/screenshots/`
 (`window.png`, `window-light.png`, `window-soft.png`,
-`window-soft-light.png`, and the Generator in `window-generator.png`).
+`window-soft-light.png`, and the Generator in `window-generator.png` and
+`window-generator-details.png`).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

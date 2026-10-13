@@ -195,6 +195,8 @@ pub struct Preferences {
     pub show_inspector: bool,
     /// The Generator in place of the inspector.
     pub show_generator: bool,
+    /// The Generator shows every setting, not only the essentials.
+    pub generator_details: bool,
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
@@ -215,6 +217,7 @@ impl Default for Preferences {
             show_sets: true,
             show_inspector: true,
             show_generator: false,
+            generator_details: false,
             click_plays: false,
         }
     }
@@ -332,6 +335,7 @@ mod tests {
         assert!(prefs.ambience.layer(Instrument::Harp).enabled);
         assert!(!prefs.ambience.layer(Instrument::Piano).enabled);
         assert!(!prefs.show_generator);
+        assert!(!prefs.generator_details, "the essentials first");
         assert_eq!(prefs.track_seconds, 120);
     }
 

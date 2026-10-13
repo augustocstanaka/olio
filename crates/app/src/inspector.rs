@@ -422,7 +422,7 @@ pub fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
 }
 
 /// Makes the sliders below fill the panel, leaving room for the value box.
-fn fill_with_slider(ui: &mut Ui) {
+pub(crate) fn fill_with_slider(ui: &mut Ui) {
     let value_box = 64.0;
     let width = (ui.available_width() - value_box - ui.spacing().item_spacing.x).max(80.0);
     ui.spacing_mut().slider_width = width;
