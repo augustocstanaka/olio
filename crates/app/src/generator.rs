@@ -974,6 +974,35 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
         }
     });
     ui.weak(settings.background.describe());
+    // Its own level, against the instruments: in one scope, so whether it
+    // shows never moves the ids of the widgets below.
+    ui.scope(|ui| {
+        if settings.background == Background::None {
+            return;
+        }
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.label("Level");
+            let mut percent = settings.background_level * 100.0;
+            inspector::fill_with_slider(ui);
+            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+                .suffix(" %")
+                .max_decimals(0);
+            let response = menu::keeps_arrows(ui.add(slider));
+            response.widget_info(|| {
+                egui::WidgetInfo::slider(true, f64::from(percent), "Background level")
+            });
+            if response
+                .on_hover_text(format!(
+                    "How loud the {} is against the instruments",
+                    settings.background.name().to_lowercase()
+                ))
+                .changed()
+            {
+                settings.background_level = percent / 100.0;
+            }
+        });
+    });
 }
 
 /// Each instrument on or off, side by side.

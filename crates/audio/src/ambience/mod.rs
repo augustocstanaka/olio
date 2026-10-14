@@ -786,6 +786,16 @@ impl Form {
 
 // ----- the settings and styles ---------------------------------------------
 
+/// Where the background's level sits unless moved.
+pub const DEFAULT_BACKGROUND_LEVEL: f32 = 0.7;
+
+/// The gain for a background level: a square law, so the slider sounds
+/// even along its length; 1 at the default.
+fn background_gain(level: f32) -> f32 {
+    let ratio = level / DEFAULT_BACKGROUND_LEVEL;
+    ratio * ratio
+}
+
 /// Where variety and concentration sit unless moved: the middle.
 pub const DEFAULT_VARIETY: f32 = 0.5;
 pub const DEFAULT_CONCENTRATION: f32 = 0.5;
@@ -820,6 +830,10 @@ pub struct AmbienceSettings {
     pub chaos: f32,
     /// The whole bed, 0 to 1; even 1 is well under the sounds.
     pub level: f32,
+    /// The background's own level against the instruments, 0 to 1:
+    /// [`DEFAULT_BACKGROUND_LEVEL`] is as it was made, 1 about twice as
+    /// loud, 0 silent.
+    pub background_level: f32,
     /// Quieter while any sound plays.
     pub duck: bool,
     /// Makes the bed repeatable; change it for a new variation.
@@ -844,6 +858,7 @@ impl AmbienceSettings {
             }
         };
         self.level = unit(self.level, 0.35);
+        self.background_level = unit(self.background_level, DEFAULT_BACKGROUND_LEVEL);
         self.variety = unit(self.variety, DEFAULT_VARIETY);
         self.concentration = unit(self.concentration, DEFAULT_CONCENTRATION);
         self.chaos = unit(self.chaos, 0.0);
@@ -1161,6 +1176,7 @@ impl Style {
             concentration: DEFAULT_CONCENTRATION,
             chaos: 0.0,
             level,
+            background_level: DEFAULT_BACKGROUND_LEVEL,
             duck: true,
             seed: 1,
         }
@@ -1296,6 +1312,7 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
         concentration,
         chaos,
         level: rng.range(0.35, 0.45),
+        background_level: DEFAULT_BACKGROUND_LEVEL,
         duck: true,
         seed: seed.max(1),
     }
@@ -1371,6 +1388,8 @@ pub struct Ambience {
     /// On and off, slowly.
     gain: Ramp,
     duck: Ramp,
+    /// The background against the instruments.
+    bed_gain: Ramp,
 }
 
 impl Ambience {
@@ -1390,6 +1409,7 @@ impl Ambience {
             clock: 0,
             gain: Ramp::at(0.0),
             duck: Ramp::at(1.0),
+            bed_gain: Ramp::at(1.0),
         }
     }
 
@@ -1467,6 +1487,10 @@ impl Ambience {
         if self.duck.target() != duck_target {
             self.duck.towards(duck_target, self.rate / 3);
         }
+        let bed_target = background_gain(self.settings.background_level);
+        if self.bed_gain.target() != bed_target {
+            self.bed_gain.towards(bed_target, self.rate / 10);
+        }
         let (from, to) = (self.clock, self.clock + frames as u64);
         if self.settings.enabled {
             // A composer about to start begins its first piece now.
@@ -1487,7 +1511,10 @@ impl Ambience {
                 self.synth.play(event, &self.heard);
             }
             let gain = self.gain.next() * self.duck.next() * level;
+            let bed_gain = self.bed_gain.next();
             let (mut left, mut right) = self.bed.next();
+            left *= bed_gain;
+            right *= bed_gain;
             let (sl, sr) = self.synth.next(music_gain);
             left = (left + sl) * gain;
             right = (right + sr) * gain;
@@ -1562,6 +1589,7 @@ mod tests {
             (DEFAULT_VARIETY, DEFAULT_CONCENTRATION, 0.0),
             "saved before the character, in the middle and in the key"
         );
+        assert_eq!(settings.background_level, DEFAULT_BACKGROUND_LEVEL);
         let harp = settings.layer(Instrument::Harp);
         assert!(harp.enabled && harp.register == Register::High);
         assert_eq!(
@@ -1653,6 +1681,37 @@ mod tests {
         assert_eq!(backgrounds.len(), Background::ALL.len());
         assert_eq!(instruments.len(), Instrument::COUNT);
         assert_ne!(surprise(1), surprise(2));
+    }
+
+    #[test]
+    fn the_background_has_its_own_level_beside_the_instruments() {
+        let rate = 48_000;
+        // The background alone, its level over the last second.
+        let level = |background_level: f32| {
+            let mut settings = Style::RainStudy.settings();
+            settings.enabled = true;
+            settings.background_level = background_level;
+            for instrument in Instrument::ALL {
+                settings.layers[instrument].enabled = false;
+            }
+            let mut ambience = Ambience::new(rate as u32, 4);
+            ambience.set(settings);
+            let mut out = vec![0.0; rate * 4 * 2];
+            let mut bus = vec![0.0; rate * 4 * 2];
+            ambience.render(&mut out, &mut bus, 2, false);
+            let last = &out[out.len() - rate * 2..];
+            (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
+        };
+        let made = level(DEFAULT_BACKGROUND_LEVEL);
+        let half = level(DEFAULT_BACKGROUND_LEVEL / 2.0);
+        let full = level(1.0);
+        assert!(made > 0.0);
+        assert!(
+            (half / made - 0.25).abs() < 0.03,
+            "a quarter as loud: {half} / {made}"
+        );
+        assert!(full > made * 1.8, "louder: {full} / {made}");
+        assert_eq!(level(0.0), 0.0, "silent");
     }
 
     #[test]

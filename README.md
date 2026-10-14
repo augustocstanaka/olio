@@ -73,7 +73,7 @@ Milestone 0, the playable skeleton, is done. Olio can:
   for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
-    crackling fire;
+    crackling fire, with a level of its own against the instruments;
   - **up to nine instruments**: a plucked bass, a harp, bells, bowed
     strings, a pad, a drone, a piano, a plucked violin and soft hand
     drums (a frame drum and a shaker), each with its own level, a Notes

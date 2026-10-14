@@ -1083,6 +1083,32 @@ fn each_instrument_plays_as_many_notes_as_its_slider_says() {
 }
 
 #[test]
+fn the_background_has_a_level_of_its_own() {
+    use egui::accesskit::Role;
+    use olio_audio::ambience::DEFAULT_BACKGROUND_LEVEL;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    assert_eq!(
+        harness.state().preferences().ambience.background_level,
+        DEFAULT_BACKGROUND_LEVEL
+    );
+    // Among the essentials, beside the backgrounds.
+    set_slider(&mut harness, "Background level", 30.0);
+    let settings = harness.state().preferences().ambience;
+    assert!((settings.background_level - 0.3).abs() < 1e-3);
+    assert_eq!(settings.describe(), "Custom: D Dorian");
+    // No background, nothing to set.
+    click_in_generator(&mut harness, "None");
+    assert_eq!(
+        harness
+            .query_all_by_role_and_label(Role::Slider, "Background level")
+            .count(),
+        0
+    );
+}
+
+#[test]
 fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     use olio_audio::ambience::Mood;
     let dir = tempfile::tempdir().unwrap();
@@ -1664,10 +1690,11 @@ fn render_the_window_to_a_png() {
     harness.get_by_label_contains("building up");
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-generator.png")).unwrap();
-    // And with every setting, down to each instrument's level and notes.
+    // And with every setting: the background's level, each instrument's
+    // level and notes.
     show_details(&mut harness);
     harness
-        .get_by_role_and_label(egui::accesskit::Role::Slider, "Piano notes")
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "Bass notes")
         .scroll_to_me();
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");

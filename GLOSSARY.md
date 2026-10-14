@@ -159,7 +159,8 @@ _Avoid_: recording, export, song
 
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,
-a forest, a desert, a fire, or none.
+a forest, a desert, a fire, or none, with a level of its own against the
+instruments (its Level slider in the Generator).
 _Avoid_: weather (only some are), noise, ambience (that is the whole)
 
 **Style**:
