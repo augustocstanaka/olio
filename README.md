@@ -73,11 +73,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
   for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
-    crackling fire, with a level of its own against the instruments;
+    crackling fire, with one **Balance** slider between it and the
+    instruments (the middle as the style was made);
   - **up to nine instruments**: a plucked bass, a harp, bells, bowed
     strings, a pad, a drone, a piano, a plucked violin and soft hand
-    drums (a frame drum and a shaker), with a level for them all
-    together against the background, and each its own level, a Notes
+    drums (a frame drum and a shaker), each with its own level, a Notes
     slider from very sparse to busy, and register. They are synthesised
     until you press **Download Recorded Instruments** (71 MB, once): then
     a real grand piano, concert harp, hand chimes, violin and bass
@@ -98,13 +98,16 @@ Milestone 0, the playable skeleton, is done. Olio can:
     builds up and then every few minutes moves on to a related key, a
     nearby mood, a related background, or lets an instrument rest; the
     panel says where it has got to while it plays;
-  - **energy**, a slider among the essentials from *Background* (barely
-    there) through *Ambient* and *Declarative* (louder, on a slow pulse,
+  - **energy**, a slider among the essentials (how much there is of the
+    music, not how loud: that is the level) from *Background* (barely
+    there) through *Ambient* and *Declarative* (harder, on a slow pulse,
     with cadences) to *Vibrant*: played harder and busier on a brisk
     pulse, the harp running up the chords, the bass answering itself,
     piano chords, a doubled shaker, strings in fifths, and the pad adding
     sevenths and ninths; and **form** (with Details): endless, or pieces
     that close on the root and pause.
+
+  Every control in the Generator says what it does when you hover it.
 
   Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
   Desert Night and Storm Watch fill it all in, and Open Road and Spring

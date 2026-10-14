@@ -1119,29 +1119,34 @@ fn each_instrument_plays_as_many_notes_as_its_slider_says() {
 }
 
 #[test]
-fn the_background_and_the_instruments_have_levels_of_their_own() {
+fn one_balance_slider_sits_between_the_background_and_the_instruments() {
     use egui::accesskit::Role;
-    use olio_audio::ambience::DEFAULT_PART_LEVEL;
+    use olio_audio::ambience::DEFAULT_BALANCE;
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
     assert_eq!(
-        harness.state().preferences().ambience.background_level,
-        DEFAULT_PART_LEVEL
+        harness.state().preferences().ambience.balance,
+        DEFAULT_BALANCE
     );
-    // Among the essentials, beside the backgrounds.
-    set_slider(&mut harness, "Background level", 30.0);
+    // Among the essentials, beside the backgrounds; no level of their own.
+    for gone in ["Background level", "Instruments level"] {
+        assert_eq!(
+            harness
+                .query_all_by_role_and_label(Role::Slider, gone)
+                .count(),
+            0
+        );
+    }
+    set_slider(&mut harness, "Balance", 30.0);
     let settings = harness.state().preferences().ambience;
-    assert!((settings.background_level - 0.3).abs() < 1e-3);
+    assert!((settings.balance - 0.3).abs() < 1e-3);
     assert_eq!(settings.describe(), "Custom: D Dorian");
-    // The instruments, all together, have theirs.
-    set_slider(&mut harness, "Instruments level", 85.0);
-    assert!((harness.state().preferences().ambience.instruments_level - 0.85).abs() < 1e-3);
-    // No background, nothing to set.
+    // No background, nothing to balance.
     click_in_generator(&mut harness, "None");
     assert_eq!(
         harness
-            .query_all_by_role_and_label(Role::Slider, "Background level")
+            .query_all_by_role_and_label(Role::Slider, "Balance")
             .count(),
         0
     );

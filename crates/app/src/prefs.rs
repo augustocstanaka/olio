@@ -455,6 +455,11 @@ mod tests {
             Some(olio_audio::ambience::Presence::Declarative),
             "a presence becomes its energy"
         );
+        assert_eq!(
+            prefs.ambience.balance,
+            olio_audio::ambience::DEFAULT_BALANCE,
+            "no part levels: as made"
+        );
         assert!(!prefs.show_generator);
         assert!(!prefs.generator_details, "the essentials first");
         assert!(prefs.styles.is_empty());

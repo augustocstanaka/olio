@@ -1,9 +1,10 @@
 //! The Generator: a panel in place of the inspector where the ambience is
 //! shaped, played live under the sounds, and rendered to tracks that land
 //! on tiles. It shows the essentials (style, key, mood, energy, how it
-//! changes over time, background, instruments); Details adds every setting
-//! (the character's amounts, each instrument's level, density and
-//! register, and the form) under the essential it belongs to. Custom settings can be saved
+//! changes over time, background and its balance with the instruments,
+//! instruments); Details adds every setting (the character's amounts,
+//! each instrument's level, density and register, and the form) under the
+//! essential it belongs to. Every control explains itself on hover. Custom settings can be saved
 //! as a style of one's own, listed after the built-in styles.
 //!
 //! The settings live in the preferences and go to the engine when they
@@ -628,12 +629,6 @@ pub fn show(
             section(ui, "Background");
             background(ui, settings, view.images);
             section(ui, "Instruments");
-            part_level(
-                ui,
-                &mut settings.instruments_level,
-                "Instruments level",
-                "How loud the instruments are, all together, against the background".to_owned(),
-            );
             // In one scope: it changes as the pack downloads and installs.
             ui.scope(|ui| recorded_row(ui, view.recorded, &mut actions));
             ui.add_space(4.0);
@@ -691,7 +686,8 @@ fn live(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
         }
     });
     if details {
-        ui.checkbox(&mut settings.duck, "Quieter while sounds play");
+        ui.checkbox(&mut settings.duck, "Quieter while sounds play")
+            .on_hover_text("Down to about a third while any sound plays, and back up after");
     }
 }
 
@@ -748,7 +744,10 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
                     }
                 }
             });
-        let _ = combo.response.labelled_by(title.id);
+        let _ = combo
+            .response
+            .labelled_by(title.id)
+            .on_hover_text("Start from a style; touch anything and the settings are yours");
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .button("New variation")
@@ -806,7 +805,11 @@ fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions:
         }
         match view.saved {
             Some(index) => {
-                if ui.button("Rename…").clicked() {
+                if ui
+                    .button("Rename…")
+                    .on_hover_text("Give this style another name")
+                    .clicked()
+                {
                     actions.push(Action::RenameStyle(index));
                 }
                 if ui
@@ -847,8 +850,12 @@ fn naming_row(ui: &mut Ui, naming: &mut Naming, styles: &[UserStyle], actions: &
         let entered = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
         let save = ui
             .add_enabled(problem.is_none(), egui::Button::new("Save"))
+            .on_hover_text("Keep the style under this name (Return)")
             .clicked();
-        let cancel = ui.button("Cancel").clicked();
+        let cancel = ui
+            .button("Cancel")
+            .on_hover_text("Leave the styles as they were (Escape)")
+            .clicked();
         if cancel || ui.input(|input| input.key_pressed(Key::Escape)) {
             actions.push(Action::CancelNaming);
         } else if (entered || save) && problem.is_none() {
@@ -947,7 +954,10 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
                     ui.selectable_value(&mut settings.scale.root, index, *name);
                 }
             });
-        let _ = combo.response.labelled_by(root.id);
+        let _ = combo
+            .response
+            .labelled_by(root.id)
+            .on_hover_text("The home note the music keeps coming back to");
         ui.add_space(8.0);
         let scale = ui.label("Scale");
         let width = (ui.available_width() - 8.0).max(120.0);
@@ -961,7 +971,10 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
                         .on_hover_text(kind.character());
                 }
             });
-        let _ = combo.response.labelled_by(scale.id);
+        let _ = combo
+            .response
+            .labelled_by(scale.id)
+            .on_hover_text("Which notes the music uses, and so its colour");
     });
     ui.add_space(4.0);
     ui.checkbox(&mut settings.suspended, "Suspended")
@@ -1051,37 +1064,40 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
         }
     });
     ui.weak(settings.background.describe());
-    // Its own level, against the instruments: in one scope, so whether it
-    // shows never moves the ids of the widgets below.
+    // Its balance with the instruments: in one scope, so whether it shows
+    // never moves the ids of the widgets below.
     ui.scope(|ui| {
-        if settings.background == Background::None {
-            return;
+        if settings.background != Background::None {
+            ui.add_space(2.0);
+            balance(ui, settings);
         }
-        ui.add_space(2.0);
-        let hint = format!(
-            "How loud the {} is against the instruments",
-            settings.background.name().to_lowercase()
-        );
-        part_level(ui, &mut settings.background_level, "Background level", hint);
     });
 }
 
-/// A part's level (the background's, or the instruments' together):
-/// "Level" and a slider in percent filling the row, named `label` for
-/// screen readers.
-fn part_level(ui: &mut Ui, value: &mut f32, label: &str, hint: String) {
+/// One slider between the background and the instruments, the middle as
+/// the style was made.
+fn balance(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    let background = settings.background.name().to_lowercase();
+    let hint = format!(
+        "Balance {:.0} %: the {background} alone at the left, the instruments alone at the \
+         right; the middle as the style was made. Each is up to twice as loud towards its end",
+        settings.balance * 100.0
+    );
     ui.horizontal(|ui| {
-        ui.label("Level");
-        let mut percent = *value * 100.0;
-        inspector::fill_with_slider(ui);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.weak(settings.background.name())
+            .on_hover_text(hint.clone());
+        let mut percent = settings.balance * 100.0;
+        ui.spacing_mut().slider_width = (ui.available_width() - 84.0).clamp(60.0, 220.0);
         let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-            .suffix(" %")
-            .max_decimals(0);
+            .show_value(false)
+            .trailing_fill(true);
         let response = menu::keeps_arrows(ui.add(slider));
-        response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(percent), label));
-        if response.on_hover_text(hint).changed() {
-            *value = percent / 100.0;
+        response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(percent), "Balance"));
+        if response.on_hover_text(hint.clone()).changed() {
+            settings.balance = percent / 100.0;
         }
+        ui.weak("Instruments").on_hover_text(hint);
     });
 }
 
@@ -1107,7 +1123,11 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
         }
         Recorded::Downloading(progress) => {
             ui.horizontal(|ui| {
-                if ui.button("Stop Download").clicked() {
+                if ui
+                    .button("Stop Download")
+                    .on_hover_text("Stop; the synthesised instruments play on")
+                    .clicked()
+                {
                     actions.push(Action::CancelDownload);
                 }
                 let text = format!("Downloading recorded instruments {:.0} %", progress * 100.0);
@@ -1166,7 +1186,11 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
             );
             name.on_hover_text(instrument.describe());
             ui.add_enabled_ui(layer.enabled, |ui| {
-                let hint = format!("Level {:.0} %", layer.level * 100.0);
+                let hint = format!(
+                    "{} at {:.0} %, among the instruments",
+                    instrument.name(),
+                    layer.level * 100.0
+                );
                 let label = format!("{} level", instrument.name());
                 amount_slider(ui, &mut layer.level, &label, hint);
             });
@@ -1197,7 +1221,13 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
         ui.horizontal(|ui| {
             ui.add_space(NAME_WIDTH + 6.0);
             ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
-            row(ui, &mut layer.register, &Register::ALL, Register::name);
+            row(
+                ui,
+                &mut layer.register,
+                &Register::ALL,
+                Register::name,
+                Register::describe,
+            );
         });
         ui.add_space(4.0);
     }
@@ -1228,11 +1258,13 @@ fn row<T: Copy + PartialEq>(
     value: &mut T,
     all: &[T],
     name: impl Fn(T) -> &'static str,
+    hint: impl Fn(T) -> &'static str,
 ) {
     ui.spacing_mut().item_spacing.x = 2.0;
     for &choice in all {
         if ui
             .selectable_label(*value == choice, name(choice))
+            .on_hover_text(sentence(hint(choice)))
             .clicked()
         {
             *value = choice;
@@ -1259,20 +1291,26 @@ fn energy(ui: &mut Ui, settings: &mut AmbienceSettings) {
     });
     ui.horizontal(|ui| {
         let hint = format!(
-            "Energy {:.0} %: barely there to the left, lively and full to the right",
+            "Energy {:.0} %: how much there is of the music, not how loud. Softer and sparser \
+             to the left; harder and busier to the right, on a pulse from the middle, with \
+             running lines and fuller chords near the top",
             settings.energy * 100.0
         );
         amount_slider(ui, &mut settings.energy, "Energy", hint);
     });
     if settings.pulsed() {
         ui.horizontal(|ui| {
-            ui.label("Pulse");
+            let hint = "Beats per minute of the pulse; the chords change every eight beats";
+            ui.label("Pulse").on_hover_text(hint);
             let mut tempo = f32::from(settings.tempo);
             ui.spacing_mut().slider_width = 160.0;
             let slider = egui::Slider::new(&mut tempo, 30.0..=120.0)
                 .suffix(" BPM")
                 .max_decimals(0);
-            if menu::keeps_arrows(ui.add(slider)).changed() {
+            if menu::keeps_arrows(ui.add(slider))
+                .on_hover_text(hint)
+                .changed()
+            {
                 settings.tempo = tempo.round() as u16;
             }
         });
@@ -1284,7 +1322,12 @@ fn energy(ui: &mut Ui, settings: &mut AmbienceSettings) {
 fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {
     let pieces = matches!(settings.form, Form::Piece { .. });
     ui.horizontal(|ui| {
-        if ui.selectable_label(!pieces, "Endless").clicked() && pieces {
+        if ui
+            .selectable_label(!pieces, "Endless")
+            .on_hover_text("Plays on without a break")
+            .clicked()
+            && pieces
+        {
             settings.form = Form::Endless;
         }
         if ui
@@ -1309,17 +1352,23 @@ fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {
             .spacing([10.0, 6.0])
             .show(ui, |ui| {
                 ui.spacing_mut().slider_width = 160.0;
-                ui.label("Length");
+                let hint = "How long each piece plays before it closes on the root";
+                let label = ui.label("Piece").on_hover_text(hint);
                 let length = egui::Slider::new(minutes, 0.5..=30.0)
                     .suffix(" min")
                     .max_decimals(1);
-                menu::keeps_arrows(ui.add(length));
+                let _ = menu::keeps_arrows(ui.add(length))
+                    .labelled_by(label.id)
+                    .on_hover_text(hint);
                 ui.end_row();
-                ui.label("Pause");
+                let hint = "The background alone between one piece and the next";
+                let label = ui.label("Pause").on_hover_text(hint);
                 let pause = egui::Slider::new(pause_seconds, 0.0..=120.0)
                     .suffix(" s")
                     .max_decimals(0);
-                menu::keeps_arrows(ui.add(pause));
+                let _ = menu::keeps_arrows(ui.add(pause))
+                    .labelled_by(label.id)
+                    .on_hover_text(hint);
                 ui.end_row();
             });
     }
@@ -1331,10 +1380,12 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
     ui.label(RichText::new("Track").strong());
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label("Length");
+        let hint = "How long the generated track is";
+        ui.label("Length").on_hover_text(hint);
         for (seconds, name) in TRACK_LENGTHS {
             if ui
                 .selectable_label(view.track_seconds == seconds, name)
+                .on_hover_text(hint)
                 .clicked()
             {
                 actions.push(Action::Length(seconds));
@@ -1345,7 +1396,11 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
     match &view.busy {
         Some(busy) => {
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui
+                    .button("Cancel")
+                    .on_hover_text("Stop generating; tracks already made stay")
+                    .clicked()
+                {
                     actions.push(Action::Cancel);
                 }
                 let percent = busy.progress * 100.0;

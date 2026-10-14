@@ -293,7 +293,7 @@ impl Composer {
     /// A velocity in `low..high`, played harder with energy above Ambient
     /// and softer below.
     fn velocity(&mut self, settings: &AmbienceSettings, low: f32, high: f32) -> f32 {
-        let lift = 0.3 * (settings.energy - super::DEFAULT_ENERGY);
+        let lift = 0.4 * (settings.energy - super::DEFAULT_ENERGY);
         (self.rng.range(low, high) + lift).clamp(0.05, 1.0)
     }
 

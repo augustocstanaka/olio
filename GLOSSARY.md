@@ -181,8 +181,8 @@ _Avoid_: sample pack, bank
 
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,
-a forest, a desert, a fire, or none, with a level of its own against the
-instruments (its Level slider in the Generator).
+a forest, a desert, a fire, or none; how much of it is heard against the
+instruments is the Balance.
 _Avoid_: weather (only some are), noise, ambience (that is the whole)
 
 **Style**:
@@ -193,10 +193,17 @@ settings Custom. Custom settings can be saved as a style of one's own
 kept in the preferences; tracks made from it are titled after it.
 _Avoid_: preset (that is Polish), theme
 
+**Balance**:
+The Generator's one slider between the background and the instruments:
+the background alone at one end, the instruments alone at the other,
+the middle as the style was made. Not how loud the whole is: that is
+its level.
+_Avoid_: mix, crossfade, background level
+
 **Energy**:
-How much there is of the Generator's music, 0 to 100 %: how loud and
-hard it plays, how many notes, whether they keep a pulse (from the
-middle up), how full the chords and lines are. **Background**,
+How much there is of the Generator's music, 0 to 100 %: how hard it
+plays, how many notes, whether they keep a pulse (from the middle up),
+how full the chords and lines are. Not how loud: that is its level. **Background**,
 **Ambient**, **Declarative** and **Vibrant** name four places on it, the
 way a Mood names a character; saved settings from before, with a
 presence, keep its place.

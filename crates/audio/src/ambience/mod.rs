@@ -486,6 +486,14 @@ impl Register {
         }
     }
 
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Low => "an octave lower than usual",
+            Self::Middle => "where the instrument usually sits",
+            Self::High => "an octave higher than usual",
+        }
+    }
+
     fn semitones(self) -> i32 {
         match self {
             Self::Low => -12,
@@ -674,18 +682,18 @@ impl<'de> Deserialize<'de> for Layers {
 // ----- energy and form -----------------------------------------------------
 
 /// How much there is of the music, from barely there to lively and full:
-/// its level, how many notes, whether they keep a pulse, how full the
-/// chords and lines are. An amount from 0 to 1 in the settings; these
+/// how hard it plays, how many notes, whether they keep a pulse, how full
+/// the chords and lines are. Not how loud: that is the level. An amount from 0 to 1 in the settings; these
 /// name four places on it, the way a [`Mood`] names a character.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Presence {
-    /// Barely there: very quiet, very sparse, no pulse.
+    /// Barely there: very sparse and soft, no pulse.
     Background,
     #[default]
     Ambient,
-    /// Music to notice: louder, denser, on a slow pulse, with cadences.
+    /// Music to notice: harder, denser, on a slow pulse, with cadences.
     Declarative,
-    /// Lively and full: louder still, brisk lines on a pulse, the harp
+    /// Lively and full: harder still, brisk lines on a pulse, the harp
     /// running up the chords, fuller chords, chords changing sooner.
     Vibrant,
 }
@@ -709,9 +717,9 @@ impl Presence {
 
     pub fn describe(self) -> &'static str {
         match self {
-            Self::Background => "barely there: very quiet and sparse, no pulse",
+            Self::Background => "barely there: very sparse and soft, no pulse",
             Self::Ambient => "a quiet bed with a little movement",
-            Self::Declarative => "music to notice: louder, denser, on a slow pulse, with cadences",
+            Self::Declarative => "music to notice: harder, denser, on a slow pulse, with cadences",
             Self::Vibrant => {
                 "lively and full: brisk lines on a pulse, arpeggios, fuller chords changing sooner"
             }
@@ -761,9 +769,10 @@ fn ramp(energy: f32, through: [f32; 4]) -> f32 {
     through[3]
 }
 
-/// The whole bed's gain at an energy: quieter at Background, up to
-/// twice Ambient at Vibrant.
-fn energy_level(energy: f32) -> f32 {
+/// The gain energy once gave the whole bed (quieter at Background, up to
+/// twice Ambient at Vibrant), before loudness was left to the level: for
+/// reading old settings and levelling the styles to sound as they did.
+fn old_energy_gain(energy: f32) -> f32 {
     ramp(energy, [0.45, 1.0, 1.6, 2.0])
 }
 
@@ -845,14 +854,27 @@ impl Form {
 
 // ----- the settings and styles ---------------------------------------------
 
-/// Where the background's and the instruments' levels sit unless moved.
-pub const DEFAULT_PART_LEVEL: f32 = 0.7;
+/// Where the balance sits unless moved: the background and the
+/// instruments as the style was made.
+pub const DEFAULT_BALANCE: f32 = 0.5;
 
-/// The gain for the background's or the instruments' level: a square
-/// law, so the slider sounds even along its length; 1 at the default.
-fn part_gain(level: f32) -> f32 {
-    let ratio = level / DEFAULT_PART_LEVEL;
-    ratio * ratio
+/// One side of the balance: 0 silent, 1 at the middle, up to twice as
+/// loud towards its end; a square law, so the slider sounds even.
+fn side(share: f32) -> f32 {
+    ((share / DEFAULT_BALANCE).powi(2)).min(2.0)
+}
+
+/// The background's and the instruments' gains at a balance.
+fn balance_gains(balance: f32) -> (f32, f32) {
+    (side(1.0 - balance), side(balance))
+}
+
+/// Where each part's own level sat before there was a balance, and the
+/// gain it gave: for reading old settings.
+const OLD_PART_LEVEL: f32 = 0.7;
+
+fn old_part_gain(level: f32) -> f32 {
+    (level / OLD_PART_LEVEL).powi(2)
 }
 
 /// Where variety and concentration sit unless moved: the middle.
@@ -896,12 +918,10 @@ pub struct AmbienceSettings {
     pub chaos: f32,
     /// The whole bed, 0 to 1; even 1 is well under the sounds.
     pub level: f32,
-    /// The background's own level against the instruments, 0 to 1:
-    /// [`DEFAULT_PART_LEVEL`] is as it was made, 1 about twice as loud, 0
-    /// silent.
-    pub background_level: f32,
-    /// All the instruments together against the background, the same way.
-    pub instruments_level: f32,
+    /// Between the background and the instruments, 0 to 1: 0 the
+    /// background alone, 1 the instruments alone, [`DEFAULT_BALANCE`] as
+    /// the style was made; each part up to twice as loud towards its end.
+    pub balance: f32,
     /// Quieter while any sound plays.
     pub duck: bool,
     /// Makes the bed repeatable; change it for a new variation.
@@ -934,6 +954,8 @@ struct SavedSettings {
     concentration: f32,
     chaos: f32,
     level: f32,
+    balance: f32,
+    /// Before the balance: each part's own level.
     background_level: f32,
     instruments_level: f32,
     duck: bool,
@@ -959,8 +981,9 @@ impl Default for SavedSettings {
             concentration: settings.concentration,
             chaos: settings.chaos,
             level: settings.level,
-            background_level: settings.background_level,
-            instruments_level: settings.instruments_level,
+            balance: f32::NAN,
+            background_level: f32::NAN,
+            instruments_level: f32::NAN,
             duck: settings.duck,
             seed: settings.seed,
         }
@@ -973,6 +996,11 @@ impl From<SavedSettings> for AmbienceSettings {
             saved.energy
         } else {
             saved.presence.energy()
+        };
+        let (balance, level) = if saved.balance.is_finite() {
+            (saved.balance, saved.level)
+        } else {
+            old_balance(&saved, energy)
         };
         Self {
             enabled: saved.enabled,
@@ -988,13 +1016,40 @@ impl From<SavedSettings> for AmbienceSettings {
             variety: saved.variety,
             concentration: saved.concentration,
             chaos: saved.chaos,
-            level: saved.level,
-            background_level: saved.background_level,
-            instruments_level: saved.instruments_level,
+            level,
+            balance,
             duck: saved.duck,
             seed: saved.seed,
         }
     }
+}
+
+/// Settings saved before the balance: the balance that keeps the two
+/// parts' levels apart as they were, and the level that keeps the louder
+/// part as loud as it was, energy's old loudness included.
+fn old_balance(saved: &SavedSettings, energy: f32) -> (f32, f32) {
+    let part = |level: f32| {
+        if level.is_finite() {
+            level.clamp(0.0, 1.0)
+        } else {
+            OLD_PART_LEVEL
+        }
+    };
+    let (bed, music) = (part(saved.background_level), part(saved.instruments_level));
+    let balance = if bed + music > 0.0 {
+        music / (bed + music)
+    } else {
+        DEFAULT_BALANCE
+    };
+    let (bed_gain, music_gain) = balance_gains(balance);
+    let (was, now) = if music_gain >= bed_gain {
+        (old_part_gain(music), music_gain)
+    } else {
+        (old_part_gain(bed), bed_gain)
+    };
+    let kept = if now > 0.0 { (was / now).sqrt() } else { 1.0 };
+    let level = saved.level * kept * old_energy_gain(energy).sqrt();
+    (balance, level.clamp(0.0, 1.0))
 }
 
 impl AmbienceSettings {
@@ -1009,8 +1064,7 @@ impl AmbienceSettings {
             }
         };
         self.level = unit(self.level, 0.35);
-        self.background_level = unit(self.background_level, DEFAULT_PART_LEVEL);
-        self.instruments_level = unit(self.instruments_level, DEFAULT_PART_LEVEL);
+        self.balance = unit(self.balance, DEFAULT_BALANCE);
         self.energy = unit(self.energy, DEFAULT_ENERGY);
         self.variety = unit(self.variety, DEFAULT_VARIETY);
         self.concentration = unit(self.concentration, DEFAULT_CONCENTRATION);
@@ -1231,7 +1285,7 @@ impl Style {
                     Background::Winter,
                     Presence::Background,
                     Form::Endless,
-                    0.3,
+                    0.2,
                 )
             }
             Self::NightDrift => {
@@ -1242,7 +1296,7 @@ impl Style {
                     Background::Wind,
                     Presence::Background,
                     Form::Endless,
-                    0.3,
+                    0.2,
                 )
             }
             Self::Cathedral => {
@@ -1282,7 +1336,7 @@ impl Style {
                         minutes: 3.0,
                         pause_seconds: 20.0,
                     },
-                    0.5,
+                    0.63,
                 )
             }
             Self::SeasidePiano => {
@@ -1330,7 +1384,7 @@ impl Style {
                     Background::Desert,
                     Presence::Background,
                     Form::Endless,
-                    0.35,
+                    0.23,
                 )
             }
             Self::StormWatch => {
@@ -1356,7 +1410,7 @@ impl Style {
                     Background::None,
                     Presence::Vibrant,
                     Form::Endless,
-                    0.45,
+                    0.64,
                 )
             }
             Self::SpringDance => {
@@ -1370,7 +1424,7 @@ impl Style {
                     Background::Forest,
                     Presence::Vibrant,
                     Form::Endless,
-                    0.45,
+                    0.64,
                 )
             }
         };
@@ -1389,8 +1443,7 @@ impl Style {
             concentration: DEFAULT_CONCENTRATION,
             chaos: 0.0,
             level,
-            background_level: DEFAULT_PART_LEVEL,
-            instruments_level: DEFAULT_PART_LEVEL,
+            balance: DEFAULT_BALANCE,
             duck: true,
             seed: 1,
         }
@@ -1527,9 +1580,9 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
         variety,
         concentration,
         chaos,
-        level: rng.range(0.35, 0.45),
-        background_level: DEFAULT_PART_LEVEL,
-        instruments_level: DEFAULT_PART_LEVEL,
+        // Livelier, a little louder; quieter when barely there.
+        level: (rng.range(0.35, 0.45) * old_energy_gain(presence.energy()).sqrt()).min(1.0),
+        balance: DEFAULT_BALANCE,
         duck: true,
         seed: seed.max(1),
     }
@@ -1722,10 +1775,7 @@ impl Ambience {
             self.clock += frames as u64;
             return;
         }
-        let level = self.settings.level
-            * self.settings.level
-            * FULL_LEVEL_GAIN
-            * energy_level(self.settings.energy);
+        let level = self.settings.level * self.settings.level * FULL_LEVEL_GAIN;
         let duck_target = if ducking && self.settings.duck {
             DUCKED
         } else {
@@ -1734,11 +1784,10 @@ impl Ambience {
         if self.duck.target() != duck_target {
             self.duck.towards(duck_target, self.rate / 3);
         }
-        let bed_target = part_gain(self.settings.background_level);
+        let (bed_target, music_target) = balance_gains(self.settings.balance);
         if self.bed_gain.target() != bed_target {
             self.bed_gain.towards(bed_target, self.rate / 10);
         }
-        let music_target = part_gain(self.settings.instruments_level);
         if self.music_level.target() != music_target {
             self.music_level.towards(music_target, self.rate / 10);
         }
@@ -1847,8 +1896,7 @@ mod tests {
             (DEFAULT_VARIETY, DEFAULT_CONCENTRATION, 0.0),
             "saved before the character, in the middle and in the key"
         );
-        assert_eq!(settings.background_level, DEFAULT_PART_LEVEL);
-        assert_eq!(settings.instruments_level, DEFAULT_PART_LEVEL);
+        assert_eq!(settings.balance, DEFAULT_BALANCE, "both parts as made");
         assert_eq!(settings.energy, DEFAULT_ENERGY, "no presence: Ambient");
         let harp = settings.layer(Instrument::Harp);
         assert!(harp.enabled && harp.register == Register::High);
@@ -1921,20 +1969,16 @@ mod tests {
         settings.energy = 0.3;
         assert_eq!(settings.presence(), None);
         assert_eq!(Presence::nearest(0.3), Presence::Ambient);
-        // Louder and busier all the way up, without a step.
-        let mut last = (0.0, f32::MAX);
+        // Busier all the way up, without a step.
+        let mut last = f32::MAX;
         for step in 0..=20 {
             let energy = step as f32 / 20.0;
-            let now = (energy_level(energy), energy_spacing(energy));
-            assert!(now.0 >= last.0 && now.1 <= last.1, "at {energy}");
-            assert!(
-                (now.0 - last.0).abs() < 0.3 || step == 0,
-                "smooth at {energy}"
-            );
+            let now = energy_spacing(energy);
+            assert!(now <= last, "at {energy}");
+            assert!((last - now).abs() < 0.3 || step == 0, "smooth at {energy}");
             last = now;
         }
-        assert_eq!(energy_level(DEFAULT_ENERGY), 1.0, "Ambient as it was");
-        assert_eq!(energy_spacing(DEFAULT_ENERGY), 1.0);
+        assert_eq!(energy_spacing(DEFAULT_ENERGY), 1.0, "Ambient as it was");
         for style in [Style::OpenRoad, Style::SpringDance] {
             let settings = style.settings();
             assert_eq!(settings.presence(), Some(Presence::Vibrant), "{style:?}");
@@ -1996,61 +2040,104 @@ mod tests {
         assert_ne!(surprise(1), surprise(2));
     }
 
-    #[test]
-    fn the_background_has_its_own_level_beside_the_instruments() {
+    /// The background's and the instruments' levels over the last second
+    /// of `seconds`, at a balance: the background alone (Rain Study, no
+    /// instruments), then a drone alone (dry and hall together).
+    fn parts_at(balance: f32) -> (f32, f32) {
         let rate = 48_000;
-        // The background alone, its level over the last second.
-        let level = |background_level: f32| {
-            let mut settings = Style::RainStudy.settings();
+        let rms = |mut settings: AmbienceSettings, seconds: usize| {
             settings.enabled = true;
-            settings.background_level = background_level;
-            for instrument in Instrument::ALL {
-                settings.layers[instrument].enabled = false;
-            }
+            settings.balance = balance;
             let mut ambience = Ambience::new(rate as u32, 4);
             ambience.set(settings);
-            let mut out = vec![0.0; rate * 4 * 2];
+            let mut out = vec![0.0; rate * seconds * 2];
             ambience.render(&mut out, 2, false);
             let last = &out[out.len() - rate * 2..];
             (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
         };
-        let made = level(DEFAULT_PART_LEVEL);
-        let half = level(DEFAULT_PART_LEVEL / 2.0);
-        let full = level(1.0);
-        assert!(made > 0.0);
-        assert!(
-            (half / made - 0.25).abs() < 0.03,
-            "a quarter as loud: {half} / {made}"
-        );
-        assert!(full > made * 1.8, "louder: {full} / {made}");
-        assert_eq!(level(0.0), 0.0, "silent");
+        let mut bed = Style::RainStudy.settings();
+        for instrument in Instrument::ALL {
+            bed.layers[instrument].enabled = false;
+        }
+        let mut drone = Style::Cathedral.settings();
+        drone.background = Background::None;
+        for instrument in Instrument::ALL {
+            drone.layers[instrument].enabled = instrument == Instrument::Drone;
+        }
+        (rms(bed, 4), rms(drone, 8))
     }
 
     #[test]
-    fn the_instruments_have_a_level_together_beside_the_background() {
-        let rate = 48_000;
-        // A drone alone, no background: its level over the last second.
-        let level = |instruments_level: f32| {
-            let mut settings = Style::Cathedral.settings();
-            settings.enabled = true;
-            settings.background = Background::None;
-            settings.instruments_level = instruments_level;
-            for instrument in Instrument::ALL {
-                settings.layers[instrument].enabled = instrument == Instrument::Drone;
-            }
-            let mut ambience = Ambience::new(rate as u32, 5);
-            ambience.set(settings);
-            let mut out = vec![0.0; rate * 8 * 2];
-            ambience.render(&mut out, 2, false);
-            // Dry and hall together: the hall follows the instruments.
-            let last = &out[out.len() - rate * 2..];
-            (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
-        };
-        let made = level(DEFAULT_PART_LEVEL);
-        let half = level(DEFAULT_PART_LEVEL / 2.0);
-        assert!(made > 0.0);
-        assert!((half / made - 0.25).abs() < 0.03, "{half} / {made}");
-        assert!(level(0.0) < 1e-8, "silent, but for the hall's last breath");
+    fn the_balance_moves_between_the_background_and_the_instruments() {
+        let (bed, music) = parts_at(DEFAULT_BALANCE);
+        assert!(bed > 0.0 && music > 0.0, "both, as made");
+        // Towards the instruments: the background fades, they come up.
+        let (quieter, louder) = parts_at(0.7);
+        assert!(quieter < bed * 0.5, "{quieter} / {bed}");
+        assert!(louder > music * 1.3, "{louder} / {music}");
+        let (none, most) = parts_at(1.0);
+        assert_eq!(none, 0.0, "the instruments alone");
+        assert!((most / music - 2.0).abs() < 0.1, "twice: {most} / {music}");
+        // And the other way.
+        let (most, none) = parts_at(0.0);
+        assert!((most / bed - 2.0).abs() < 0.1, "twice: {most} / {bed}");
+        assert!(
+            none < 1e-8,
+            "the background alone, but for the hall's breath"
+        );
+    }
+
+    #[test]
+    fn levels_saved_before_the_balance_keep_their_parts_and_loudness() {
+        let load = |json: &str| serde_json::from_str::<AmbienceSettings>(json).unwrap();
+        // As made, at Ambient: unchanged.
+        let settings = load(r#"{"level":0.4,"background_level":0.7,"instruments_level":0.7}"#);
+        assert_eq!(settings.balance, DEFAULT_BALANCE);
+        assert!((settings.level - 0.4).abs() < 1e-6);
+        // The background down, the instruments up, at Declarative: the
+        // instruments as loud as they were, energy's old loudness kept in
+        // the level, the background as far below them as it was.
+        let settings = load(
+            r#"{"level":0.5,"background_level":0.3,"instruments_level":0.7,"presence":"Declarative"}"#,
+        );
+        assert!((settings.balance - 0.7).abs() < 1e-6);
+        let (bed, music) = balance_gains(settings.balance);
+        let heard = |level: f32, gain: f32| level * level * gain;
+        let was = heard(0.5, 1.6);
+        assert!((heard(settings.level, music) / was - 1.0).abs() < 1e-3);
+        assert!(
+            (heard(settings.level, bed) / (was * old_part_gain(0.3)) - 1.0).abs() < 1e-3,
+            "the background as far below"
+        );
+        // The instruments silenced: the background kept as loud.
+        let settings = load(r#"{"level":0.3,"background_level":0.7,"instruments_level":0.0}"#);
+        assert_eq!(settings.balance, 0.0);
+        let (bed, _) = balance_gains(0.0);
+        assert!((heard(settings.level, bed) / heard(0.3, 1.0) - 1.0).abs() < 1e-3);
+        // Saved with a balance: read as it is.
+        let settings = load(r#"{"level":0.3,"balance":0.2,"energy":0.9}"#);
+        assert_eq!((settings.balance, settings.level), (0.2, 0.3));
+    }
+
+    #[test]
+    fn styles_sound_as_loud_as_before_energy_left_loudness_to_the_level() {
+        // What each style's level was while energy also set the loudness.
+        let before = [
+            (Style::WinterHush, 0.3),
+            (Style::NightDrift, 0.3),
+            (Style::DesertNight, 0.35),
+            (Style::Affirmation, 0.5),
+            (Style::OpenRoad, 0.45),
+            (Style::SpringDance, 0.45),
+            (Style::RainStudy, 0.35),
+        ];
+        for (style, level) in before {
+            let settings = style.settings();
+            let was = level * level * old_energy_gain(settings.energy);
+            let now = settings.level * settings.level;
+            let db = 10.0 * (now / was).log10();
+            assert!(db.abs() < 0.2, "{style:?} {db:.2} dB");
+        }
     }
 
     /// Prints how much louder each instrument of the pack in `OLIO_PACK`
