@@ -1083,21 +1083,24 @@ fn each_instrument_plays_as_many_notes_as_its_slider_says() {
 }
 
 #[test]
-fn the_background_has_a_level_of_its_own() {
+fn the_background_and_the_instruments_have_levels_of_their_own() {
     use egui::accesskit::Role;
-    use olio_audio::ambience::DEFAULT_BACKGROUND_LEVEL;
+    use olio_audio::ambience::DEFAULT_PART_LEVEL;
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
     assert_eq!(
         harness.state().preferences().ambience.background_level,
-        DEFAULT_BACKGROUND_LEVEL
+        DEFAULT_PART_LEVEL
     );
     // Among the essentials, beside the backgrounds.
     set_slider(&mut harness, "Background level", 30.0);
     let settings = harness.state().preferences().ambience;
     assert!((settings.background_level - 0.3).abs() < 1e-3);
     assert_eq!(settings.describe(), "Custom: D Dorian");
+    // The instruments, all together, have theirs.
+    set_slider(&mut harness, "Instruments level", 85.0);
+    assert!((harness.state().preferences().ambience.instruments_level - 0.85).abs() < 1e-3);
     // No background, nothing to set.
     click_in_generator(&mut harness, "None");
     assert_eq!(

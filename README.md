@@ -76,7 +76,8 @@ Milestone 0, the playable skeleton, is done. Olio can:
     crackling fire, with a level of its own against the instruments;
   - **up to nine instruments**: a plucked bass, a harp, bells, bowed
     strings, a pad, a drone, a piano, a plucked violin and soft hand
-    drums (a frame drum and a shaker), each with its own level, a Notes
+    drums (a frame drum and a shaker), with a level for them all
+    together against the background, and each its own level, a Notes
     slider from very sparse to busy, and register;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone;

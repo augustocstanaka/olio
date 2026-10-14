@@ -570,6 +570,13 @@ pub fn show(
             section(ui, "Background");
             background(ui, settings, view.images);
             section(ui, "Instruments");
+            part_level(
+                ui,
+                &mut settings.instruments_level,
+                "Instruments level",
+                "How loud the instruments are, all together, against the background".to_owned(),
+            );
+            ui.add_space(4.0);
             if details {
                 instrument_rows(ui, settings);
             } else {
@@ -981,27 +988,30 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
             return;
         }
         ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            ui.label("Level");
-            let mut percent = settings.background_level * 100.0;
-            inspector::fill_with_slider(ui);
-            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-                .suffix(" %")
-                .max_decimals(0);
-            let response = menu::keeps_arrows(ui.add(slider));
-            response.widget_info(|| {
-                egui::WidgetInfo::slider(true, f64::from(percent), "Background level")
-            });
-            if response
-                .on_hover_text(format!(
-                    "How loud the {} is against the instruments",
-                    settings.background.name().to_lowercase()
-                ))
-                .changed()
-            {
-                settings.background_level = percent / 100.0;
-            }
-        });
+        let hint = format!(
+            "How loud the {} is against the instruments",
+            settings.background.name().to_lowercase()
+        );
+        part_level(ui, &mut settings.background_level, "Background level", hint);
+    });
+}
+
+/// A part's level (the background's, or the instruments' together):
+/// "Level" and a slider in percent filling the row, named `label` for
+/// screen readers.
+fn part_level(ui: &mut Ui, value: &mut f32, label: &str, hint: String) {
+    ui.horizontal(|ui| {
+        ui.label("Level");
+        let mut percent = *value * 100.0;
+        inspector::fill_with_slider(ui);
+        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix(" %")
+            .max_decimals(0);
+        let response = menu::keeps_arrows(ui.add(slider));
+        response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(percent), label));
+        if response.on_hover_text(hint).changed() {
+            *value = percent / 100.0;
+        }
     });
 }
 
