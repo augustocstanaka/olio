@@ -182,6 +182,14 @@ and the home note) and **Chaos** (dissonance: notes outside the key,
 clashes and clusters). A **Mood** names a place for all three.
 _Avoid_: complexity, randomness (for chaos)
 
+**Surprise**:
+Generator settings picked at random from what tends to sound well
+together (a key, a background or none, two to four instruments with
+something low or long beneath, a mood), played at once: Surprise Me in
+the panel, Playback ▸ Surprise Me, ⇧⌘R. Back returns to what played
+before; Save Style… keeps it.
+_Avoid_: random style, shuffle, randomize
+
 **Mood**:
 A named character: Still, Gentle (where every style starts), Wandering,
 Restless or Unsettled. Picking one sets Variety, Concentration and Chaos;

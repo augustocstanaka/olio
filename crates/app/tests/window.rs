@@ -919,8 +919,13 @@ fn click_in_generator(harness: &mut Harness<'static, OlioApp>, label: &str) {
 
 /// Picks a style from the Generator's dropdown.
 fn pick_style(harness: &mut Harness<'static, OlioApp>, name: &str) {
+    use egui::accesskit::Role;
     harness
-        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Style")
+        .get_by_role_and_label(Role::ComboBox, "Style")
+        .scroll_to_me();
+    harness.run_steps(3);
+    harness
+        .get_by_role_and_label(Role::ComboBox, "Style")
         .click();
     harness.run_steps(2);
     // The list scrolls once there are styles of one's own; and the
@@ -1068,6 +1073,48 @@ fn an_evolving_ambience_builds_up_and_says_where_it_has_got_to() {
     click_in_generator(&mut harness, "Steady");
     harness.run_steps(3);
     assert_eq!(harness.query_all_by_label_contains("Now:").count(), 0);
+}
+
+#[test]
+fn surprise_me_plays_something_new_and_back_returns() {
+    use olio_audio::ambience::{Journey, Style};
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    click_in_generator(&mut harness, "Evolves");
+    assert!(!harness.state().preferences().ambience.enabled);
+    assert_eq!(harness.query_all_by_label("Back").count(), 0);
+
+    click_in_generator(&mut harness, "Surprise Me");
+    let first = harness.state().preferences().ambience;
+    assert!(first.enabled, "playing at once");
+    assert_eq!(first.style, None);
+    assert_eq!(first.journey, Journey::Evolve, "played the way chosen");
+    assert!((2..=4).contains(&first.playing().count()));
+    harness.get_by_label_contains("Surprise: ");
+    harness.get_by_label_contains("Save Style… keeps it.");
+    click_in_generator(&mut harness, "Surprise Me");
+    let second = harness.state().preferences().ambience;
+    assert!(!second.same_music(&first), "another");
+
+    // Back to what played before the first of them, still playing.
+    click_in_generator(&mut harness, "Back");
+    let back = harness.state().preferences().ambience;
+    assert_eq!(back.style, Some(Style::RainStudy));
+    assert!(back.enabled);
+    harness.get_by_label("Back to Rain Study");
+    assert_eq!(harness.query_all_by_label("Back").count(), 0);
+
+    // A surprise kept as a style has no Back.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::R,
+    );
+    harness.run_steps(3);
+    harness.get_by_label("Back");
+    pick_style(&mut harness, "Campfire");
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("Back").count(), 0);
 }
 
 /// Types `name` over whatever the focused field holds, then Return.

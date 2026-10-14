@@ -156,6 +156,10 @@ pub struct OlioApp {
     generation: Option<Generation>,
     /// A style's name being typed in the Generator.
     naming: Option<generator::Naming>,
+    /// What played before a surprise, and its name, while Back can return
+    /// to it; and how many surprises so far, so each is new.
+    before_surprise: Option<(olio_audio::AmbienceSettings, String)>,
+    surprises: u64,
     history: History,
     /// The set in front when a dragged tile first opened another set by
     /// being held over it; the window goes back to it if the drag ends
@@ -235,6 +239,8 @@ impl OlioApp {
             show_polish: false,
             generation: None,
             naming: None,
+            before_surprise: None,
+            surprises: 0,
             history: History::default(),
             spring_origin: None,
             emoji_picker: None,
@@ -555,6 +561,10 @@ impl OlioApp {
             }
             MenuAction::ToggleGenerator => {
                 self.prefs.show_generator = !self.prefs.show_generator;
+            }
+            MenuAction::Surprise => {
+                self.prefs.show_generator = true;
+                self.surprise();
             }
             MenuAction::SaveStyle => {
                 if self.prefs.ambience.style.is_none() && self.prefs.saved_style().is_none() {
@@ -1477,6 +1487,42 @@ impl OlioApp {
         self.set_status(message, false);
     }
 
+    /// Something new in the Generator, picked at random and played now;
+    /// how it changes over time stays. Back returns to what played before
+    /// the first of a run of surprises.
+    fn surprise(&mut self) {
+        self.surprises += 1;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos() as u64);
+        let seed = nanos ^ self.surprises.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        if self.before_surprise.is_none() {
+            self.before_surprise = Some((self.prefs.ambience, self.prefs.style_name()));
+        }
+        self.prefs.ambience = olio_audio::AmbienceSettings {
+            enabled: true,
+            journey: self.prefs.ambience.journey,
+            ..olio_audio::ambience::surprise(seed)
+        };
+        self.naming = None;
+        self.apply_ambience();
+        let summary = generator::summary(&self.prefs.ambience);
+        self.set_status(format!("Surprise: {summary} Save Style… keeps it."), false);
+    }
+
+    /// Back to what played before the surprise, still playing.
+    fn back_from_surprise(&mut self) {
+        let Some((settings, name)) = self.before_surprise.take() else {
+            return;
+        };
+        self.prefs.ambience = olio_audio::AmbienceSettings {
+            enabled: self.prefs.ambience.enabled,
+            ..settings
+        };
+        self.apply_ambience();
+        self.set_status(format!("Back to {name}"), false);
+    }
+
     fn ask_remove_style(&mut self, index: usize) {
         let Some(style) = self.prefs.styles.get(index) else {
             return;
@@ -2365,6 +2411,7 @@ impl eframe::App for OlioApp {
                 styles: &self.prefs.styles,
                 saved: self.prefs.saved_style(),
                 now: self.ambience_now(),
+                before_surprise: self.before_surprise.as_ref().map(|(_, name)| name.as_str()),
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
@@ -2471,7 +2518,13 @@ impl eframe::App for OlioApp {
                 generator::Action::NameStyle => self.name_style(),
                 generator::Action::CancelNaming => self.naming = None,
                 generator::Action::RemoveStyle(index) => self.ask_remove_style(index),
+                generator::Action::Surprise => self.surprise(),
+                generator::Action::BackFromSurprise => self.back_from_surprise(),
             }
+        }
+        // A surprise picked as, or saved as, a style is kept: no going back.
+        if self.prefs.ambience.style.is_some() || self.prefs.saved_style().is_some() {
+            self.before_surprise = None;
         }
         // A name being typed is for the settings it was started for.
         if let Some(naming) = &self.naming {

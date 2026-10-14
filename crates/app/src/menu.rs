@@ -34,6 +34,8 @@ pub enum MenuAction {
     ToggleGenerator,
     /// Name the Generator's Custom settings as a style of one's own.
     SaveStyle,
+    /// Play something new in the Generator, picked at random.
+    Surprise,
     /// Open the emoji picker for the selected tile.
     ChooseEmoji,
     /// Copy the selected tile into the next free slot.
@@ -108,6 +110,10 @@ pub const SHORTCUTS: &[(MenuAction, KeyboardShortcut)] = &[
     (
         MenuAction::ToggleAmbience,
         KeyboardShortcut::new(CMD_SHIFT, Key::B),
+    ),
+    (
+        MenuAction::Surprise,
+        KeyboardShortcut::new(CMD_SHIFT, Key::R),
     ),
     (
         MenuAction::ToggleGenerator,
@@ -487,6 +493,7 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 state.custom_style,
                 &mut actions,
             );
+            item(ui, "Surprise Me", MenuAction::Surprise, true, &mut actions);
             ui.separator();
             item(
                 ui,
@@ -720,6 +727,7 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
                         (MenuAction::ToggleMute, "Mute or unmute"),
                         (MenuAction::ToggleAmbience, "The ambience on or off"),
                         (MenuAction::ToggleGenerator, "Show or hide the generator"),
+                        (MenuAction::Surprise, "Play a surprise in the generator"),
                         (MenuAction::PlaySelected, "Play or stop the selected tile"),
                         (MenuAction::Move(Direction::Up), "Select the tile above"),
                         (MenuAction::Move(Direction::Down), "Select the tile below"),

@@ -120,7 +120,7 @@ pub fn track_title(name: &str, seconds: u32) -> String {
 }
 
 /// The settings in a line: "G Aeolian, rain; harp and bass."
-fn summary(settings: &AmbienceSettings) -> String {
+pub fn summary(settings: &AmbienceSettings) -> String {
     let instruments: Vec<String> = settings
         .playing()
         .map(|instrument| instrument.name().to_lowercase())
@@ -481,6 +481,8 @@ pub struct View<'a> {
     pub saved: Option<usize>,
     /// Where a building or evolving ambience playing live has got to.
     pub now: Option<Now>,
+    /// After a surprise: what Back returns to.
+    pub before_surprise: Option<&'a str>,
 }
 
 /// What the person did in the panel.
@@ -506,6 +508,10 @@ pub enum Action {
     CancelNaming,
     /// Remove the saved style, once confirmed.
     RemoveStyle(usize),
+    /// Something new, picked at random, playing now.
+    Surprise,
+    /// Back to what played before the surprise.
+    BackFromSurprise,
 }
 
 pub fn show(
@@ -552,7 +558,7 @@ pub fn show(
                 style(ui, settings, &title, view);
                 match naming {
                     Some(naming) => naming_row(ui, naming, view.styles, &mut actions),
-                    None => own_style(ui, settings, view, &mut actions),
+                    None => style_actions(ui, settings, view, &mut actions),
                 }
             });
             section(ui, "Mood");
@@ -703,30 +709,63 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
 
 /// Custom settings can be saved as a style; a saved one renamed or
 /// removed.
-fn own_style(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions: &mut Vec<Action>) {
-    if settings.style.is_some() {
-        return;
-    }
-    ui.horizontal(|ui| match view.saved {
-        Some(index) => {
-            if ui.button("Rename…").clicked() {
-                actions.push(Action::RenameStyle(index));
+/// Surprise Me, and Back after one; Custom settings can be saved as a
+/// style, a saved one renamed or removed.
+fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions: &mut Vec<Action>) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let dice = match view.images.texture(ui.ctx(), "🎲") {
+            Some(texture) => {
+                let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
+                    texture,
+                    egui::vec2(16.0, 16.0),
+                ));
+                egui::Button::new((picture, "Surprise Me"))
             }
-            if ui
-                .button("Remove Style")
-                .on_hover_text("Tracks made from it stay")
-                .clicked()
-            {
-                actions.push(Action::RemoveStyle(index));
-            }
+            None => egui::Button::new("Surprise Me"),
+        };
+        if ui
+            .add(dice)
+            .on_hover_text(
+                "Something new, playing now: a key, a background, a few instruments and a \
+                 mood picked at random",
+            )
+            .clicked()
+        {
+            actions.push(Action::Surprise);
         }
-        None => {
-            if ui
-                .button("Save Style…")
-                .on_hover_text("Keep these settings as a style of your own, in the Style list")
+        if let Some(name) = view.before_surprise
+            && ui
+                .button("Back")
+                .on_hover_text(format!("Back to {name}"))
                 .clicked()
-            {
-                actions.push(Action::SaveStyle);
+        {
+            actions.push(Action::BackFromSurprise);
+        }
+        if settings.style.is_some() {
+            return;
+        }
+        match view.saved {
+            Some(index) => {
+                if ui.button("Rename…").clicked() {
+                    actions.push(Action::RenameStyle(index));
+                }
+                if ui
+                    .button("Remove Style")
+                    .on_hover_text("Tracks made from it stay")
+                    .clicked()
+                {
+                    actions.push(Action::RemoveStyle(index));
+                }
+            }
+            None => {
+                if ui
+                    .button("Save Style…")
+                    .on_hover_text("Keep these settings as a style of your own, in the Style list")
+                    .clicked()
+                {
+                    actions.push(Action::SaveStyle);
+                }
             }
         }
     });

@@ -1088,6 +1088,145 @@ impl Style {
     }
 }
 
+// ----- surprise --------------------------------------------------------
+
+/// One of `choices`, more often the heavier.
+fn weighted<T: Copy>(rng: &mut Rng, choices: &[(T, f32)]) -> T {
+    let total: f32 = choices.iter().map(|(_, weight)| weight).sum();
+    let mut roll = rng.unit() * total;
+    for &(choice, weight) in choices {
+        if roll < weight {
+            return choice;
+        }
+        roll -= weight;
+    }
+    choices[choices.len() - 1].0
+}
+
+/// Settings picked at random from what tends to sound well together: a
+/// key (never Locrian, whole tone rarely), a background or none, two to
+/// four instruments with something low or long beneath the rest, a mood
+/// and a presence. Off, endless and steady; the same seed picks the same.
+pub fn surprise(seed: u64) -> AmbienceSettings {
+    use Instrument::*;
+    let mut rng = Rng::new(seed ^ 0x5DEE_CE66_D1CE_D1CE);
+    let mode = |mode: Mode| ScaleKind::Mode(mode);
+    let kind = weighted(
+        &mut rng,
+        &[
+            (mode(Mode::Ionian), 2.0),
+            (mode(Mode::Dorian), 3.0),
+            (mode(Mode::Phrygian), 1.0),
+            (mode(Mode::Lydian), 2.0),
+            (mode(Mode::Mixolydian), 2.0),
+            (mode(Mode::Aeolian), 3.0),
+            (ScaleKind::MajorPentatonic, 2.0),
+            (ScaleKind::MinorPentatonic, 2.0),
+            (ScaleKind::HarmonicMinor, 1.0),
+            (ScaleKind::WholeTone, 0.4),
+        ],
+    );
+    let scale = Scale {
+        root: rng.below(12) as u8,
+        kind,
+    };
+    let background = weighted(
+        &mut rng,
+        &[
+            (Background::None, 1.0),
+            (Background::Rain, 2.0),
+            (Background::Thunder, 1.0),
+            (Background::Wind, 1.5),
+            (Background::Winter, 1.0),
+            (Background::Waves, 2.0),
+            (Background::Forest, 2.0),
+            (Background::Desert, 1.0),
+            (Background::Fire, 1.5),
+        ],
+    );
+    let presence = weighted(
+        &mut rng,
+        &[
+            (Presence::Background, 1.0),
+            (Presence::Ambient, 3.5),
+            (Presence::Declarative, 0.8),
+        ],
+    );
+
+    let mut layers = Layers::default();
+    // Something low or long beneath, now and then two.
+    let grounds = [(Drone, 1.0), (Pad, 1.0), (Bass, 1.2)];
+    let ground = weighted(&mut rng, &grounds);
+    layers[ground] = Layer::on(rng.range(0.5, 0.7), Density::Sparse);
+    if rng.chance(0.3) {
+        let others: Vec<(Instrument, f32)> =
+            grounds.into_iter().filter(|(i, _)| *i != ground).collect();
+        let second = weighted(&mut rng, &others);
+        layers[second] = Layer::on(rng.range(0.45, 0.6), Density::Sparse);
+    }
+    // One or two above it.
+    let mut melodic = vec![
+        (Harp, 1.3),
+        (Piano, 1.2),
+        (Violin, 1.0),
+        (Bells, 0.8),
+        (Strings, 0.9),
+    ];
+    for _ in 0..if rng.chance(0.6) { 1 } else { 2 } {
+        let voice = weighted(&mut rng, &melodic);
+        melodic.retain(|(i, _)| *i != voice);
+        let level = match voice {
+            Bells => rng.range(0.35, 0.5),
+            _ => rng.range(0.5, 0.75),
+        };
+        let density = if rng.chance(0.4) {
+            Density::Occasional
+        } else {
+            Density::Sparse
+        };
+        layers[voice] = Layer::on(level, density);
+    }
+    // Soft drums, sometimes, where there is room and something to notice.
+    let playing = layers.iter().filter(|layer| layer.enabled).count();
+    if playing < 4 && presence != Presence::Background && rng.chance(0.2) {
+        layers[Drums] = Layer::on(rng.range(0.4, 0.55), Density::Sparse);
+    }
+
+    let mood = weighted(
+        &mut rng,
+        &[
+            (Mood::Still, 2.0),
+            (Mood::Gentle, 3.0),
+            (Mood::Wandering, 2.0),
+            (Mood::Restless, 1.0),
+            (Mood::Unsettled, 0.4),
+        ],
+    );
+    let (variety, concentration, chaos) = mood.character();
+    let tempo = if presence.pulsed() {
+        50 + rng.below(23) as u16
+    } else {
+        60
+    };
+    AmbienceSettings {
+        enabled: false,
+        style: None,
+        scale,
+        background,
+        layers,
+        presence,
+        tempo,
+        form: Form::Endless,
+        journey: Journey::Steady,
+        variety,
+        concentration,
+        chaos,
+        level: rng.range(0.35, 0.45),
+        duck: true,
+        seed: seed.max(1),
+    }
+}
+
 // ----- random ----------------------------------------------------------
 
 /// A small, fast random source (xorshift64*). Seeded, so a render can be
@@ -1399,6 +1538,37 @@ mod tests {
         other.chaos = 0.3;
         assert!(!rain.same_music(&other));
         assert!(!rain.same_music(&Style::Campfire.settings()));
+    }
+
+    #[test]
+    fn a_surprise_is_a_tasteful_handful_and_the_same_seed_picks_the_same() {
+        use std::collections::HashSet;
+        let (mut kinds, mut backgrounds, mut instruments) =
+            (HashSet::new(), HashSet::new(), HashSet::new());
+        for seed in 1..500 {
+            let settings = surprise(seed);
+            assert_eq!(settings, surprise(seed));
+            assert_eq!(settings.clamped(), settings, "within range");
+            assert_eq!(settings.style, None);
+            assert!(!settings.enabled);
+            assert!(settings.mood().is_some(), "at a mood");
+            let playing: Vec<Instrument> = settings.playing().collect();
+            assert!((2..=4).contains(&playing.len()), "{playing:?}");
+            assert!(
+                playing
+                    .iter()
+                    .any(|i| matches!(i, Instrument::Drone | Instrument::Pad | Instrument::Bass)),
+                "something beneath: {playing:?}"
+            );
+            assert_ne!(settings.scale.kind, ScaleKind::Mode(Mode::Locrian));
+            kinds.insert(settings.scale.kind);
+            backgrounds.insert(settings.background);
+            instruments.extend(playing);
+        }
+        assert!(kinds.len() >= 9, "{kinds:?}");
+        assert_eq!(backgrounds.len(), Background::ALL.len());
+        assert_eq!(instruments.len(), Instrument::COUNT);
+        assert_ne!(surprise(1), surprise(2));
     }
 
     #[test]

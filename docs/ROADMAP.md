@@ -44,7 +44,8 @@ are intentions, reordered as real use dictates.
   the inspector (⇧⌘G): a background (rain, thunder, wind, winter, waves,
   forest, desert, fire) and nine instruments (bass, harp, bells,
   strings, pad, drone, piano, plucked violin, hand drums) in a chosen
-  mode or scale, with styles (built-in, or saved under your own name), a
+  mode or scale, with styles (built-in, saved under your own name, or a
+  surprise picked at random), a
   character (variety, concentration, chaos), a journey over time
   (steady, building up, or evolving through related keys, moods and
   backgrounds), presence, endless or pieces. It plays live

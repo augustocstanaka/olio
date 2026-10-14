@@ -97,7 +97,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
   Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
   Desert Night and Storm Watch fill it all in; touch anything and it is
   yours, and Save Style… keeps it in the Style list under a name of your
-  own (rename or remove it there; ⌘Z brings a removed one back). Play it live behind your sounds as the ambience (⇧⌘B, or
+  own (rename or remove it there; ⌘Z brings a removed one back).
+  🎲 Surprise Me (⇧⌘R) plays something new at once, picked from what
+  sounds well together; Back returns to what you had. Play it live behind your sounds as the ambience (⇧⌘B, or
   Playback ▸ Ambience): it ducks while sounds play and never gets near
   their level. Or press Generate Track to render 30 s to 10 min of it
   into the library onto a tile, titled after its style and length, to
