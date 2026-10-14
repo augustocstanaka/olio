@@ -62,6 +62,10 @@ pub struct ZoneManifest {
     /// False for unpitched sounds (a shaker), played as recorded.
     #[serde(default = "yes")]
     pub pitched: bool,
+    /// How far the recording is from its root, in cents, as measured;
+    /// played corrected.
+    #[serde(default)]
+    pub tune: f32,
 }
 
 fn one() -> f32 {
@@ -84,6 +88,7 @@ pub struct Zone {
     pub(crate) looped: Option<(usize, usize)>,
     pub(crate) gain: f32,
     pub(crate) pitched: bool,
+    pub(crate) tune: f32,
 }
 
 /// An instrument's recorded notes, decoded into memory.
@@ -193,6 +198,7 @@ impl Pack {
                 looped,
                 gain: zone.gain,
                 pitched: zone.pitched,
+                tune: zone.tune,
             });
         }
         Ok(Some(Multisample {
@@ -267,6 +273,7 @@ pub(crate) mod tests {
             looped: None,
             gain: 1.0,
             pitched: true,
+            tune: 0.0,
         };
         let manifest = Manifest {
             version: PACK_VERSION,

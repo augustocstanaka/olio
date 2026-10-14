@@ -189,7 +189,7 @@ impl Sampler {
         self.round_robin[index] = self.round_robin[index].wrapping_add(1);
         let zone = &set.zones[zone_index];
         let semitones = if zone.pitched {
-            f32::from(note.midi) - f32::from(zone.root)
+            f32::from(note.midi) - f32::from(zone.root) - zone.tune / 100.0
         } else {
             0.0
         };

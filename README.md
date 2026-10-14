@@ -215,3 +215,10 @@ Copyright 2020 Twitter, Inc and other contributors, licensed under
 names and search data come from the
 [emojis](https://crates.io/crates/emojis) crate (Unicode CLDR and GitHub
 gemoji).
+
+The Generator's recorded instruments come from the
+[Versilian Community Sample Library](https://github.com/sgossner/VCSL)
+and [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) by
+Sam Gossner and Versilian Studios, released into the public domain
+(CC0 1.0); Olio's instrument pack trims, loops, levels and re-encodes
+them and is CC0 as well (`crates/packer`, `cargo xtask instruments`).

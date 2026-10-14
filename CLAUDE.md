@@ -40,6 +40,10 @@ and UI text.
   `olio import` and `olio generate`), `clips.rs` background decoding.
 - `xtask/`: the `cargo xtask` commands below; `demo.rs` synthesises the
   demo pack.
+- `crates/packer` (`olio-packer`): builds the Generator's instrument pack
+  from the CC0 recordings pinned in `sources.json` (fetch, check their
+  pitches, trim, loop, level, FLAC, zip); run through `cargo xtask
+  instruments`.
 - `docs/ARCHITECTURE.md`: threads, data flow, where a feature goes.
 - `docs/EGUI-NOTES.md`: read before changing UI code; egui 0.36 API traps.
 - `docs/BOARD-JSON.md`: the board format users script against. Keep it in
@@ -59,6 +63,8 @@ and UI text.
   you can rebuild while a window is open). `cargo xtask demo` builds a demo
   library to open with `--library target/demo/library`. `cargo xtask
   previews` renders 30 s of each Generator style to `target/previews/`.
+  `cargo xtask instruments fetch`, then `build`, makes the instrument pack
+  in `target/instruments/` (`check` reports the recordings' pitches).
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
   in both themes and both tile styles to `target/screenshots/`; use it
   for visual changes, and copy the results to `docs/images/` when they

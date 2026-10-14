@@ -1790,6 +1790,45 @@ mod tests {
         assert!(level(0.0) < 1e-8, "silent, but for the hall's last breath");
     }
 
+    /// Prints how much louder each instrument of the pack in `OLIO_PACK`
+    /// is than its synthesised voice, to set the pack's gains; run with
+    /// `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn measure_recorded_against_synthesised() {
+        use crate::instruments::Pack;
+        let Ok(dir) = std::env::var("OLIO_PACK") else {
+            return;
+        };
+        let pack = Pack::open(std::path::Path::new(&dir)).unwrap();
+        let rate = 48_000;
+        for instrument in pack.instruments() {
+            let samples = std::sync::Arc::new(pack.load(instrument).unwrap().unwrap());
+            let level = |recorded: bool| {
+                let mut settings = Style::RainStudy.settings();
+                settings.enabled = true;
+                settings.background = Background::None;
+                for other in Instrument::ALL {
+                    settings.layers[other].enabled = other == instrument;
+                }
+                settings.layers[instrument].density = Density::LIVELY;
+                let mut ambience = Ambience::new(rate as u32, 9);
+                if recorded {
+                    ambience.set_samples(instrument, Some(samples.clone()));
+                }
+                ambience.set(settings);
+                let mut out = vec![0.0; rate * 60 * 2];
+                ambience.render(&mut out, 2, false);
+                (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt()
+            };
+            let (synth, recorded) = (level(false), level(true));
+            println!(
+                "GAIN {instrument:?}: synth {synth:.5}, recorded {recorded:.5}, gain {:.3}",
+                synth / recorded
+            );
+        }
+    }
+
     #[test]
     fn the_drone_follows_its_level_and_stops_when_switched_off() {
         let mut settings = Style::Cathedral.settings();
