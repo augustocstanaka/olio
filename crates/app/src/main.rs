@@ -14,6 +14,10 @@ fn main() -> eframe::Result {
             args.next();
             std::process::exit(cli::generate(args));
         }
+        Some("instruments") => {
+            args.next();
+            std::process::exit(cli::install_instruments(args));
+        }
         _ => {}
     }
     let options = match parse_args(args) {

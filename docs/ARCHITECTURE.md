@@ -50,7 +50,13 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    (`render_track`, `Engine::offline`), so the track sounds like the live
    bed, reverb and all; brings it to one loudness with a limiter; writes
    a WAV; imports it with `Store::import_sound`; and wakes the UI, which
-   puts it on a tile.
+   puts it on a tile. It loads any recorded instrument a track plays that
+   is not loaded yet.
+5. **Instrument threads** (`instruments.rs`): one downloads and installs
+   the instrument pack when asked; one per instrument decodes its
+   recordings when the live ambience starts playing it, and the UI hands
+   the result to the mixer (`Engine::set_instrument`). Recordings the
+   mixer lets go come back through `Engine::poll` and are freed there.
 
 The UI and audio threads share no locks. The engine sends `Message`s to the
 mixer over a wait-free ring buffer (`rtrb`); the mixer sends `Event`s back

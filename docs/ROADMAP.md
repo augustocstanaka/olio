@@ -48,7 +48,9 @@ are intentions, reordered as real use dictates.
   surprise picked at random), a
   character (variety, concentration, chaos), a journey over time
   (steady, building up, or evolving through related keys, moods and
-  backgrounds), presence, endless or pieces. It plays live
+  backgrounds), presence, endless or pieces; recorded instruments (a
+  71 MB pack of CC0 recordings, downloaded once) or synthesised ones, in
+  a chorus and hall of their own. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, or a new set of them (variations, moods or

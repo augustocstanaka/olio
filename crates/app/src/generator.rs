@@ -21,11 +21,12 @@ use olio_audio::ambience::{
     AmbienceSettings, Background, Density, Form, Instrument, Journey, Mood, Now, Presence,
     ROOT_NAMES, Register, ScaleKind, Style,
 };
-use olio_audio::instruments::Recorded;
+use olio_audio::instruments::{Pack, Recorded as Recordings};
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
+use crate::instruments::{PACK_BYTES, megabytes};
 use crate::prefs::{UserStyle, style_name_problem, style_named};
 use crate::{inspector, menu};
 
@@ -280,15 +281,18 @@ pub struct Generation {
 }
 
 impl Generation {
-    /// Starts rendering `seconds` of each track, with the `recorded`
-    /// instruments, into the library in `store`.
+    /// Starts rendering `seconds` of each track into the library in
+    /// `store`, with the `recorded` instruments already loaded and, from
+    /// `pack`, any others a track plays.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         ctx: egui::Context,
         store: Store,
         title: String,
         tracks: Vec<TrackPlan>,
         seconds: u32,
-        recorded: Recorded,
+        recorded: Recordings,
+        pack: Option<Pack>,
         destination: Destination,
     ) -> Self {
         let progress = Arc::new(AtomicU32::new(0));
@@ -305,6 +309,7 @@ impl Generation {
             tracks,
             seconds,
             recorded,
+            pack,
             progress: Arc::clone(&progress),
             current: Arc::clone(&current),
             cancel: Arc::clone(&cancel),
@@ -367,18 +372,21 @@ struct Job {
     store: Store,
     tracks: Vec<TrackPlan>,
     seconds: u32,
-    recorded: Recorded,
+    recorded: Recordings,
+    pack: Option<Pack>,
     progress: Arc<AtomicU32>,
     current: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
 }
 
 impl Job {
-    fn run(self) -> Made {
+    fn run(mut self) -> Made {
         let mut sounds = Vec::new();
         let count = self.tracks.len().max(1) as f32;
-        for (index, track) in self.tracks.iter().enumerate() {
+        let tracks = std::mem::take(&mut self.tracks);
+        for (index, track) in tracks.iter().enumerate() {
             self.current.store(index, Ordering::Relaxed);
+            self.load_for(track);
             match self.render(track, |done| (index as f32 + done) / count) {
                 Ok(Some(sound)) => sounds.push(sound),
                 Ok(None) => {
@@ -398,6 +406,22 @@ impl Job {
         Made {
             sounds,
             stopped: None,
+        }
+    }
+
+    /// Loads from the pack any recorded instrument the track plays that is
+    /// not loaded yet; one that will not load stays synthesised.
+    fn load_for(&mut self, track: &TrackPlan) {
+        let Some(pack) = &self.pack else {
+            return;
+        };
+        for instrument in track.settings.playing() {
+            if self.recorded.get(instrument).is_none()
+                && pack.instruments().any(|i| i == instrument)
+                && let Ok(Some(samples)) = pack.load(instrument)
+            {
+                self.recorded.set(instrument, Some(Arc::new(samples)));
+            }
         }
     }
 
@@ -492,6 +516,21 @@ pub struct View<'a> {
     pub now: Option<Now>,
     /// After a surprise: what Back returns to.
     pub before_surprise: Option<&'a str>,
+    /// Whether the recorded instruments are installed, downloading or on.
+    pub recorded: Recorded,
+}
+
+/// Where the recorded instruments are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Recorded {
+    /// Nowhere to install them.
+    Unavailable,
+    /// Not installed: the panel offers the download.
+    Missing,
+    /// Downloading, this far.
+    Downloading(f32),
+    /// Installed, played or not, some still loading.
+    Installed { on: bool, loading: bool },
 }
 
 /// What the person did in the panel.
@@ -521,6 +560,11 @@ pub enum Action {
     Surprise,
     /// Back to what played before the surprise.
     BackFromSurprise,
+    /// Download and install the recorded instruments, or stop.
+    DownloadInstruments,
+    CancelDownload,
+    /// Play the recorded instruments (or the synthesised ones).
+    RecordedInstruments(bool),
 }
 
 pub fn show(
@@ -585,6 +629,8 @@ pub fn show(
                 "Instruments level",
                 "How loud the instruments are, all together, against the background".to_owned(),
             );
+            // In one scope: it changes as the pack downloads and installs.
+            ui.scope(|ui| recorded_row(ui, view.recorded, &mut actions));
             ui.add_space(4.0);
             if details {
                 instrument_rows(ui, settings);
@@ -1022,6 +1068,53 @@ fn part_level(ui: &mut Ui, value: &mut f32, label: &str, hint: String) {
             *value = percent / 100.0;
         }
     });
+}
+
+/// The recorded instruments: offered for download, downloading, or,
+/// installed, a switch between them and the synthesised ones.
+fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
+    const ABOUT: &str = "A grand piano, harp, hand chimes, violin and bass pizzicato, string \
+                         sections, bowed vibraphone and hand drums, recorded by Versilian \
+                         Studios (public domain)";
+    match recorded {
+        Recorded::Unavailable => {}
+        Recorded::Missing => {
+            let label = format!("Download Recorded Instruments ({})", megabytes(PACK_BYTES));
+            if ui
+                .button(label)
+                .on_hover_text(format!(
+                    "{ABOUT}. Downloaded once, then played in place of the synthesised ones"
+                ))
+                .clicked()
+            {
+                actions.push(Action::DownloadInstruments);
+            }
+        }
+        Recorded::Downloading(progress) => {
+            ui.horizontal(|ui| {
+                if ui.button("Stop Download").clicked() {
+                    actions.push(Action::CancelDownload);
+                }
+                let text = format!("Downloading recorded instruments {:.0} %", progress * 100.0);
+                ui.add(egui::ProgressBar::new(progress).text(text));
+            });
+        }
+        Recorded::Installed { on, loading } => {
+            ui.horizontal(|ui| {
+                let mut value = on;
+                if ui
+                    .checkbox(&mut value, "Recorded instruments")
+                    .on_hover_text(format!("{ABOUT}. Off, every instrument is synthesised"))
+                    .changed()
+                {
+                    actions.push(Action::RecordedInstruments(value));
+                }
+                if loading {
+                    ui.spinner();
+                }
+            });
+        }
+    }
 }
 
 /// Each instrument on or off, side by side.

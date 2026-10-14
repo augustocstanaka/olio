@@ -20,6 +20,11 @@ cpal = "0.18"
 # Every codec and container Symphonia has; all are royalty-free to decode.
 symphonia = { version = "0.6", default-features = false, features = ["all", "opt-simd"] }
 rtrb = "0.4"
+# The Generator's instrument pack: fetched over HTTPS, a zip checked by
+# its SHA-256 (the pack builder also encodes FLAC, in crates/packer).
+ureq = "3"
+zip = { version = "9", default-features = false }
+sha2 = "0.11"
 
 # library (ADR 0003)
 serde = { version = "1", features = ["derive"] }
@@ -47,7 +52,7 @@ egui_kittest = { version = "0.36", features = ["wgpu", "eframe"] }
 #   emojis 0.9 (emoji picker, M1)
 #   global-hotkey 0.8 (Show Olio hotkey, M2)
 #   rubato 5 (editor export, M3)
-#   argon2 0.6, zip 9 (locked sets, .olioset bundles, M4)
+#   argon2 0.6 (locked sets, M4; zip is in use already)
 #   midir 0.11, rosc 0.11, tungstenite 0.30 (MIDI, OSC, control API, M5)
 #   resvg 0.48 (Stream Deck key images, M5)
 

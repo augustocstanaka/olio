@@ -256,6 +256,8 @@ pub struct Preferences {
     pub generator_details: bool,
     /// Styles of one's own, listed after the built-in ones.
     pub styles: Vec<UserStyle>,
+    /// The Generator plays its recorded instruments, once installed.
+    pub recorded_instruments: bool,
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
@@ -278,6 +280,7 @@ impl Default for Preferences {
             show_generator: false,
             generator_details: false,
             styles: Vec::new(),
+            recorded_instruments: true,
             click_plays: false,
         }
     }

@@ -72,12 +72,19 @@ fn library(dir: &Path) -> PathBuf {
 }
 
 fn window(library: PathBuf, render: bool) -> Harness<'static, OlioApp> {
+    // Nothing installed: the Generator offers the download.
+    window_with(library, render, tempfile::tempdir().unwrap().keep())
+}
+
+/// A window whose recorded instruments are installed in `instruments`.
+fn window_with(library: PathBuf, render: bool, instruments: PathBuf) -> Harness<'static, OlioApp> {
     let options = Options {
         library: library.clone(),
         silent: true,
         set: Some("Show".to_owned()),
         screenshot: None,
         import: Vec::new(),
+        instruments: Some(instruments),
     };
     let store = Store::open(library).unwrap();
     // 60 steps a second, so two clicks a step apart make a double-click.
@@ -1218,6 +1225,101 @@ fn surprise_me_plays_something_new_and_back_returns() {
     pick_style(&mut harness, "Campfire");
     harness.run_steps(2);
     assert_eq!(harness.query_all_by_label("Back").count(), 0);
+}
+
+/// Installs a small instrument pack in `dir`: a harp of two sine notes.
+fn write_instrument_pack(dir: &Path) {
+    use olio_audio::ambience::Instrument;
+    use olio_audio::instruments::{
+        InstrumentManifest, MANIFEST, Manifest, PACK_VERSION, ZoneManifest,
+    };
+    let pack = dir.join("olio-instruments");
+    std::fs::create_dir_all(pack.join("harp")).unwrap();
+    let rate = 44_100;
+    for (name, hz) in [("A3", 220.0f32), ("A5", 880.0)] {
+        let samples: Vec<f32> = (0..rate)
+            .flat_map(|i| {
+                let t = i as f32 / rate as f32;
+                let s = (t * hz * std::f32::consts::TAU).sin() * 0.4 * (-t * 3.0).exp();
+                [s, s]
+            })
+            .collect();
+        Clip::new(rate, 2, samples)
+            .write_wav(&pack.join(format!("harp/{name}.wav")), WavFormat::Int16)
+            .unwrap();
+    }
+    let zone = |file: &str, root: u8, low: u8, high: u8| ZoneManifest {
+        file: file.to_owned(),
+        root,
+        low,
+        high,
+        velocity: (0.0, 1.0),
+        looped: None,
+        gain: 1.0,
+        pitched: true,
+        tune: 0.0,
+    };
+    let manifest = Manifest {
+        version: PACK_VERSION,
+        instruments: vec![InstrumentManifest {
+            instrument: Instrument::Harp,
+            attack: 0.001,
+            release: 0.3,
+            gain: 1.0,
+            zones: vec![
+                zone("harp/A3.wav", 57, 0, 69),
+                zone("harp/A5.wav", 81, 70, 127),
+            ],
+        }],
+    };
+    std::fs::write(
+        pack.join(MANIFEST),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn without_recorded_instruments_the_generator_offers_their_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    harness.get_by_label("Download Recorded Instruments (71 MB)");
+    assert_eq!(
+        harness.query_all_by_label("Recorded instruments").count(),
+        0
+    );
+}
+
+#[test]
+fn recorded_instruments_load_while_the_music_plays_and_go_when_switched_off() {
+    use olio_audio::ambience::Instrument;
+    let dir = tempfile::tempdir().unwrap();
+    let instruments = tempfile::tempdir().unwrap();
+    write_instrument_pack(instruments.path());
+    let mut harness = window_with(library(dir.path()), false, instruments.path().to_path_buf());
+    open_generator(&mut harness);
+    // Installed: a switch, on, and nothing loaded until the music plays.
+    harness.get_by_label("Recorded instruments");
+    assert!(harness.state().preferences().recorded_instruments);
+    assert!(harness.state().recorded_instruments().is_empty());
+
+    click_in_generator(&mut harness, "Play live");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while harness.state().recorded_instruments().is_empty() {
+        assert!(Instant::now() < deadline, "the harp never loaded");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Rain Study's harp is in the pack; its bass is not, and stays
+    // synthesised.
+    assert_eq!(harness.state().recorded_instruments(), [Instrument::Harp]);
+
+    // Off, every instrument is synthesised again.
+    click_in_generator(&mut harness, "Recorded instruments");
+    harness.run_steps(3);
+    assert!(!harness.state().preferences().recorded_instruments);
+    assert!(harness.state().recorded_instruments().is_empty());
 }
 
 /// Types `name` over whatever the focused field holds, then Return.

@@ -157,6 +157,20 @@ four variations, the style in each mood, or every style ("Rain Study
 Moods", tiles "Rain Study Still", "Rain Study Gentle"…).
 _Avoid_: recording, export, song
 
+**Recorded instruments**:
+The Generator's instruments played from recordings rather than
+synthesised, from the instrument pack: downloaded once (Download
+Recorded Instruments, or `olio instruments`) into `Instruments` in the
+per-user data folder, shared by every library, and loaded as the music
+uses them. An instrument with no recording, the drone, stays
+synthesised; the pad's recording plays beneath its synthesised voice.
+_Avoid_: samples (in the UI), sound library, soundfont
+
+**Instrument pack**:
+The recordings, their manifest (`pack.json`) and credits, built by
+`cargo xtask instruments` from CC0 libraries and published as a release.
+_Avoid_: sample pack, bank
+
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,
 a forest, a desert, a fire, or none, with a level of its own against the

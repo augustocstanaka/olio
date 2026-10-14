@@ -34,8 +34,9 @@ use crate::meter::{self, Meter};
 use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
-use crate::{keys, palette, polish};
-use olio_audio::instruments::Recorded;
+use crate::{instruments, keys, palette, polish};
+use olio_audio::ambience::Instrument;
+use olio_audio::instruments::{Pack, Recorded};
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
@@ -155,8 +156,14 @@ pub struct OlioApp {
     show_polish: bool,
     /// A track the Generator is rendering.
     generation: Option<Generation>,
-    /// The Generator's instruments played from recordings, where loaded.
+    /// The Generator's instruments played from recordings, where loaded;
+    /// those loading; the pack they come from and where it is installed;
+    /// and the pack being downloaded.
     recorded: Recorded,
+    loading: Vec<instruments::Loading>,
+    pack: Option<Pack>,
+    instruments_dir: Option<PathBuf>,
+    download: Option<instruments::Download>,
     /// A style's name being typed in the Generator.
     naming: Option<generator::Naming>,
     /// What played before a surprise, and its name, while Back can return
@@ -242,6 +249,13 @@ impl OlioApp {
             show_polish: false,
             generation: None,
             recorded: Recorded::default(),
+            loading: Vec::new(),
+            pack: options
+                .instruments
+                .as_deref()
+                .and_then(instruments::installed),
+            instruments_dir: options.instruments.clone(),
+            download: None,
             naming: None,
             before_surprise: None,
             surprises: 0,
@@ -379,6 +393,139 @@ impl OlioApp {
     fn apply_ambience(&mut self) {
         if let Audio::Running(engine) = &mut self.audio {
             engine.set_ambience(self.prefs.ambience);
+        }
+    }
+
+    /// Sends every loaded recorded instrument to a new engine.
+    fn apply_instruments(&mut self) {
+        if let Audio::Running(engine) = &mut self.audio {
+            for instrument in Instrument::ALL {
+                if let Some(samples) = self.recorded.get(instrument) {
+                    engine.set_instrument(instrument, Some(samples.clone()));
+                }
+            }
+        }
+    }
+
+    /// True if the Generator wants `instrument` from its recording now:
+    /// playing live, switched on, recorded instruments wanted and in the
+    /// pack.
+    fn wants_recorded(&self, instrument: Instrument) -> bool {
+        let ambience = &self.prefs.ambience;
+        ambience.enabled
+            && ambience.layer(instrument).enabled
+            && self.prefs.recorded_instruments
+            && self
+                .pack
+                .as_ref()
+                .is_some_and(|pack| pack.instruments().any(|i| i == instrument))
+    }
+
+    /// Loads the recorded instruments the music wants, each on a thread of
+    /// its own, and lets go of those it no longer does.
+    fn follow_instruments(&mut self, ctx: &egui::Context) {
+        let mut index = 0;
+        while index < self.loading.len() {
+            let Some(result) = self.loading[index].poll() else {
+                index += 1;
+                continue;
+            };
+            let instrument = self.loading.swap_remove(index).instrument;
+            match result {
+                Ok(Some(samples)) if self.wants_recorded(instrument) => {
+                    let samples = Arc::new(samples);
+                    self.recorded.set(instrument, Some(samples.clone()));
+                    if let Audio::Running(engine) = &mut self.audio {
+                        engine.set_instrument(instrument, Some(samples));
+                    }
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    let name = instrument.name().to_lowercase();
+                    self.set_status(format!("Could not load the recorded {name}: {err}"), true);
+                }
+            }
+        }
+        for instrument in Instrument::ALL {
+            let wanted = self.wants_recorded(instrument);
+            let loaded = self.recorded.get(instrument).is_some();
+            let loading = self.loading.iter().any(|l| l.instrument == instrument);
+            if wanted && !loaded && !loading {
+                if let Some(pack) = &self.pack {
+                    let loading =
+                        instruments::Loading::start(ctx.clone(), pack.clone(), instrument);
+                    self.loading.push(loading);
+                }
+            } else if !wanted && loaded {
+                self.recorded.set(instrument, None);
+                if let Audio::Running(engine) = &mut self.audio {
+                    engine.set_instrument(instrument, None);
+                }
+            }
+        }
+    }
+
+    /// The recorded instruments a generated track plays: those loaded, if
+    /// recorded instruments are wanted.
+    fn recordings_for_tracks(&self) -> Recorded {
+        if self.prefs.recorded_instruments {
+            self.recorded.clone()
+        } else {
+            Recorded::default()
+        }
+    }
+
+    /// The pack a generated track loads the rest from, if wanted.
+    fn pack_for_tracks(&self) -> Option<Pack> {
+        self.pack
+            .as_ref()
+            .filter(|_| self.prefs.recorded_instruments)
+            .cloned()
+    }
+
+    /// The recorded instruments playing now, for tests.
+    pub fn recorded_instruments(&self) -> Vec<Instrument> {
+        Instrument::ALL
+            .into_iter()
+            .filter(|instrument| self.recorded.get(*instrument).is_some())
+            .collect()
+    }
+
+    /// True while an instrument is loading.
+    pub fn is_loading_instruments(&self) -> bool {
+        !self.loading.is_empty()
+    }
+
+    /// Starts downloading the instrument pack.
+    fn download_instruments(&mut self, ctx: &egui::Context) {
+        if self.download.is_some() {
+            return;
+        }
+        let Some(dir) = self.instruments_dir.clone() else {
+            return;
+        };
+        self.download = Some(instruments::Download::start(ctx.clone(), dir));
+        self.set_status("Downloading the recorded instruments…", false);
+    }
+
+    fn poll_download(&mut self) {
+        let Some(result) = self.download.as_ref().and_then(instruments::Download::poll) else {
+            return;
+        };
+        self.download = None;
+        match result {
+            Ok(true) => {
+                self.pack = self
+                    .instruments_dir
+                    .as_deref()
+                    .and_then(instruments::installed);
+                self.set_status("Recorded instruments installed", false);
+            }
+            Ok(false) => self.set_status("Stopped downloading the recorded instruments", false),
+            Err(err) => self.set_status(
+                format!("Could not download the recorded instruments: {err}"),
+                true,
+            ),
         }
     }
 
@@ -1566,7 +1713,8 @@ impl OlioApp {
             title,
             vec![track],
             self.prefs.track_seconds,
-            self.recorded.clone(),
+            self.recordings_for_tracks(),
+            self.pack_for_tracks(),
             Destination::Tile(self.current),
         );
         self.set_status(format!("Generating “{}”…", generation.title), false);
@@ -1591,7 +1739,8 @@ impl OlioApp {
             name,
             tracks,
             self.prefs.track_seconds,
-            self.recorded.clone(),
+            self.recordings_for_tracks(),
+            self.pack_for_tracks(),
             Destination::NewSet,
         );
         self.set_status(
@@ -1823,6 +1972,7 @@ impl OlioApp {
                         self.set_status(message, false);
                         self.apply_master_gain();
                         self.apply_ambience();
+                        self.apply_instruments();
                     }
                 } else {
                     ctx.request_repaint_after(*retry_at - now);
@@ -2300,7 +2450,9 @@ impl eframe::App for OlioApp {
         self.drive_screenshot(&ctx);
         self.clips.poll();
         self.poll_generation();
+        self.poll_download();
         self.maintain_audio(&ctx);
+        self.follow_instruments(&ctx);
         self.update_meters(&ctx);
         self.request_clips();
         if self
@@ -2418,6 +2570,15 @@ impl eframe::App for OlioApp {
                 saved: self.prefs.saved_style(),
                 now: self.ambience_now(),
                 before_surprise: self.before_surprise.as_ref().map(|(_, name)| name.as_str()),
+                recorded: match (&self.instruments_dir, &self.pack, &self.download) {
+                    (None, _, _) => generator::Recorded::Unavailable,
+                    (_, _, Some(download)) => generator::Recorded::Downloading(download.progress()),
+                    (_, None, None) => generator::Recorded::Missing,
+                    (_, Some(_), None) => generator::Recorded::Installed {
+                        on: self.prefs.recorded_instruments,
+                        loading: !self.loading.is_empty(),
+                    },
+                },
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
@@ -2512,6 +2673,15 @@ impl eframe::App for OlioApp {
                 generator::Action::Changed => self.apply_ambience(),
                 generator::Action::Length(seconds) => self.prefs.track_seconds = seconds,
                 generator::Action::Details(details) => self.prefs.generator_details = details,
+                generator::Action::DownloadInstruments => self.download_instruments(&ctx),
+                generator::Action::CancelDownload => {
+                    if let Some(download) = &self.download {
+                        download.cancel();
+                    }
+                }
+                generator::Action::RecordedInstruments(on) => {
+                    self.prefs.recorded_instruments = on;
+                }
                 generator::Action::Generate => self.start_generation(&ctx),
                 generator::Action::GenerateSet(of) => self.start_set_generation(&ctx, of),
                 generator::Action::Cancel => {

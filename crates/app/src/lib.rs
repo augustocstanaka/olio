@@ -10,8 +10,12 @@
 //! without opening a window, for scripts (see `docs/BOARD-JSON.md`).
 //!
 //! `olio generate [--style NAME|all] [--seconds N] [--seed N] [--variety
-//! N] [--concentration N] [--chaos N] [--journey NAME] [--out DIR]`
-//! renders the Generator's styles to WAV files, without a window.
+//! N] [--concentration N] [--chaos N] [--journey NAME] [--synthesised]
+//! [--out DIR]` renders the Generator's styles to WAV files, without a
+//! window.
+//!
+//! `olio instruments [--from ZIP] [--dir DIR]` downloads and installs the
+//! Generator's recorded instruments (or a pack built here).
 
 pub mod app;
 pub mod cli;
@@ -24,6 +28,7 @@ mod generator;
 mod grid;
 pub mod import;
 mod inspector;
+pub mod instruments;
 mod keys;
 mod menu;
 mod meter;
@@ -44,7 +49,9 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
        olio import [--library DIR] [--set NAME] [--force] PATH...
        olio generate [--style NAME|all] [--seconds N] [--seed N]
                      [--variety N] [--concentration N] [--chaos N]
-                     [--journey steady|build|evolve] [--out DIR]
+                     [--journey steady|build|evolve] [--synthesised]
+                     [--out DIR]
+       olio instruments [--from ZIP] [--dir DIR]
 
   --library DIR       use the library in DIR (default: $OLIO_LIBRARY, or the
                       per-user data folder)
@@ -68,7 +75,15 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
   --chaos N           as in \"Campfire (chaos 90).wav\"
   --journey NAME      steady, build (one instrument at a time) or evolve
                       (builds, then moves on every few minutes)
+  --synthesised       synthesised instruments, even where recorded ones
+                      are installed
   --out DIR           where the files go (default: previews)
+
+  instruments         download the Generator's recorded instruments and
+                      install them, then exit
+  --from ZIP          install a pack built here (cargo xtask instruments)
+  --dir DIR           install it in DIR (default: $OLIO_INSTRUMENTS, or
+                      Instruments in the per-user data folder)
 ";
 
 /// What the command line asked for.
@@ -81,6 +96,9 @@ pub struct Options {
     pub set: Option<String>,
     pub screenshot: Option<PathBuf>,
     pub import: Vec<PathBuf>,
+    /// Where the Generator's recorded instruments are installed (`None`:
+    /// nowhere, they cannot be).
+    pub instruments: Option<PathBuf>,
 }
 
 /// The library directory unless `--library` named one.
@@ -126,5 +144,6 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Options>,
         set,
         screenshot,
         import,
+        instruments: instruments::default_dir(),
     }))
 }

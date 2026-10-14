@@ -31,7 +31,8 @@ and UI text.
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
   `polish.rs` the Polish Preset window, `generator.rs` the Generator
-  panel and the thread that generates tracks, `meter.rs` level meters,
+  panel and the thread that generates tracks, `instruments.rs` the
+  recorded instruments (where the pack lives, its download, loading), `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
   redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),

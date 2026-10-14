@@ -22,6 +22,9 @@ serde.workspace = true
 emojis.workspace = true
 twemoji-assets.workspace = true
 image.workspace = true
+ureq.workspace = true
+zip.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

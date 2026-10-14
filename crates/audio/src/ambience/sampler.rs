@@ -118,6 +118,13 @@ impl Sampler {
     /// ones fade out, and the old ones are released once they have.
     pub(super) fn set(&mut self, instrument: Instrument, samples: Option<Arc<Multisample>>) {
         let index = instrument.index();
+        // The same recordings again: nothing changes. (Dropping this second
+        // reference frees nothing; the first is still held.)
+        if let (Some(new), Some(old)) = (&samples, &self.sets[index])
+            && Arc::ptr_eq(new, old)
+        {
+            return;
+        }
         let Some(old) = std::mem::replace(&mut self.sets[index], samples) else {
             return;
         };

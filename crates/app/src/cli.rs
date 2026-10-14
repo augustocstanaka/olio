@@ -3,9 +3,12 @@
 //! files.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use olio_audio::ambience::{Journey, Style};
 use olio_audio::instruments::Recorded;
+
+use crate::instruments;
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Set, Store};
 
@@ -98,6 +101,57 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<i32, String> {
     Ok(if report.problems.is_empty() { 0 } else { 1 })
 }
 
+/// Runs `olio instruments` with the arguments after `instruments`:
+/// downloads the Generator's recorded instruments and installs them, or
+/// installs a pack built here (`--from ZIP`). Returns the exit code.
+pub fn install_instruments(args: impl Iterator<Item = String>) -> i32 {
+    match run_install_instruments(args) {
+        Ok(dir) => {
+            println!("recorded instruments installed in {}", dir.display());
+            0
+        }
+        Err(message) => {
+            eprintln!("olio instruments: {message}");
+            2
+        }
+    }
+}
+
+fn run_install_instruments(mut args: impl Iterator<Item = String>) -> Result<PathBuf, String> {
+    let mut from = None;
+    let mut dir = instruments::default_dir();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                std::process::exit(0);
+            }
+            "--from" => from = Some(PathBuf::from(args.next().ok_or("--from needs a zip")?)),
+            "--dir" => dir = Some(PathBuf::from(args.next().ok_or("--dir needs a directory")?)),
+            other => return Err(format!("unknown argument {other}")),
+        }
+    }
+    let dir = dir.ok_or("no per-user data folder on this system; pass --dir DIR")?;
+    match from {
+        Some(zip) => instruments::install_zip(&zip, None, &dir)?,
+        None => {
+            let mut shown = 0;
+            let finished = instruments::download_and_install(&dir, |done| {
+                let tenth = (done * 10.0) as u32;
+                if tenth > shown {
+                    shown = tenth;
+                    println!("{} %", tenth * 10);
+                }
+                true
+            })?;
+            if !finished {
+                return Err("the download stopped".to_owned());
+            }
+        }
+    }
+    Ok(dir)
+}
+
 /// Runs `olio generate` with the arguments after `generate`; returns the
 /// exit code.
 pub fn generate(args: impl Iterator<Item = String>) -> i32 {
@@ -117,6 +171,7 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     // Variety, concentration and chaos, in percent, when asked for.
     let mut character: [Option<f32>; 3] = [None; 3];
     let mut journey = None;
+    let mut synthesised = false;
     let mut out = PathBuf::from("previews");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -173,11 +228,19 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                     _ => return Err("--journey needs steady, build or evolve".to_owned()),
                 });
             }
+            "--synthesised" => synthesised = true,
             "--out" => out = PathBuf::from(args.next().ok_or("--out needs a directory")?),
             other => return Err(format!("unknown argument {other}")),
         }
     }
     std::fs::create_dir_all(&out).map_err(|err| format!("{}: {err}", out.display()))?;
+    // The recorded instruments where installed, loaded as styles need them.
+    let pack = if synthesised {
+        None
+    } else {
+        instruments::default_dir().and_then(|dir| instruments::installed(&dir))
+    };
+    let mut recorded = Recorded::default();
     for style in styles {
         let mut settings = style.settings();
         if let Some(seed) = seed {
@@ -200,12 +263,25 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             settings.journey = journey;
             asked.push(journey.name().to_lowercase());
         }
+        if synthesised {
+            asked.push("synthesised".to_owned());
+        }
         let name = match asked.is_empty() {
             true => style.name().to_owned(),
             false => format!("{} ({})", style.name(), asked.join(", ")),
         };
-        let clip = render_track(&settings, seconds, &Recorded::default(), |_| true)
-            .ok_or("the render stopped")?;
+        if let Some(pack) = &pack {
+            for instrument in settings.playing() {
+                if recorded.get(instrument).is_none()
+                    && pack.instruments().any(|i| i == instrument)
+                    && let Some(samples) = pack.load(instrument)?
+                {
+                    recorded.set(instrument, Some(Arc::new(samples)));
+                }
+            }
+        }
+        let clip =
+            render_track(&settings, seconds, &recorded, |_| true).ok_or("the render stopped")?;
         let path = out.join(format!("{name}.wav"));
         clip.write_wav(&path, WavFormat::Int16)
             .map_err(|err| format!("{}: {err}", path.display()))?;

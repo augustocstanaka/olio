@@ -78,7 +78,12 @@ Milestone 0, the playable skeleton, is done. Olio can:
     strings, a pad, a drone, a piano, a plucked violin and soft hand
     drums (a frame drum and a shaker), with a level for them all
     together against the background, and each its own level, a Notes
-    slider from very sparse to busy, and register;
+    slider from very sparse to busy, and register. They are synthesised
+    until you press **Download Recorded Instruments** (71 MB, once): then
+    a real grand piano, concert harp, hand chimes, violin and bass
+    pizzicato, cello, viola and violin sections, bowed vibraphone under
+    the pad, and a frame drum and shaker play instead, each loaded as
+    the music uses it; the Recorded instruments switch turns them off;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone;
   - **character**: *Variety* (a short motif that keeps coming back, up to
@@ -128,7 +133,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
   without opening a window; see [docs/BOARD-JSON.md](docs/BOARD-JSON.md).
   `olio generate --style "Rain Study" --seconds 120` renders Generator
   styles to WAV files the same way; `--variety`, `--concentration` and
-  `--chaos` (0 to 100) set their character.
+  `--chaos` (0 to 100) set their character, and they play the recorded
+  instruments where installed (`olio instruments` installs them;
+  `--synthesised` leaves them out).
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 
