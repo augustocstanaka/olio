@@ -18,13 +18,14 @@ use olio_audio::{Engine, Mixer, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{
     Library, Lock, MAX_FADE_SECONDS, Set, SetId, Slot, Sound, Store, Tile, TileColor, TileId,
+    columns_to_fit,
 };
 
 use crate::Options;
 use crate::clips::{ClipState, Clips};
 use crate::confirm::{self, Confirm, Pending, Reply};
 use crate::emoji::{self, EmojiImages};
-use crate::generator::{self, Generation};
+use crate::generator::{self, Destination, Generation, Made, SetOf, Stop, TrackPlan};
 use crate::grid::{self, GridLayout, GridView, Progress};
 use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
@@ -1076,6 +1077,16 @@ impl OlioApp {
                 Ok((set, tile)) => Ok(Change::Generated { set, tile }),
                 Err(tile) => Err(Change::Generated { set, tile }),
             },
+            Change::GeneratedSet { index, set } => {
+                // Back where it was, after the sets before it.
+                let id = set.id;
+                let index = index.min(self.library.sets.len());
+                let record = set.clone();
+                self.library.sets.insert(index, set);
+                self.execute(Command::SelectSet(id));
+                self.changed();
+                Ok(Change::GeneratedSet { index, set: record })
+            }
             Change::RemovedStyle { index, style } => {
                 match prefs::style_named(&self.prefs.styles, &style.name) {
                     Some(at) => {
@@ -1201,6 +1212,10 @@ impl OlioApp {
             Change::Generated { set, tile } => match self.take_tile(tile.id) {
                 Some(Change::RemovedTile { set, tile }) => Ok(Change::Generated { set, tile }),
                 _ => Err(Change::Generated { set, tile }),
+            },
+            Change::GeneratedSet { index, set } => match self.take_set(set.id) {
+                Some(Change::RemovedSet { index, set }) => Ok(Change::GeneratedSet { index, set }),
+                _ => Err(Change::GeneratedSet { index, set }),
             },
             Change::RemovedStyle { index, style } => {
                 // Not over a style saved since under the same name.
@@ -1490,15 +1505,47 @@ impl OlioApp {
         if self.generation.is_some() {
             return;
         }
+        let title = generator::track_title(&self.prefs.track_name(), self.prefs.track_seconds);
+        let track = TrackPlan {
+            title: title.clone(),
+            settings: self.prefs.ambience,
+        };
         let generation = Generation::start(
             ctx.clone(),
             self.store.clone(),
-            self.prefs.ambience,
-            &self.prefs.track_name(),
+            title,
+            vec![track],
             self.prefs.track_seconds,
-            self.current,
+            Destination::Tile(self.current),
         );
         self.set_status(format!("Generating “{}”…", generation.title), false);
+        self.generation = Some(generation);
+    }
+
+    /// Starts rendering a new set of tracks: variations, moods or styles.
+    fn start_set_generation(&mut self, ctx: &egui::Context, of: SetOf) {
+        if self.generation.is_some() {
+            return;
+        }
+        let (name, tracks) = generator::set_plan(
+            of,
+            &self.prefs.ambience,
+            &self.prefs.track_name(),
+            &self.prefs.styles,
+        );
+        let count = tracks.len();
+        let generation = Generation::start(
+            ctx.clone(),
+            self.store.clone(),
+            name,
+            tracks,
+            self.prefs.track_seconds,
+            Destination::NewSet,
+        );
+        self.set_status(
+            format!("Generating “{}”: {count} tracks…", generation.title),
+            false,
+        );
         self.generation = Some(generation);
     }
 
@@ -1517,27 +1564,36 @@ impl OlioApp {
 
     /// Places a finished track on a tile, or says why not.
     fn poll_generation(&mut self) {
-        let Some(result) = self.generation.as_ref().and_then(Generation::poll) else {
+        let Some(made) = self.generation.as_ref().and_then(Generation::poll) else {
             return;
         };
         let Some(generation) = self.generation.take() else {
             return;
         };
-        match result {
-            Ok(Some(sound)) => self.place_track(&generation, sound),
-            Ok(None) => {
-                self.set_status(format!("Stopped generating “{}”", generation.title), false)
+        let Made { sounds, stopped } = made;
+        if sounds.is_empty() {
+            match stopped {
+                Some(Stop::Failed(err)) => self.set_status(
+                    format!("Could not generate “{}”: {err}", generation.title),
+                    true,
+                ),
+                _ => self.set_status(format!("Stopped generating “{}”", generation.title), false),
             }
-            Err(err) => self.set_status(
-                format!("Could not generate “{}”: {err}", generation.title),
-                true,
-            ),
+            return;
+        }
+        match generation.destination {
+            Destination::Tile(set) => {
+                if let Some(sound) = sounds.into_iter().next() {
+                    self.place_track(&generation, set, sound);
+                }
+            }
+            Destination::NewSet => self.place_set(&generation, sounds, stopped),
         }
     }
 
-    fn place_track(&mut self, generation: &Generation, sound: Sound) {
-        let set = if self.library.set(generation.set).is_some() {
-            generation.set
+    fn place_track(&mut self, generation: &Generation, set: SetId, sound: Sound) {
+        let set = if self.library.set(set).is_some() {
+            set
         } else {
             self.current
         };
@@ -1556,7 +1612,12 @@ impl OlioApp {
             return;
         };
         if let Some(tile) = self.library.tile_mut(id) {
-            tile.emoji = generation.emoji.to_owned();
+            tile.emoji = generation
+                .emojis
+                .first()
+                .copied()
+                .unwrap_or_default()
+                .to_owned();
         }
         let Some((_, tile)) = self.library.tile(id) else {
             return;
@@ -1567,6 +1628,45 @@ impl OlioApp {
         self.reveal_selected = true;
         self.changed();
         self.record(Change::Generated { set, tile });
+    }
+
+    /// Puts generated tracks on the tiles of a new set, after the others,
+    /// and opens it. Undo takes the whole set off.
+    fn place_set(&mut self, generation: &Generation, sounds: Vec<Sound>, stopped: Option<Stop>) {
+        let count = sounds.len();
+        let mut set = Set::new(self.library.unique_set_name(&generation.title));
+        set.columns = columns_to_fit(count);
+        let mut first = None;
+        for (sound, emoji) in sounds.into_iter().zip(&generation.emojis) {
+            let Some(id) = set.place(sound, None) else {
+                break;
+            };
+            if let Some(tile) = set.tile_mut(id) {
+                tile.emoji = (*emoji).to_owned();
+            }
+            first.get_or_insert(id);
+        }
+        let id = set.id;
+        let name = set.name.clone();
+        let index = self.library.sets.len();
+        self.library.sets.push(set.clone());
+        self.execute(Command::SelectSet(id));
+        self.selected = first;
+        self.changed();
+        self.record(Change::GeneratedSet { index, set });
+        let total = generation.emojis.len();
+        match stopped {
+            None => {}
+            Some(Stop::Cancelled) => {
+                self.set_undo_status(format!(
+                    "Stopped after {count} of {total} tracks of “{name}”"
+                ));
+            }
+            Some(Stop::Failed(err)) => self.set_status(
+                format!("Generated {count} of {total} tracks of “{name}”, then: {err}"),
+                true,
+            ),
+        }
     }
 
     // ----- importing ------------------------------------------------------
@@ -2253,10 +2353,12 @@ impl eframe::App for OlioApp {
                 .unwrap_or(&self.library.sets[0]);
             let view = generator::View {
                 images: &self.images,
-                busy: self
-                    .generation
-                    .as_ref()
-                    .map(|generation| (generation.title.as_str(), generation.progress())),
+                busy: self.generation.as_ref().map(|generation| generator::Busy {
+                    title: &generation.title,
+                    progress: generation.progress(),
+                    track: (generation.destination == Destination::NewSet)
+                        .then(|| generation.track()),
+                }),
                 track_seconds: self.prefs.track_seconds,
                 set_name: &set.name,
                 details: self.prefs.generator_details,
@@ -2358,6 +2460,7 @@ impl eframe::App for OlioApp {
                 generator::Action::Length(seconds) => self.prefs.track_seconds = seconds,
                 generator::Action::Details(details) => self.prefs.generator_details = details,
                 generator::Action::Generate => self.start_generation(&ctx),
+                generator::Action::GenerateSet(of) => self.start_set_generation(&ctx, of),
                 generator::Action::Cancel => {
                     if let Some(generation) = &self.generation {
                         generation.cancel();

@@ -131,8 +131,9 @@ On a generation bump, re-check every line below and update the versions.
   `get_by_role_and_label(Role::ComboBox, "Style")`, click it, step, then
   click the entry by label in the popup (`pick_style` in the window
   tests). Sliders in a grid are named the same way.
-- A popup's entry is only clicked if the pointer was over the popup the
-  frame before: `hover()`, step, then `click()`. A long list scrolls
+- A popup's entry, or a button that has only just appeared (Cancel in
+  place of Generate Track), is only clicked if the pointer was over it
+  the frame before: `hover()`, step, then `click()`. A long list scrolls
   inside the popup, so `scroll_to_me()` first. A `Modal` needs about ten
   frames to place itself before its buttons can be clicked.
 - `.wgpu()` on the builder plus `harness.render()` gives an image; it needs

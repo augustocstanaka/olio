@@ -11,7 +11,7 @@
 //! written as a WAV into the library and placed on a tile by the app.
 
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -137,49 +137,180 @@ fn summary(settings: &AmbienceSettings) -> String {
     format!("{}, {background}; {instruments}.", settings.scale.name())
 }
 
-// ----- generating a track -------------------------------------------------
+// ----- generating tracks ----------------------------------------------------
 
-/// A track being rendered on its own thread.
-pub struct Generation {
+/// One track to render: its title (which becomes its tile's) and settings.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackPlan {
     pub title: String,
-    pub emoji: &'static str,
-    /// The set it goes to.
-    pub set: olio_library::SetId,
-    /// How far, as `f32` bits, 0 to 1.
+    pub settings: AmbienceSettings,
+}
+
+/// What a new set of tracks holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetOf {
+    /// The settings, several times over, each with other notes.
+    Variations,
+    /// The settings in each mood.
+    Moods,
+    /// Every style, built-in and one's own.
+    Styles,
+}
+
+impl SetOf {
+    pub const ALL: [Self; 3] = [Self::Variations, Self::Moods, Self::Styles];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Variations => "Variations",
+            Self::Moods => "Moods",
+            Self::Styles => "Styles",
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Variations => "Four tracks of these settings, each with other notes",
+            Self::Moods => "These settings in each mood, from Still to Unsettled",
+            Self::Styles => "A track of every style, the built-in ones and your own",
+        }
+    }
+}
+
+/// How many tracks a set of variations has.
+pub const VARIATIONS: u64 = 4;
+
+/// The name of a new set of tracks and the tracks in it, for `settings`
+/// called `name` (its style, or its key when Custom). Each keeps how the
+/// music changes over time.
+pub fn set_plan(
+    of: SetOf,
+    settings: &AmbienceSettings,
+    name: &str,
+    styles: &[UserStyle],
+) -> (String, Vec<TrackPlan>) {
+    let plan = |title: String, settings: AmbienceSettings| TrackPlan { title, settings };
+    match of {
+        SetOf::Variations => {
+            let tracks = (0..VARIATIONS)
+                .map(|n| {
+                    let seed = settings.seed.wrapping_add(n);
+                    plan(
+                        format!("{name} {}", n + 1),
+                        AmbienceSettings { seed, ..*settings },
+                    )
+                })
+                .collect();
+            (format!("{name} Variations"), tracks)
+        }
+        SetOf::Moods => {
+            let tracks = Mood::ALL
+                .into_iter()
+                .map(|mood| {
+                    let mut settings = *settings;
+                    settings.set_mood(mood);
+                    plan(format!("{name} {}", mood.name()), settings)
+                })
+                .collect();
+            (format!("{name} Moods"), tracks)
+        }
+        SetOf::Styles => {
+            let journey = settings.journey;
+            let built_in = Style::ALL
+                .into_iter()
+                .map(|style| (style.name().to_owned(), style.settings()));
+            let own = styles
+                .iter()
+                .map(|style| (style.name.clone(), style.settings));
+            let tracks = built_in
+                .chain(own)
+                .map(|(title, settings)| {
+                    plan(
+                        title,
+                        AmbienceSettings {
+                            journey,
+                            ..settings
+                        },
+                    )
+                })
+                .collect();
+            ("Styles".to_owned(), tracks)
+        }
+    }
+}
+
+/// Where generated tracks go.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Destination {
+    /// A tile in this set.
+    Tile(olio_library::SetId),
+    /// A new set of their own.
+    NewSet,
+}
+
+/// Why generating stopped before the end.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Stop {
+    Cancelled,
+    Failed(String),
+}
+
+/// What a generation made: the sounds imported, in the order of its
+/// tracks, and why it stopped early, if it did.
+#[derive(Debug)]
+pub struct Made {
+    pub sounds: Vec<Sound>,
+    pub stopped: Option<Stop>,
+}
+
+/// Tracks being rendered, one after another, on a thread of their own.
+pub struct Generation {
+    /// A track's title, or the new set's name.
+    pub title: String,
+    pub destination: Destination,
+    /// Each track's emoji, for its tile.
+    pub emojis: Vec<&'static str>,
+    /// How far, as `f32` bits, 0 to 1, over every track.
     progress: Arc<AtomicU32>,
+    /// The track being rendered.
+    current: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
-    done: mpsc::Receiver<Result<Option<Sound>, String>>,
+    done: mpsc::Receiver<Made>,
 }
 
 impl Generation {
-    /// Starts rendering `seconds` of the ambience with `settings` into the
-    /// library in `store`, for the set `set`, titled after `name`.
+    /// Starts rendering `seconds` of each track into the library in
+    /// `store`.
     pub fn start(
         ctx: egui::Context,
         store: Store,
-        settings: AmbienceSettings,
-        name: &str,
+        title: String,
+        tracks: Vec<TrackPlan>,
         seconds: u32,
-        set: olio_library::SetId,
+        destination: Destination,
     ) -> Self {
-        let title = track_title(name, seconds);
         let progress = Arc::new(AtomicU32::new(0));
+        let current = Arc::new(AtomicUsize::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
         let (sender, done) = mpsc::channel();
+        let emojis = tracks
+            .iter()
+            .map(|track| emoji(track.settings.background))
+            .collect();
         let job = Job {
             ctx: ctx.clone(),
             store,
-            settings,
+            tracks,
             seconds,
-            title: title.clone(),
             progress: Arc::clone(&progress),
+            current: Arc::clone(&current),
             cancel: Arc::clone(&cancel),
         };
         let spawned = thread::Builder::new()
             .name("olio-generator".to_owned())
             .spawn(move || {
-                let result = job.run();
-                let _ = sender.send(result);
+                let made = job.run();
+                let _ = sender.send(made);
                 ctx.request_repaint();
             });
         if let Err(err) = spawned {
@@ -188,32 +319,42 @@ impl Generation {
         }
         Self {
             title,
-            emoji: emoji(settings.background),
-            set,
+            destination,
+            emojis,
             progress,
+            current,
             cancel,
             done,
         }
     }
 
-    /// 0 to 1.
+    /// 0 to 1, over every track.
     pub fn progress(&self) -> f32 {
         f32::from_bits(self.progress.load(Ordering::Relaxed))
+    }
+
+    /// The track being rendered, from 1, and how many there are.
+    pub fn track(&self) -> (usize, usize) {
+        let count = self.emojis.len();
+        let current = self.current.load(Ordering::Relaxed) + 1;
+        (current.min(count), count)
     }
 
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
-    /// The result once there is one: the imported sound, `None` if it was
-    /// cancelled, or what went wrong.
-    pub fn poll(&self) -> Option<Result<Option<Sound>, String>> {
+    /// What was made, once it is done.
+    pub fn poll(&self) -> Option<Made> {
         match self.done.try_recv() {
-            Ok(result) => Some(result),
+            Ok(made) => Some(made),
             Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Some(Err("the generator stopped unexpectedly".to_owned()))
-            }
+            Err(mpsc::TryRecvError::Disconnected) => Some(Made {
+                sounds: Vec::new(),
+                stopped: Some(Stop::Failed(
+                    "the generator stopped unexpectedly".to_owned(),
+                )),
+            }),
         }
     }
 }
@@ -221,18 +362,52 @@ impl Generation {
 struct Job {
     ctx: egui::Context,
     store: Store,
-    settings: AmbienceSettings,
+    tracks: Vec<TrackPlan>,
     seconds: u32,
-    title: String,
     progress: Arc<AtomicU32>,
+    current: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
 }
 
 impl Job {
-    fn run(self) -> Result<Option<Sound>, String> {
+    fn run(self) -> Made {
+        let mut sounds = Vec::new();
+        let count = self.tracks.len().max(1) as f32;
+        for (index, track) in self.tracks.iter().enumerate() {
+            self.current.store(index, Ordering::Relaxed);
+            match self.render(track, |done| (index as f32 + done) / count) {
+                Ok(Some(sound)) => sounds.push(sound),
+                Ok(None) => {
+                    return Made {
+                        sounds,
+                        stopped: Some(Stop::Cancelled),
+                    };
+                }
+                Err(err) => {
+                    return Made {
+                        sounds,
+                        stopped: Some(Stop::Failed(err)),
+                    };
+                }
+            }
+        }
+        Made {
+            sounds,
+            stopped: None,
+        }
+    }
+
+    /// Renders one track and imports it: `None` if cancelled. `overall`
+    /// turns its own progress into the whole generation's.
+    fn render(
+        &self,
+        track: &TrackPlan,
+        overall: impl Fn(f32) -> f32,
+    ) -> Result<Option<Sound>, String> {
         let mut shown = Instant::now();
-        let clip = render_track(&self.settings, self.seconds as f32, |done| {
-            self.progress.store(done.to_bits(), Ordering::Relaxed);
+        let clip = render_track(&track.settings, self.seconds as f32, |done| {
+            self.progress
+                .store(overall(done).to_bits(), Ordering::Relaxed);
             if shown.elapsed() > Duration::from_millis(100) {
                 shown = Instant::now();
                 self.ctx.request_repaint();
@@ -246,7 +421,7 @@ impl Job {
         // file name gives the tile its title.
         let folder = self.store.root().join("generating");
         fs::create_dir_all(&folder).map_err(|err| err.to_string())?;
-        let name: String = self
+        let name: String = track
             .title
             .chars()
             .map(|c| if "/\\:*?\"<>|".contains(c) { '-' } else { c })
@@ -281,11 +456,21 @@ impl Naming {
     }
 }
 
+/// Tracks being generated.
+pub struct Busy<'a> {
+    /// A track's title, or a new set's name.
+    pub title: &'a str,
+    /// 0 to 1, over every track.
+    pub progress: f32,
+    /// For a set: the track being rendered, from 1, and how many.
+    pub track: Option<(usize, usize)>,
+}
+
 /// What the panel shows besides the settings.
 pub struct View<'a> {
     pub images: &'a EmojiImages,
-    /// The track being generated, if any: its title and progress.
-    pub busy: Option<(&'a str, f32)>,
+    /// What is being generated, if anything.
+    pub busy: Option<Busy<'a>>,
     pub track_seconds: u32,
     /// The set a track would go to.
     pub set_name: &'a str,
@@ -307,6 +492,8 @@ pub enum Action {
     Length(u32),
     /// Generate a track of the picked length.
     Generate,
+    /// Generate a new set of tracks of the picked length.
+    GenerateSet(SetOf),
     Cancel,
     /// Show every setting, or only the essentials.
     Details(bool),
@@ -911,16 +1098,21 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
         }
     });
     ui.add_space(2.0);
-    match view.busy {
-        Some((title, progress)) => {
+    match &view.busy {
+        Some(busy) => {
             ui.horizontal(|ui| {
                 if ui.button("Cancel").clicked() {
                     actions.push(Action::Cancel);
                 }
-                ui.add(
-                    egui::ProgressBar::new(progress)
-                        .text(format!("Generating “{title}” {:.0} %", progress * 100.0)),
-                );
+                let percent = busy.progress * 100.0;
+                let text = match busy.track {
+                    Some((track, count)) => format!(
+                        "Generating “{}”: {track} of {count}, {percent:.0} %",
+                        busy.title
+                    ),
+                    None => format!("Generating “{}” {percent:.0} %", busy.title),
+                };
+                ui.add(egui::ProgressBar::new(busy.progress).text(text));
             });
         }
         None => {
@@ -937,6 +1129,16 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
                 actions.push(Action::Generate);
             }
             ui.weak(format!("onto a tile in “{}”", view.set_name));
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label("New set of");
+                for of in SetOf::ALL {
+                    if ui.button(of.name()).on_hover_text(of.describe()).clicked() {
+                        actions.push(Action::GenerateSet(of));
+                    }
+                }
+            });
         }
     }
     ui.add_space(6.0);
@@ -945,6 +1147,48 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_set_holds_variations_moods_or_every_style() {
+        use olio_audio::ambience::Journey;
+        let mut settings = Style::Campfire.settings();
+        settings.journey = Journey::Evolve;
+        let own = [UserStyle::new(
+            "Night Harp".to_owned(),
+            Style::Cathedral.settings(),
+        )];
+
+        let (name, tracks) = set_plan(SetOf::Variations, &settings, "Campfire", &own);
+        assert_eq!(name, "Campfire Variations");
+        let titles: Vec<&str> = tracks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Campfire 1", "Campfire 2", "Campfire 3", "Campfire 4"]
+        );
+        let seeds: std::collections::HashSet<u64> =
+            tracks.iter().map(|t| t.settings.seed).collect();
+        assert_eq!(seeds.len(), 4, "each with other notes");
+        assert!(tracks.iter().all(|t| t.settings.same_music(&settings)));
+
+        let (name, tracks) = set_plan(SetOf::Moods, &settings, "Campfire", &own);
+        assert_eq!(name, "Campfire Moods");
+        assert_eq!(tracks.len(), Mood::ALL.len());
+        assert_eq!(tracks[0].title, "Campfire Still");
+        for (track, mood) in tracks.iter().zip(Mood::ALL) {
+            assert_eq!(track.settings.mood(), Some(mood));
+            assert_eq!(track.settings.background, settings.background);
+        }
+
+        let (name, tracks) = set_plan(SetOf::Styles, &settings, "Campfire", &own);
+        assert_eq!(name, "Styles");
+        assert_eq!(tracks.len(), Style::ALL.len() + 1);
+        assert_eq!(tracks[0].title, "Rain Study");
+        assert_eq!(tracks.last().unwrap().title, "Night Harp");
+        assert!(
+            tracks.iter().all(|t| t.settings.journey == Journey::Evolve),
+            "played the way chosen"
+        );
+    }
 
     #[test]
     fn tracks_are_titled_by_style_or_key_and_length() {

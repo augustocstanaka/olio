@@ -101,7 +101,10 @@ Milestone 0, the playable skeleton, is done. Olio can:
   Playback ▸ Ambience): it ducks while sounds play and never gets near
   their level. Or press Generate Track to render 30 s to 10 min of it
   into the library onto a tile, titled after its style and length, to
-  play, loop and polish like any sound; ⌘Z takes it off again.
+  play, loop and polish like any sound; ⌘Z takes it off again. *New set
+  of* renders several at once into a set of their own: four
+  *Variations* of the settings, the style in each of the five *Moods*,
+  or every *Style*, yours included; one ⌘Z takes the whole set off.
 - **Find your way.** Menus list every command with its shortcut (Help ▸
   Keyboard Shortcuts has them all), written the way the platform writes
   them.

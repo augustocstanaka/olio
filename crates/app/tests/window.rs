@@ -1226,6 +1226,69 @@ fn the_generator_takes_the_inspectors_place_and_gives_it_back() {
     harness.get_by_label("Trim silence");
 }
 
+/// Steps the window until the generator is done.
+fn wait_for_generating(harness: &mut Harness<'static, OlioApp>, seconds: u64) {
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while harness.state().is_generating() {
+        assert!(Instant::now() < deadline, "the generator never finished");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.run_steps(3);
+}
+
+#[test]
+fn a_set_of_moods_lands_as_a_new_set_and_undo_takes_it_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    harness.get_by_label("30 s").click();
+    harness.run_steps(2);
+
+    // Cancelled before a track is done, it leaves nothing behind.
+    harness.get_by_label("Variations").click();
+    harness.run_steps(2);
+    assert!(harness.state().is_generating());
+    // The button has only just appeared: the pointer goes over it first.
+    harness.get_by_label("Cancel").hover();
+    harness.run_steps(1);
+    harness.get_by_label("Cancel").click();
+    wait_for_generating(&mut harness, 60);
+    harness.get_by_label("Stopped generating “Rain Study Variations”");
+    assert_eq!(harness.state().current_set_name(), "Show");
+
+    harness.get_by_label("Moods").click();
+    harness.run_steps(2);
+    harness.get_by_label("Generating “Rain Study Moods”: 5 tracks…");
+    harness.get_by_label_contains("Generating “Rain Study Moods”: 1 of 5");
+    wait_for_generating(&mut harness, 300);
+    harness.get_by_label("Generated the set “Rain Study Moods”: 5 tracks");
+    assert_eq!(harness.state().current_set_name(), "Rain Study Moods");
+    for mood in ["Still", "Gentle", "Wandering", "Restless", "Unsettled"] {
+        harness.get_by_label(&format!("Rain Study {mood}"));
+    }
+    let tile = harness
+        .state()
+        .selected_tile()
+        .expect("the first, selected");
+    assert_eq!(tile.title, "Rain Study Still");
+    assert_eq!(tile.emoji, "🌧️");
+
+    // One undo takes the whole set off; redo brings it back.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(3);
+    harness.get_by_label("Removed the set “Rain Study Moods”");
+    assert_ne!(harness.state().current_set_name(), "Rain Study Moods");
+    assert_eq!(harness.query_all_by_label("Rain Study Still").count(), 0);
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    harness.run_steps(3);
+    assert_eq!(harness.state().current_set_name(), "Rain Study Moods");
+    harness.get_by_label("Rain Study Gentle");
+}
+
 #[test]
 fn a_generated_track_lands_on_a_tile_and_undo_takes_it_off() {
     let dir = tempfile::tempdir().unwrap();

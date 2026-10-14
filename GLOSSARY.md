@@ -152,7 +152,9 @@ _Avoid_: background music (as a name), soundtrack, loop
 **Track**:
 A sound the Generator rendered into the library and put on a tile, named
 after its style and length ("Rain Study 2 min"). From then on it is a
-sound like any other.
+sound like any other. Several can be generated at once into a new set:
+four variations, the style in each mood, or every style ("Rain Study
+Moods", tiles "Rain Study Still", "Rain Study Gentle"…).
 _Avoid_: recording, export, song
 
 **Background**:

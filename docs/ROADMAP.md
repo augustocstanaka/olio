@@ -50,7 +50,8 @@ are intentions, reordered as real use dictates.
   backgrounds), presence, endless or pieces. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
-  30 s to 10 min onto tiles, undoable; `olio generate` and `cargo xtask
+  30 s to 10 min onto tiles, or a new set of them (variations, moods or
+  every style), undoable; `olio generate` and `cargo xtask
   previews` render the styles to WAV files.
 - **Grid size**: columns per set (⌘] / ⌘[, Fit to Window ⌘\\, Set ▸
   Columns, the inspector), never narrower than the tiles allow, undoable; Compact,
