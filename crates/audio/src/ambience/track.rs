@@ -2,7 +2,8 @@
 //! through, run offline, so a track sounds like the bed, reverb and all.
 //! Not for the audio thread: it allocates the whole track.
 
-use super::AmbienceSettings;
+use super::{AmbienceSettings, Instrument};
+use crate::instruments::Recorded;
 use crate::{Clip, Engine};
 
 use std::collections::VecDeque;
@@ -26,7 +27,8 @@ const LAST_FADE_SECONDS: f32 = 0.5;
 const CHUNK: usize = 4096;
 
 /// Renders `seconds` of the ambience with `settings` (switched on and not
-/// ducked, whatever they say) into a stereo clip that fades in over a
+/// ducked, whatever they say), with the `recorded` instruments as they
+/// play live, into a stereo clip that fades in over a
 /// second, fades out at the end, and is about -20 dBFS RMS with no peak
 /// over -1 dBFS. The same settings render the same track.
 ///
@@ -35,6 +37,7 @@ const CHUNK: usize = 4096;
 pub fn render_track(
     settings: &AmbienceSettings,
     seconds: f32,
+    recorded: &Recorded,
     mut progress: impl FnMut(f32) -> bool,
 ) -> Option<Clip> {
     let rate = TRACK_RATE;
@@ -47,6 +50,11 @@ pub fn render_track(
         ..*settings
     };
     let (mut engine, mut mixer) = Engine::offline(rate);
+    for instrument in Instrument::ALL {
+        if let Some(samples) = recorded.get(instrument) {
+            engine.set_instrument(instrument, Some(samples.clone()));
+        }
+    }
     engine.set_ambience(on);
     let mut samples = vec![0.0f32; total * 2];
     let mut done = 0;

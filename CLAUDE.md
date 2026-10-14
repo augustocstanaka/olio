@@ -14,8 +14,10 @@ and UI text.
   `composer.rs` what plays when, `synth.rs` the instruments,
   `background.rs` rain, waves, fire and the rest, `journey.rs` building
   up and evolving over time, `hall.rs` the instruments' chorus and hall,
-  `dsp.rs` shared
-  filters, `track.rs` rendering a track offline), and `engine.rs` (the
+  `sampler.rs` recorded instruments played, `dsp.rs` shared
+  filters, `track.rs` rendering a track offline), `instruments.rs`
+  (instrument packs: the manifest, loading recorded instruments), and
+  `engine.rs` (the
   app's handle on the mixer plus the cpal output stream). No UI or
   library dependency.
 - `crates/library` (`olio-library`): `model.rs` (Library, Set, Tile,

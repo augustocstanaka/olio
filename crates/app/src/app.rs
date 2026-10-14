@@ -35,6 +35,7 @@ use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
 use crate::{keys, palette, polish};
+use olio_audio::instruments::Recorded;
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
@@ -154,6 +155,8 @@ pub struct OlioApp {
     show_polish: bool,
     /// A track the Generator is rendering.
     generation: Option<Generation>,
+    /// The Generator's instruments played from recordings, where loaded.
+    recorded: Recorded,
     /// A style's name being typed in the Generator.
     naming: Option<generator::Naming>,
     /// What played before a surprise, and its name, while Back can return
@@ -238,6 +241,7 @@ impl OlioApp {
             show_shortcuts: false,
             show_polish: false,
             generation: None,
+            recorded: Recorded::default(),
             naming: None,
             before_surprise: None,
             surprises: 0,
@@ -1562,6 +1566,7 @@ impl OlioApp {
             title,
             vec![track],
             self.prefs.track_seconds,
+            self.recorded.clone(),
             Destination::Tile(self.current),
         );
         self.set_status(format!("Generating “{}”…", generation.title), false);
@@ -1586,6 +1591,7 @@ impl OlioApp {
             name,
             tracks,
             self.prefs.track_seconds,
+            self.recorded.clone(),
             Destination::NewSet,
         );
         self.set_status(

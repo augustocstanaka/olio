@@ -21,6 +21,7 @@ use olio_audio::ambience::{
     AmbienceSettings, Background, Density, Form, Instrument, Journey, Mood, Now, Presence,
     ROOT_NAMES, Register, ScaleKind, Style,
 };
+use olio_audio::instruments::Recorded;
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
 
@@ -279,14 +280,15 @@ pub struct Generation {
 }
 
 impl Generation {
-    /// Starts rendering `seconds` of each track into the library in
-    /// `store`.
+    /// Starts rendering `seconds` of each track, with the `recorded`
+    /// instruments, into the library in `store`.
     pub fn start(
         ctx: egui::Context,
         store: Store,
         title: String,
         tracks: Vec<TrackPlan>,
         seconds: u32,
+        recorded: Recorded,
         destination: Destination,
     ) -> Self {
         let progress = Arc::new(AtomicU32::new(0));
@@ -302,6 +304,7 @@ impl Generation {
             store,
             tracks,
             seconds,
+            recorded,
             progress: Arc::clone(&progress),
             current: Arc::clone(&current),
             cancel: Arc::clone(&cancel),
@@ -364,6 +367,7 @@ struct Job {
     store: Store,
     tracks: Vec<TrackPlan>,
     seconds: u32,
+    recorded: Recorded,
     progress: Arc<AtomicU32>,
     current: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
@@ -405,15 +409,20 @@ impl Job {
         overall: impl Fn(f32) -> f32,
     ) -> Result<Option<Sound>, String> {
         let mut shown = Instant::now();
-        let clip = render_track(&track.settings, self.seconds as f32, |done| {
-            self.progress
-                .store(overall(done).to_bits(), Ordering::Relaxed);
-            if shown.elapsed() > Duration::from_millis(100) {
-                shown = Instant::now();
-                self.ctx.request_repaint();
-            }
-            !self.cancel.load(Ordering::Relaxed)
-        });
+        let clip = render_track(
+            &track.settings,
+            self.seconds as f32,
+            &self.recorded,
+            |done| {
+                self.progress
+                    .store(overall(done).to_bits(), Ordering::Relaxed);
+                if shown.elapsed() > Duration::from_millis(100) {
+                    shown = Instant::now();
+                    self.ctx.request_repaint();
+                }
+                !self.cancel.load(Ordering::Relaxed)
+            },
+        );
         let Some(clip) = clip else {
             return Ok(None);
         };

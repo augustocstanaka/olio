@@ -227,6 +227,20 @@ impl Engine {
         self.send(Message::Ambience(settings));
     }
 
+    /// Plays a Generator instrument from recordings, or with `None` from
+    /// its synthesised voice again. The old recordings come back through
+    /// [`poll`](Self::poll) to be freed here, once their notes have faded.
+    pub fn set_instrument(
+        &mut self,
+        instrument: crate::ambience::Instrument,
+        samples: Option<Arc<crate::instruments::Multisample>>,
+    ) {
+        self.send(Message::Instrument {
+            instrument,
+            samples,
+        });
+    }
+
     /// Sets the gain applied to the whole mix (linear, 1.0 is unity).
     pub fn set_master_gain(&mut self, gain: f32) {
         self.send(Message::MasterGain { gain });
@@ -267,10 +281,15 @@ impl Engine {
     /// are released here, on the caller's thread.
     pub fn poll(&mut self) -> Vec<VoiceId> {
         let mut ended = Vec::new();
-        while let Ok(Event::Ended { voice, clip }) = self.events.pop() {
-            drop(clip);
-            self.live -= 1;
-            ended.push(voice);
+        while let Ok(event) = self.events.pop() {
+            match event {
+                Event::Ended { voice, clip } => {
+                    drop(clip);
+                    self.live -= 1;
+                    ended.push(voice);
+                }
+                Event::Released(samples) => drop(samples),
+            }
         }
         ended
     }

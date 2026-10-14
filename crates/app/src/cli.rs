@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use olio_audio::ambience::{Journey, Style};
+use olio_audio::instruments::Recorded;
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Set, Store};
 
@@ -203,7 +204,8 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             true => style.name().to_owned(),
             false => format!("{} ({})", style.name(), asked.join(", ")),
         };
-        let clip = render_track(&settings, seconds, |_| true).ok_or("the render stopped")?;
+        let clip = render_track(&settings, seconds, &Recorded::default(), |_| true)
+            .ok_or("the render stopped")?;
         let path = out.join(format!("{name}.wav"));
         clip.write_wav(&path, WavFormat::Int16)
             .map_err(|err| format!("{}: {err}", path.display()))?;

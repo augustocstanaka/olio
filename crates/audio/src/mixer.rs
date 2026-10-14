@@ -10,8 +10,9 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::ambience::{Ambience, AmbienceSettings, Now};
+use crate::ambience::{Ambience, AmbienceSettings, Instrument, Now};
 use crate::clip::Clip;
+use crate::instruments::Multisample;
 use crate::reverb::Reverb;
 
 /// The most voices that can sound at once. The engine refuses further
@@ -86,6 +87,11 @@ pub(crate) enum Message {
         gain: f32,
     },
     Ambience(AmbienceSettings),
+    /// An instrument's recordings, or none to synthesise it again.
+    Instrument {
+        instrument: Instrument,
+        samples: Option<Arc<Multisample>>,
+    },
 }
 
 /// What the mixer tells the engine.
@@ -93,6 +99,9 @@ pub(crate) enum Event {
     /// The voice has finished (played out or stopped); its clip travels back
     /// so it is dropped off the audio thread.
     Ended { voice: VoiceId, clip: Arc<Clip> },
+    /// Recordings the ambience no longer plays, to be freed off the audio
+    /// thread.
+    Released(Arc<Multisample>),
 }
 
 /// State the mixer publishes after every buffer for the app to read:
@@ -568,6 +577,10 @@ impl Mixer {
                 }
             }
             Message::Ambience(settings) => self.ambience.set(settings),
+            Message::Instrument {
+                instrument,
+                samples,
+            } => self.ambience.set_samples(instrument, samples),
             Message::MasterGain { gain } => {
                 let frames = self.declick;
                 self.master.towards(gain.max(0.0), frames);
@@ -580,6 +593,13 @@ impl Mixer {
     fn publish(&mut self) {
         let now = self.ambience.now().map_or(0, Now::pack);
         self.shared.ambience.store(now, Ordering::Relaxed);
+        while self.events.slots() > 0 {
+            let Some(samples) = self.ambience.take_released() else {
+                break;
+            };
+            let pushed = self.events.push(Event::Released(samples));
+            debug_assert!(pushed.is_ok(), "checked for a free slot first");
+        }
         for (peak, published) in self.output_peaks.iter_mut().zip(&self.shared.output_peaks) {
             published.raise(*peak);
             *peak = 0.0;

@@ -4,6 +4,8 @@
 //!   instruments in a scale), played live or rendered to a track.
 //! - [`clip`]: decode a sound file into a [`Clip`] held in memory, and write
 //!   one back out as WAV.
+//! - [`instruments`]: recorded instruments for the ambience, loaded from an
+//!   instrument pack.
 //! - [`peaks`]: the waveform overview drawn on tiles.
 //! - [`reverb`]: the room reverb voices can send to.
 //! - [`spectrum`]: the spectrogram drawn under a tile's waveform.
@@ -19,6 +21,7 @@
 pub mod ambience;
 pub mod clip;
 pub mod engine;
+pub mod instruments;
 pub mod mixer;
 pub mod peaks;
 pub mod reverb;

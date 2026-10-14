@@ -1,6 +1,7 @@
 //! Rendering the ambience to a track.
 
 use olio_audio::ambience::Style;
+use olio_audio::instruments::Recorded;
 use olio_audio::{AmbienceSettings, TRACK_RATE, render_track};
 
 fn peak(samples: &[f32]) -> f32 {
@@ -16,7 +17,7 @@ fn rms_db(samples: &[f32]) -> f32 {
 fn a_track_is_as_long_as_asked_at_one_loudness_and_fades_at_both_ends() {
     let settings = Style::Campfire.settings();
     let mut reported = Vec::new();
-    let clip = render_track(&settings, 6.0, |done| {
+    let clip = render_track(&settings, 6.0, &Recorded::default(), |done| {
         reported.push(done);
         true
     })
@@ -50,14 +51,14 @@ fn the_same_settings_render_the_same_track_and_a_new_seed_another() {
         ..Style::ForestMorning.settings()
     };
     // Long enough for the instruments to come in.
-    let first = render_track(&settings, 12.0, |_| true).unwrap();
-    let again = render_track(&settings, 12.0, |_| true).unwrap();
+    let first = render_track(&settings, 12.0, &Recorded::default(), |_| true).unwrap();
+    let again = render_track(&settings, 12.0, &Recorded::default(), |_| true).unwrap();
     assert!(first.samples() == again.samples());
     let other = AmbienceSettings {
         seed: 2,
         ..settings
     };
-    let different = render_track(&other, 12.0, |_| true).unwrap();
+    let different = render_track(&other, 12.0, &Recorded::default(), |_| true).unwrap();
     assert!(first.samples() != different.samples());
 }
 
@@ -65,7 +66,7 @@ fn the_same_settings_render_the_same_track_and_a_new_seed_another() {
 fn a_render_stops_when_asked() {
     let settings = Style::RainStudy.settings();
     let mut chunks = 0;
-    let clip = render_track(&settings, 60.0, |_| {
+    let clip = render_track(&settings, 60.0, &Recorded::default(), |_| {
         chunks += 1;
         chunks < 3
     });

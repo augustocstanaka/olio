@@ -2,10 +2,13 @@
 //! synth is built; rendering a frame allocates nothing.
 
 use std::f32::consts::TAU;
+use std::sync::Arc;
 
 use super::composer::{Event, SHAKER};
 use super::dsp::{BandPass, OnePole, coefficient, decay, hz, pan_gains};
+use super::sampler::Sampler;
 use super::{AmbienceSettings, Instrument, Rng};
+use crate::instruments::Multisample;
 use crate::mixer::Ramp;
 
 // ----- plucked ---------------------------------------------------------
@@ -661,6 +664,8 @@ const LOWEST_HZ: f32 = 24.0;
 pub(super) struct Synth {
     rate: u32,
     rng: Rng,
+    /// Instruments played from recordings, where there are some.
+    sampler: Sampler,
     bass: Vec<Plucked>,
     harp: Vec<Plucked>,
     violin: Vec<Plucked>,
@@ -679,6 +684,7 @@ impl Synth {
         Self {
             rate,
             rng: Rng::new(seed),
+            sampler: Sampler::new(rate),
             bass: (0..BASS_STRINGS)
                 .map(|_| Plucked::new(max_frames))
                 .collect(),
@@ -698,12 +704,29 @@ impl Synth {
         }
     }
 
+    /// Takes on an instrument's recordings, or goes back to its
+    /// synthesised voice with `None`.
+    pub(super) fn set_samples(
+        &mut self,
+        instrument: Instrument,
+        samples: Option<Arc<Multisample>>,
+    ) {
+        self.sampler.set(instrument, samples);
+    }
+
+    /// Recordings no longer played, for the app to free.
+    pub(super) fn take_released(&mut self) -> Option<Arc<Multisample>> {
+        self.sampler.take_released()
+    }
+
     pub(super) fn is_sounding(&self) -> bool {
-        self.bass
-            .iter()
-            .chain(&self.harp)
-            .chain(&self.violin)
-            .any(|s| s.active)
+        self.sampler.is_sounding()
+            || self
+                .bass
+                .iter()
+                .chain(&self.harp)
+                .chain(&self.violin)
+                .any(|s| s.active)
             || self.bells.iter().any(|b| b.active)
             || self.strings.iter().chain(&self.pad).any(|s| s.active)
             || self.drone.iter().any(|d| d.active)
@@ -741,6 +764,13 @@ impl Synth {
             return;
         }
         let velocity = (note.velocity * layer.level).clamp(0.0, 1.0);
+        if self.sampler.has(note.instrument) {
+            self.sampler.play(event, velocity);
+            // The pad keeps its synthesised voice beneath the recording.
+            if note.instrument != Instrument::Pad {
+                return;
+            }
+        }
         match note.instrument {
             Instrument::Bass | Instrument::Harp | Instrument::Violin => {
                 let pool = match note.instrument {
@@ -817,7 +847,7 @@ impl Synth {
     /// The next frame of every instrument, at `gain`.
     #[inline]
     pub(super) fn next(&mut self, gain: f32) -> (f32, f32) {
-        let (mut l, mut r) = (0.0, 0.0);
+        let (mut l, mut r) = self.sampler.next(1.0);
         for string in self
             .bass
             .iter_mut()

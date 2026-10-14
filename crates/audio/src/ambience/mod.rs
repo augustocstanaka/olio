@@ -22,6 +22,7 @@ mod composer;
 mod dsp;
 mod hall;
 mod journey;
+mod sampler;
 mod synth;
 mod track;
 
@@ -1458,6 +1459,22 @@ impl Ambience {
             self.course.reset(settings.seed, self.clock);
         }
         self.settings = settings;
+    }
+
+    /// Plays an instrument from recordings, or with `None` from its
+    /// synthesised voice again. Notes on the old recordings fade out.
+    pub fn set_samples(
+        &mut self,
+        instrument: Instrument,
+        samples: Option<std::sync::Arc<crate::instruments::Multisample>>,
+    ) {
+        self.synth.set_samples(instrument, samples);
+    }
+
+    /// Recordings no longer played, for the app to free off the audio
+    /// thread.
+    pub fn take_released(&mut self) -> Option<std::sync::Arc<crate::instruments::Multisample>> {
+        self.synth.take_released()
     }
 
     /// What a building or evolving ambience plays now; `None` when it is

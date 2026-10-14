@@ -26,7 +26,17 @@ queues, and settings arrive as one `Message::Ambience` value. The mixing
 rules apply to it unchanged. Its instruments go through a space of their
 own (`ambience/hall.rs`: an ensemble chorus and a long feedback-delay-
 network hall, also allocated up front) rather than the tiles' room, and
-the ambience stays audible until the hall's tail has died away. A generated track is the same ambience
+the ambience stays audible until the hall's tail has died away.
+
+Its instruments can also play from recordings: an instrument pack's
+notes are decoded off the audio thread into a `Multisample` (16-bit
+stereo, about 10 MB a stereo minute) and handed to the mixer in an `Arc`
+(`Message::Instrument`). A fixed pool of 40 sampler voices plays them,
+pitch-shifted with Catmull-Rom interpolation, held notes looping where
+the pack baked a seamless join. Replaced recordings are not freed on the
+audio thread: their voices fade over 50 ms, then the `Arc` travels back
+as `Event::Released` to be dropped by `Engine::poll`. An instrument with
+no recordings keeps its synthesised voice. A generated track is the same ambience
 rendered by a mixer of its own on another thread (`Engine::offline`), so
 it sounds like the live bed, reverb included; nothing new runs on the
 audio thread for it.
