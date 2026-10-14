@@ -470,7 +470,7 @@ impl Mixer {
 
         // The ambience, under everything, quieter while anything plays.
         let sounding = self.voices.iter().flatten().any(|voice| !voice.finished);
-        self.ambience.render(out, bus, channels, sounding);
+        self.ambience.render(out, channels, sounding);
 
         if bus.iter().any(|&sample| sample != 0.0) {
             self.reverb_remaining = self.reverb_tail;

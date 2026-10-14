@@ -558,3 +558,36 @@ fn the_ambience_ducks_under_a_playing_sound() {
     assert!(ducked < alone * 0.6, "{ducked} vs {alone}");
     assert!(ducked > 0.0);
 }
+
+/// Prints how loud some styles' instruments are through the mixer; run
+/// with `--ignored --nocapture` when tuning the mix.
+#[test]
+#[ignore]
+fn measure_style_levels() {
+    use olio_audio::ambience::Style;
+    for style in [
+        Style::Cathedral,
+        Style::SeasidePiano,
+        Style::RainStudy,
+        Style::Affirmation,
+        Style::NightDrift,
+    ] {
+        let (mut engine, mut mixer) = Engine::offline(RATE);
+        let mut settings = style.settings();
+        settings.enabled = true;
+        settings.background = Background::None;
+        settings.duck = false;
+        engine.set_ambience(settings);
+        render(&mut mixer, RATE as usize * 5, 2);
+        let mut out = Vec::new();
+        for _ in 0..(RATE as usize * 40 / 4800) {
+            out.extend(render(&mut mixer, 4800, 2));
+        }
+        println!(
+            "LEVEL {:?}: rms {:.5} peak {:.4}",
+            style,
+            rms(&out),
+            peak(&out)
+        );
+    }
+}

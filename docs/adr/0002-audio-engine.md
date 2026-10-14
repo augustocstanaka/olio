@@ -23,7 +23,10 @@ The ambience bed is synthesised in the mixer rather than played from
 files: everything it needs (delay lines, voice pools, noise filters) is
 allocated when the mixer is built, its composer plans with fixed-size
 queues, and settings arrive as one `Message::Ambience` value. The mixing
-rules apply to it unchanged. A generated track is the same ambience
+rules apply to it unchanged. Its instruments go through a space of their
+own (`ambience/hall.rs`: an ensemble chorus and a long feedback-delay-
+network hall, also allocated up front) rather than the tiles' room, and
+the ambience stays audible until the hall's tail has died away. A generated track is the same ambience
 rendered by a mixer of its own on another thread (`Engine::offline`), so
 it sounds like the live bed, reverb included; nothing new runs on the
 audio thread for it.

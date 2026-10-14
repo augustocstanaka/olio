@@ -20,6 +20,7 @@
 mod background;
 mod composer;
 mod dsp;
+mod hall;
 mod journey;
 mod synth;
 mod track;
@@ -33,6 +34,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::mixer::Ramp;
 use background::Bed;
 pub use composer::{Composer, Event, Note, SHAKER};
+use hall::{Chorus, Hall};
 use journey::Course;
 pub use journey::{Journey, Now};
 use synth::Synth;
@@ -1375,8 +1377,12 @@ impl Rng {
 const FULL_LEVEL_GAIN: f32 = 0.16;
 /// How much quieter while sounds play.
 const DUCKED: f32 = 0.35;
-/// How much of the instruments goes to the reverb.
-const REVERB_SEND: f32 = 0.4;
+/// How much of the instruments goes into their hall, and how much they
+/// are trimmed by so that, hall and all, they sit where they did.
+const HALL_SEND: f32 = 0.6;
+const MUSIC_TRIM: f32 = 0.72;
+/// Below this the hall's tail is no longer heard, and rendering can stop.
+const HALL_QUIET: f32 = 1e-6;
 
 /// The ambience, synthesised. Built once with everything it needs.
 pub struct Ambience {
@@ -1396,6 +1402,11 @@ pub struct Ambience {
     /// The background against the instruments, and they against it.
     bed_gain: Ramp,
     music_level: Ramp,
+    /// The instruments' ensemble and their hall, and whether its tail
+    /// still rings.
+    chorus: Chorus,
+    hall: Hall,
+    ringing: bool,
 }
 
 impl Ambience {
@@ -1417,6 +1428,9 @@ impl Ambience {
             duck: Ramp::at(1.0),
             bed_gain: Ramp::at(1.0),
             music_level: Ramp::at(1.0),
+            chorus: Chorus::new(rate),
+            hall: Hall::new(rate),
+            ringing: false,
         }
     }
 
@@ -1470,13 +1484,13 @@ impl Ambience {
 
     /// True while anything may be heard.
     pub fn is_audible(&self) -> bool {
-        self.settings.enabled || !self.gain.is_silent() || self.synth.is_sounding()
+        self.settings.enabled || !self.gain.is_silent() || self.synth.is_sounding() || self.ringing
     }
 
-    /// Adds the next `out.len() / channels` frames into `out` (dry) and
-    /// the instruments' share into the stereo `bus`. `ducking` while
-    /// sounds play.
-    pub fn render(&mut self, out: &mut [f32], bus: &mut [f32], channels: usize, ducking: bool) {
+    /// Adds the next `out.len() / channels` frames into `out`: the
+    /// background, and the instruments through their chorus and hall.
+    /// `ducking` while sounds play.
+    pub fn render(&mut self, out: &mut [f32], channels: usize, ducking: bool) {
         let frames = out.len() / channels;
         if !self.is_audible() {
             self.clock += frames as u64;
@@ -1515,8 +1529,8 @@ impl Ambience {
             self.composer.poll(&self.heard, from, to);
         }
         let music_gain = self.composer.music_gain();
-        let (sends, _) = bus.as_chunks_mut::<2>();
-        for (i, (frame, send)) in out.chunks_exact_mut(channels).zip(sends).enumerate() {
+        let mut tail = 0.0f32;
+        for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
             let now = from + i as u64;
             while let Some(event) = self.composer.due(now) {
                 self.synth.play(event, &self.heard);
@@ -1526,18 +1540,25 @@ impl Ambience {
             let (mut left, mut right) = self.bed.next();
             left *= bed_gain;
             right *= bed_gain;
-            let (sl, sr) = self.synth.next(music_gain * self.music_level.next());
-            left = (left + sl) * gain;
-            right = (right + sr) * gain;
+            let (sl, sr) = self
+                .synth
+                .next(music_gain * self.music_level.next() * MUSIC_TRIM);
+            let (sl, sr) = self.chorus.process(sl, sr);
+            // The hall rings on after the bed is switched off.
+            let (hl, hr) = self
+                .hall
+                .process(sl * gain * HALL_SEND, sr * gain * HALL_SEND);
+            tail = tail.max(hl.abs()).max(hr.abs());
+            left = (left + sl) * gain + hl;
+            right = (right + sr) * gain + hr;
             if channels == 1 {
                 frame[0] += 0.5 * (left + right);
             } else {
                 frame[0] += left;
                 frame[1] += right;
             }
-            send[0] += sl * gain * REVERB_SEND;
-            send[1] += sr * gain * REVERB_SEND;
         }
+        self.ringing = tail > HALL_QUIET;
         self.clock = to;
     }
 }
@@ -1709,8 +1730,7 @@ mod tests {
             let mut ambience = Ambience::new(rate as u32, 4);
             ambience.set(settings);
             let mut out = vec![0.0; rate * 4 * 2];
-            let mut bus = vec![0.0; rate * 4 * 2];
-            ambience.render(&mut out, &mut bus, 2, false);
+            ambience.render(&mut out, 2, false);
             let last = &out[out.len() - rate * 2..];
             (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
         };
@@ -1741,19 +1761,16 @@ mod tests {
             let mut ambience = Ambience::new(rate as u32, 5);
             ambience.set(settings);
             let mut out = vec![0.0; rate * 8 * 2];
-            let mut bus = vec![0.0; rate * 8 * 2];
-            ambience.render(&mut out, &mut bus, 2, false);
+            ambience.render(&mut out, 2, false);
+            // Dry and hall together: the hall follows the instruments.
             let last = &out[out.len() - rate * 2..];
-            let send = &bus[bus.len() - rate * 2..];
-            let rms = |s: &[f32]| (s.iter().map(|s| s * s).sum::<f32>() / s.len() as f32).sqrt();
-            (rms(last), rms(send))
+            (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
         };
         let made = level(DEFAULT_PART_LEVEL);
         let half = level(DEFAULT_PART_LEVEL / 2.0);
-        assert!(made.0 > 0.0 && made.1 > 0.0);
-        assert!((half.0 / made.0 - 0.25).abs() < 0.03, "{half:?} / {made:?}");
-        assert!((half.1 / made.1 - 0.25).abs() < 0.03, "the reverb follows");
-        assert_eq!(level(0.0), (0.0, 0.0), "silent");
+        assert!(made > 0.0);
+        assert!((half / made - 0.25).abs() < 0.03, "{half} / {made}");
+        assert!(level(0.0) < 1e-8, "silent, but for the hall's last breath");
     }
 
     #[test]
@@ -1767,8 +1784,7 @@ mod tests {
         // The level over the last second of `seconds` more.
         let level = |ambience: &mut Ambience, seconds: usize| {
             let mut out = vec![0.0; rate * seconds * 2];
-            let mut bus = vec![0.0; rate * seconds * 2];
-            ambience.render(&mut out, &mut bus, 2, false);
+            ambience.render(&mut out, 2, false);
             let last = &out[out.len() - rate * 2..];
             (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
         };
@@ -1803,8 +1819,7 @@ mod tests {
             let mut ambience = Ambience::new(48_000, 11);
             ambience.set(settings);
             let mut out = vec![0.0; 48_000 * 2];
-            let mut bus = vec![0.0; 48_000 * 2];
-            ambience.render(&mut out, &mut bus, 2, false);
+            ambience.render(&mut out, 2, false);
             out
         };
         assert_eq!(render(), render());
@@ -1825,8 +1840,7 @@ mod tests {
             let mut ambience = Ambience::new(48_000, 3);
             ambience.set(settings);
             let mut out = vec![0.0; 48_000 * 2 * 40];
-            let mut bus = vec![0.0; 48_000 * 2 * 40];
-            ambience.render(&mut out, &mut bus, 2, false);
+            ambience.render(&mut out, 2, false);
             let peak = out.iter().fold(0.0f32, |p, s| p.max(s.abs()));
             assert!(peak > 0.002, "{} is silent", instrument.name());
             assert!(peak < 0.6, "{} peaks at {peak}", instrument.name());

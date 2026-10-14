@@ -221,13 +221,17 @@ enum Timbre {
     Pad,
 }
 
-/// A bowed or blown note: three detuned oscillators through a low-pass,
-/// with a slow rise and a slow fall.
+/// Oscillators in a bowed or blown note: half lean left, half right.
+const UNISON: usize = 6;
+
+/// A bowed or blown note: six detuned oscillators, spread across the
+/// stereo field, through a low-pass on each side, with a slow rise and a
+/// slow fall.
 #[derive(Clone, Copy)]
 struct Sustained {
     timbre: Timbre,
-    phases: [f32; 3],
-    steps: [f32; 3],
+    phases: [f32; UNISON],
+    steps: [f32; UNISON],
     vibrato: f32,
     vibrato_step: f32,
     env: f32,
@@ -236,7 +240,7 @@ struct Sustained {
     /// Frames of holding left before the release.
     hold: u64,
     releasing: bool,
-    lowpass: f32,
+    lowpass: [f32; 2],
     cutoff: f32,
     lfo: f32,
     lfo_step: f32,
@@ -249,8 +253,8 @@ impl Sustained {
     fn new(timbre: Timbre) -> Self {
         Self {
             timbre,
-            phases: [0.0; 3],
-            steps: [0.0; 3],
+            phases: [0.0; UNISON],
+            steps: [0.0; UNISON],
             vibrato: 0.0,
             vibrato_step: 0.0,
             env: 0.0,
@@ -258,7 +262,7 @@ impl Sustained {
             release: 0.0,
             hold: 0,
             releasing: false,
-            lowpass: 0.0,
+            lowpass: [0.0; 2],
             cutoff: 0.0,
             lfo: 0.0,
             lfo_step: 0.0,
@@ -270,11 +274,16 @@ impl Sustained {
 
     fn bow(&mut self, rng: &mut Rng, rate: u32, midi: u8, velocity: f32, pan: f32, hold: u64) {
         let base = hz(midi) / rate as f32;
+        // The widest of the oscillators, sharp and flat; the rest evenly
+        // between.
         let detune = match self.timbre {
-            Timbre::Strings => 0.004,
-            Timbre::Pad => 0.006,
+            Timbre::Strings => 0.005,
+            Timbre::Pad => 0.011,
         };
-        self.steps = [base * (1.0 - detune), base, base * (1.0 + detune)];
+        for (i, step) in self.steps.iter_mut().enumerate() {
+            let offset = i as f32 / (UNISON - 1) as f32 * 2.0 - 1.0;
+            *step = base * (1.0 + detune * offset);
+        }
         for phase in &mut self.phases {
             *phase = rng.unit();
         }
@@ -315,33 +324,44 @@ impl Sustained {
         self.vibrato = (self.vibrato + self.vibrato_step).fract();
         self.lfo = (self.lfo + self.lfo_step).fract();
         let bend = 1.0 + 0.0025 * (self.vibrato * TAU).sin();
-        let mut out = 0.0;
-        for i in 0..3 {
+        // Alternate oscillators to each side, so the note is wide.
+        let mut sides = [0.0f32; 2];
+        for i in 0..UNISON {
             let step = self.steps[i] * bend;
-            out += match self.timbre {
+            sides[i % 2] += match self.timbre {
                 Timbre::Strings => saw(self.phases[i], step),
                 Timbre::Pad => triangle(self.phases[i]),
             };
             self.phases[i] = (self.phases[i] + step).fract();
         }
-        // The filter opens a little with the envelope and breathes with
+        // The filters open a little with the envelope and breathe with
         // the LFO.
         let breath = 0.7 + 0.3 * self.env + 0.15 * (self.lfo * TAU).sin();
-        self.lowpass += (out / 3.0 - self.lowpass) * (self.cutoff * breath).clamp(0.0, 1.0);
-        let out = self.lowpass * self.env * self.level;
+        let opening = (self.cutoff * breath).clamp(0.0, 1.0);
+        let per_side = (UNISON / 2) as f32;
+        for (lowpass, side) in self.lowpass.iter_mut().zip(sides) {
+            *lowpass += (side / per_side - *lowpass) * opening;
+        }
+        let amp = self.env * self.level;
         let (l, r) = pan_gains(self.pan);
-        (out * l, out * r)
+        (self.lowpass[0] * amp * l, self.lowpass[1] * amp * r)
     }
 }
 
 // ----- drone -------------------------------------------------------------
 
+/// A drone's partials: the root, its octave and twelfth, the fifth, a
+/// copy a little sharp that beats slowly against the root, and the octave
+/// below, soft.
+const DRONE_PARTIALS: usize = 6;
+const DRONE_AMPS: [f32; DRONE_PARTIALS] = [1.0, 0.45, 0.18, 0.3, 0.5, 0.25];
+
 /// The root, held: a few partials and the fifth above, swelling in and out
 /// slowly. Two of them, so a change of key crosses over.
 #[derive(Clone, Copy)]
 struct DroneVoice {
-    phases: [f32; 4],
-    steps: [f32; 4],
+    phases: [f32; DRONE_PARTIALS],
+    steps: [f32; DRONE_PARTIALS],
     /// The layer's level, followed smoothly so a slider never clicks.
     level: f32,
     level_target: f32,
@@ -358,8 +378,8 @@ struct DroneVoice {
 impl DroneVoice {
     fn new() -> Self {
         Self {
-            phases: [0.0; 4],
-            steps: [0.0; 4],
+            phases: [0.0; DRONE_PARTIALS],
+            steps: [0.0; DRONE_PARTIALS],
             level: 0.0,
             level_target: 0.0,
             level_step: 0.0,
@@ -380,7 +400,14 @@ impl DroneVoice {
         self.level_target = level;
         self.level_step = 1.0 - (-1.0 / (0.5 * rate as f32)).exp();
         let base = hz(midi) / rate as f32;
-        self.steps = [base, base * 2.0, base * 3.0, base * 1.5];
+        self.steps = [
+            base,
+            base * 2.0,
+            base * 3.0,
+            base * 1.5,
+            base * 1.0035,
+            base * 0.5,
+        ];
         self.rate_in = 1.0 - (-1.0 / (4.0 * rate as f32)).exp();
         self.rate_out = (-4.0 / (4.0 * rate as f32)).exp();
         self.breath_step = 0.045 / rate as f32;
@@ -406,15 +433,14 @@ impl DroneVoice {
         self.breath = (self.breath + self.breath_step).fract();
         self.level += (self.level_target - self.level) * self.level_step;
         let swell = 0.75 + 0.25 * (self.breath * TAU).sin();
-        let amps = [1.0, 0.45, 0.18, 0.3];
         let mut out = 0.0;
-        for ((phase, step), amp) in self.phases.iter_mut().zip(self.steps).zip(amps) {
+        for ((phase, step), amp) in self.phases.iter_mut().zip(self.steps).zip(DRONE_AMPS) {
             out += (*phase * TAU).sin() * amp;
             *phase = (*phase + step).fract();
         }
         // At the styles' usual level, about 0.6, as loud as before the
         // drone followed its level.
-        out * self.env * swell * 0.27 * self.level
+        out * self.env * swell * 0.24 * self.level
     }
 }
 
@@ -483,10 +509,11 @@ impl Piano {
             } else {
                 1.0
             };
-            self.amps[i] = PIANO_AMPS[i] * velocity * brightness * 0.12;
+            // Louder than the rest: a struck note gains least from the hall.
+            self.amps[i] = PIANO_AMPS[i] * velocity * brightness * 0.17;
             self.decays[i] = decay(PIANO_SECONDS[i] * shorten, rate);
         }
-        self.knock = velocity * 0.12;
+        self.knock = velocity * 0.17;
         self.knock_decay = decay(0.03, rate);
         self.knock_tone = coefficient(1200.0 + 2000.0 * velocity, rate);
         self.attack = 0.0;
