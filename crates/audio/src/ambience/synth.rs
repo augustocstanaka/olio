@@ -650,14 +650,14 @@ impl Drum {
 
 // ----- the synth ----------------------------------------------------------
 
-const BASS_STRINGS: usize = 3;
+const BASS_STRINGS: usize = 4;
 const HARP_STRINGS: usize = 8;
 const VIOLIN_STRINGS: usize = 4;
 const BELLS: usize = 6;
-const STRINGS: usize = 4;
-const PAD_VOICES: usize = 6;
-const PIANO_VOICES: usize = 6;
-const DRUMS: usize = 3;
+const STRINGS: usize = 6;
+const PAD_VOICES: usize = 10;
+const PIANO_VOICES: usize = 10;
+const DRUMS: usize = 4;
 /// The lowest plucked note, for the delay lines' length.
 const LOWEST_HZ: f32 = 24.0;
 

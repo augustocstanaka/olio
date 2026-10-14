@@ -417,7 +417,7 @@ mod tests {
         (enabled:false,level:0.8,density:Sparse,register:Middle),\
         (enabled:false,level:0.8,density:Sparse,register:Middle),\
         (enabled:false,level:0.8,density:Sparse,register:Middle),\
-        (enabled:false,level:0.8,density:Sparse,register:Middle)),presence:Ambient,\
+        (enabled:false,level:0.8,density:Sparse,register:Middle)),presence:Declarative,\
         tempo:60,form:Endless,level:0.35,duck:true,seed:1),show_spectrograms:true,\
         polish:(fade_in_seconds:1.0,fade_out_seconds:1.0,reverb:0.3),volume:0.3,muted:false,\
         show_sets:true,show_inspector:true,click_plays:false)";
@@ -450,6 +450,11 @@ mod tests {
             "saved as a step, read as its amount"
         );
         assert!(!prefs.ambience.layer(Instrument::Piano).enabled);
+        assert_eq!(
+            prefs.ambience.presence(),
+            Some(olio_audio::ambience::Presence::Declarative),
+            "a presence becomes its energy"
+        );
         assert!(!prefs.show_generator);
         assert!(!prefs.generator_details, "the essentials first");
         assert!(prefs.styles.is_empty());

@@ -140,7 +140,7 @@ _Avoid_: main volume, output level
 
 **Generator**:
 The panel, in place of the inspector, where gentle music is made up: a
-key, a character, a background, instruments, presence and form. It plays the
+key, a character, energy, a background, instruments and form. It plays the
 ambience live and generates tracks.
 _Avoid_: composer (that is the code that picks the notes), synth
 
@@ -187,15 +187,20 @@ _Avoid_: weather (only some are), noise, ambience (that is the whole)
 
 **Style**:
 A named preset of Generator settings (Rain Study, Seaside Piano,
-Campfire…). Picking one fills everything in; changing anything makes the
+Campfire, the lively Open Road…). Picking one fills everything in; changing anything makes the
 settings Custom. Custom settings can be saved as a style of one's own
 (Save Style…), listed after the built-in ones, renamed or removed, and
 kept in the preferences; tracks made from it are titled after it.
 _Avoid_: preset (that is Polish), theme
 
-**Presence**:
-How noticeable the ambience is: Background, Ambient or Declarative.
-_Avoid_: intensity, volume (that is level)
+**Energy**:
+How much there is of the Generator's music, 0 to 100 %: how loud and
+hard it plays, how many notes, whether they keep a pulse (from the
+middle up), how full the chords and lines are. **Background**,
+**Ambient**, **Declarative** and **Vibrant** name four places on it, the
+way a Mood names a character; saved settings from before, with a
+presence, keep its place.
+_Avoid_: presence (its old name), intensity, volume (that is level)
 
 **Character**:
 How the Generator's lines move, as three amounts from 0 to 100 %:

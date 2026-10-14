@@ -98,12 +98,17 @@ Milestone 0, the playable skeleton, is done. Olio can:
     builds up and then every few minutes moves on to a related key, a
     nearby mood, a related background, or lets an instrument rest; the
     panel says where it has got to while it plays;
-  - **presence**, from *Background* (barely there) to *Declarative*
-    (louder, on a slow pulse, with cadences), and **form**: endless, or
-    pieces that close on the root and pause.
+  - **energy**, a slider among the essentials from *Background* (barely
+    there) through *Ambient* and *Declarative* (louder, on a slow pulse,
+    with cadences) to *Vibrant*: played harder and busier on a brisk
+    pulse, the harp running up the chords, the bass answering itself,
+    piano chords, a doubled shaker, strings in fifths, and the pad adding
+    sevenths and ninths; and **form** (with Details): endless, or pieces
+    that close on the root and pause.
 
   Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
-  Desert Night and Storm Watch fill it all in; touch anything and it is
+  Desert Night and Storm Watch fill it all in, and Open Road and Spring
+  Dance show off the lively end; touch anything and it is
   yours, and Save Style… keeps it in the Style list under a name of your
   own (rename or remove it there; ⌘Z brings a removed one back).
   🎲 Surprise Me (⇧⌘R) plays something new at once, picked from what

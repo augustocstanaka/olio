@@ -1,9 +1,9 @@
 //! The Generator: a panel in place of the inspector where the ambience is
 //! shaped, played live under the sounds, and rendered to tracks that land
-//! on tiles. It shows the essentials (style, mood, how it changes over
-//! time, background, instruments); Details adds every setting (the character's amounts,
-//! each instrument's level, density and register, the key, presence and
-//! form) under the essential it belongs to. Custom settings can be saved
+//! on tiles. It shows the essentials (style, key, mood, energy, how it
+//! changes over time, background, instruments); Details adds every setting
+//! (the character's amounts, each instrument's level, density and
+//! register, and the form) under the essential it belongs to. Custom settings can be saved
 //! as a style of one's own, listed after the built-in styles.
 //!
 //! The settings live in the preferences and go to the engine when they
@@ -618,6 +618,9 @@ pub fn show(
             key(ui, settings);
             section(ui, "Mood");
             mood(ui, settings, details);
+            section(ui, "Energy");
+            // One scope: the pulse's row comes and goes with the energy.
+            ui.scope(|ui| energy(ui, settings));
             section(ui, "Over time");
             // One scope, so the line saying where it has got to never
             // moves the ids of the widgets below.
@@ -643,8 +646,6 @@ pub fn show(
                 ui.weak("No instruments: the background only.");
             }
             if details {
-                section(ui, "Presence");
-                presence(ui, settings);
                 section(ui, "Form");
                 form(ui, settings);
             }
@@ -1239,15 +1240,31 @@ fn row<T: Copy + PartialEq>(
     }
 }
 
-fn presence(ui: &mut Ui, settings: &mut AmbienceSettings) {
-    choose(
-        ui,
-        &mut settings.presence,
-        &Presence::ALL,
-        Presence::name,
-        Presence::describe,
-    );
-    if settings.presence.pulsed() {
+/// How much there is of the music: its four names, the amount, and the
+/// pulse when there is one.
+fn energy(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    let now = settings.presence();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().button_padding.x = 6.0;
+        for presence in Presence::ALL {
+            if ui
+                .selectable_label(now == Some(presence), presence.name())
+                .on_hover_text(presence.describe())
+                .clicked()
+            {
+                settings.set_presence(presence);
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        let hint = format!(
+            "Energy {:.0} %: barely there to the left, lively and full to the right",
+            settings.energy * 100.0
+        );
+        amount_slider(ui, &mut settings.energy, "Energy", hint);
+    });
+    if settings.pulsed() {
         ui.horizontal(|ui| {
             ui.label("Pulse");
             let mut tempo = f32::from(settings.tempo);
@@ -1260,7 +1277,8 @@ fn presence(ui: &mut Ui, settings: &mut AmbienceSettings) {
             }
         });
     }
-    ui.weak(settings.presence.describe());
+    ui.add_space(2.0);
+    ui.weak(sentence(Presence::nearest(settings.energy).describe()));
 }
 
 fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {

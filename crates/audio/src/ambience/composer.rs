@@ -3,9 +3,16 @@
 //! A slow harmony (a chord degree of the scale) underlies everything: the
 //! bass and strings lean on it, the harp, piano, violin and bells mostly
 //! touch its tones, the pad voices it, the frame drum keeps to the root.
-//! Declarative presence puts the notes on a pulse and walks a cadence; the
-//! other presences drift. Pieces have an intro, a close that thins out and
+//! From the middle of energy up the notes keep a pulse and walk a cadence;
+//! below it they drift. Pieces have an intro, a close that thins out and
 //! lands on the root, and a pause.
+//!
+//! Energy, past spacing the notes closer (in `mod.rs`), plays them harder;
+//! towards Vibrant it drives: the harp runs up the chords, the bass answers
+//! itself on the fifth or the octave, the piano strikes chords, the shaker
+//! doubles, the strings bow in fifths and the pad adds the seventh and the
+//! ninth over shorter chords. At Ambient and below none of it draws on the
+//! random source.
 //!
 //! The character shapes the lines. Variety: the harp, piano and violin
 //! each remember a short motif and come back to it, and its rhythm, more
@@ -52,6 +59,17 @@ const QUEUE: usize = 32;
 fn frames(rate: u32, seconds: f32) -> u64 {
     (seconds.max(0.0) * rate as f32) as u64
 }
+
+/// How far energy is past Declarative: 0 up to it, 1 at Vibrant.
+fn drive(settings: &AmbienceSettings) -> f32 {
+    ((settings.energy - 0.65) / 0.25).clamp(0.0, 1.0)
+}
+
+/// From this energy the pad adds a seventh and the strings a fifth.
+const FULLER: f32 = 0.6;
+
+/// From this energy the pad adds a ninth as well.
+const FULLEST: f32 = 0.85;
 
 /// The most notes a motif holds.
 const MOTIF: usize = 8;
@@ -151,7 +169,7 @@ pub struct Composer {
     chord: i32,
     sus: i32,
     next_harmony: u64,
-    /// Where Declarative presence is in its cadence.
+    /// Where the pulse is in its cadence.
     cadence_step: usize,
     /// The drone's last note, so it is only retuned on a change.
     drone_midi: Option<u8>,
@@ -179,7 +197,7 @@ fn open_chord(settings: &AmbienceSettings, chord: i32) -> i32 {
     }
 }
 
-/// Declarative presence walks this, a chord every two bars: I IV V I,
+/// On the pulse the harmony walks this, a chord every two bars: I IV V I,
 /// then VI IV V I.
 const CADENCE: [i32; 8] = [0, 3, 4, 0, 5, 3, 4, 0];
 
@@ -259,7 +277,7 @@ impl Composer {
     /// How long the harmony stays put: in free time, longer as variety
     /// falls.
     fn harmony_span(&mut self, settings: &AmbienceSettings) -> u64 {
-        if settings.presence.pulsed() {
+        if settings.pulsed() {
             self.beat(settings) * 8
         } else {
             let seconds = self.rng.range(18.0, 45.0) * (1.6 - 1.2 * settings.variety);
@@ -270,6 +288,13 @@ impl Composer {
     /// True with `probability`, drawing nothing when it is 0 or less.
     fn maybe(&mut self, probability: f32) -> bool {
         probability > 0.0 && self.rng.chance(probability)
+    }
+
+    /// A velocity in `low..high`, played harder with energy above Ambient
+    /// and softer below.
+    fn velocity(&mut self, settings: &AmbienceSettings, low: f32, high: f32) -> f32 {
+        let lift = 0.3 * (settings.energy - super::DEFAULT_ENERGY);
+        (self.rng.range(low, high) + lift).clamp(0.05, 1.0)
     }
 
     /// The gain the instruments play at now: 1, or less as a piece closes.
@@ -412,7 +437,7 @@ impl Composer {
         if now < self.next_harmony {
             return;
         }
-        self.chord = if settings.presence.pulsed() {
+        self.chord = if settings.pulsed() {
             self.cadence_step = (self.cadence_step + 1) % CADENCE.len();
             let mut chord = CADENCE[self.cadence_step];
             // Variety stands in the supertonic, submediant or mediant now
@@ -520,7 +545,7 @@ impl Composer {
         while self.next[index] < to && guard < 8 {
             guard += 1;
             let mut at = self.next[index].max(from);
-            if settings.presence.pulsed() {
+            if settings.pulsed() {
                 at = self.on_pulse(settings, at, instrument);
             }
             let spacing = settings.spacing(instrument) * thinning;
@@ -548,7 +573,7 @@ impl Composer {
             // Chaos loosens free time: a note early or late. The pad keeps
             // to the harmony.
             let chaos = settings.chaos;
-            if instrument != Instrument::Pad && !settings.presence.pulsed() && self.maybe(chaos) {
+            if instrument != Instrument::Pad && !settings.pulsed() && self.maybe(chaos) {
                 let stretch = self.rng.range(1.0 - 0.6 * chaos, 1.0 + 0.6 * chaos);
                 next_gap = (next_gap as f32 * stretch) as u64;
             }
@@ -576,7 +601,7 @@ impl Composer {
     /// How long after a note its answer comes: half a beat on the pulse,
     /// else a moment.
     fn answer(&mut self, settings: &AmbienceSettings, low: f32, high: f32) -> u64 {
-        if settings.presence.pulsed() {
+        if settings.pulsed() {
             (self.beat(settings) / 2).max(1)
         } else {
             frames(self.rate, self.rng.range(low, high))
@@ -723,21 +748,45 @@ impl Composer {
         if self.maybe(settings.chaos * 0.3) {
             midi = settings.note(Instrument::Bass, self.chord) + 6;
         }
-        let velocity = self.rng.range(0.55, 0.95);
+        let velocity = self.velocity(settings, 0.55, 0.95);
         let pan = self.rng.range(-0.15, 0.15);
         self.note(at, Instrument::Bass, midi, velocity, pan, 0);
+        // Driven, it answers itself on the fifth or the octave.
+        if self.maybe(0.5 * drive(settings)) {
+            let above = if self.rng.chance(0.5) {
+                4
+            } else {
+                settings.scale.degrees()
+            };
+            let answer = settings.note(Instrument::Bass, self.chord + above);
+            let later = at + self.answer(settings, 0.3, 0.5);
+            self.note(later, Instrument::Bass, answer, velocity * 0.8, pan, 0);
+        }
         frames(self.rate, spacing * self.gap_factor(settings, 0.55, 1.6))
     }
 
     /// Mostly the chord's tones, else a small step; now and then a short
-    /// rising phrase, more often with variety.
+    /// rising phrase, more often with variety. Driven, the phrases are
+    /// longer, more often, and run up the chord's tones.
     fn harp(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
         let third = self.third(settings);
+        let drive = drive(settings);
         let mut line = self.harp;
         if self.phrase_left > 0 {
             let (low, high) = span(settings.concentration, len);
-            line.degree = (line.degree + 1 + self.rng.below(2) as i32).clamp(low, high);
+            line.degree = if drive > 0.0 {
+                // The next chord tone up, an octave down again at the top.
+                let tones = [0, third, 4];
+                let mut degree = line.degree + 1;
+                while !tones.contains(&(degree - self.chord).rem_euclid(len)) {
+                    degree += 1;
+                }
+                if degree > high { degree - len } else { degree }
+            } else {
+                line.degree + 1 + self.rng.below(2) as i32
+            }
+            .clamp(low, high);
         } else {
             let shape = Shape {
                 chord: 0.6,
@@ -748,15 +797,22 @@ impl Composer {
         }
         let midi = settings.note(Instrument::Harp, line.degree);
         let midi = self.unsettle(settings, midi, 0.4);
-        let velocity = self.rng.range(0.35, 0.8);
+        let velocity = self.velocity(settings, 0.35, 0.8);
         let pan = self.rng.range(-0.65, 0.65);
         self.note(at, Instrument::Harp, midi, velocity, pan, 0);
         let gap = if self.phrase_left > 0 {
             self.phrase_left -= 1;
-            frames(self.rate, self.rng.range(0.13, 0.24))
-        } else if self.rng.chance(0.22 * spread(settings.variety)) {
-            self.phrase_left = 1 + self.rng.below(2) as u8;
-            frames(self.rate, self.rng.range(0.13, 0.24))
+            self.answer(settings, 0.13, 0.24)
+        } else if self
+            .rng
+            .chance(0.22 * spread(settings.variety) + 0.5 * drive)
+        {
+            self.phrase_left = if drive > 0.0 {
+                2 + self.rng.below(3) as u8
+            } else {
+                1 + self.rng.below(2) as u8
+            };
+            self.answer(settings, 0.13, 0.24)
         } else {
             self.line_gap(settings, &mut line, spacing, 0.5, 1.7)
         };
@@ -777,14 +833,15 @@ impl Composer {
         };
         let midi = settings.note(Instrument::Bells, degree);
         let midi = self.unsettle(settings, midi, 0.4);
-        let velocity = self.rng.range(0.3, 0.7);
+        let velocity = self.velocity(settings, 0.3, 0.7);
         let pan = self.rng.range(-0.7, 0.7);
         self.note(at, Instrument::Bells, midi, velocity, pan, 0);
         frames(self.rate, spacing * self.gap_factor(settings, 0.4, 2.0))
     }
 
     /// One long bowed note at a time: the chord's root, third or fifth;
-    /// the home note more often with concentration.
+    /// the home note more often with concentration. Fuller, now and then
+    /// a fifth above it as well; driven, shorter.
     fn strings(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let degree = if self.maybe(settings.concentration - 0.5) {
             0
@@ -793,18 +850,24 @@ impl Composer {
         };
         let midi = settings.note(Instrument::Strings, degree);
         let midi = self.unsettle(settings, midi, 0.25);
-        let seconds = self.rng.range(4.0, 9.0);
+        let seconds = self.rng.range(4.0, 9.0) * (1.0 - 0.5 * drive(settings));
         let duration = frames(self.rate, seconds);
-        let velocity = self.rng.range(0.4, 0.8);
+        let velocity = self.velocity(settings, 0.4, 0.8);
         let pan = self.rng.range(-0.3, 0.3);
         self.note(at, Instrument::Strings, midi, velocity, pan, duration);
+        if settings.energy >= FULLER && self.maybe(0.4) {
+            let fifth = settings.note(Instrument::Strings, degree + 4);
+            let velocity = velocity * 0.8;
+            self.note(at, Instrument::Strings, fifth, velocity, -pan, duration);
+        }
         let factor = self.gap_factor(settings, 0.8, 1.3);
         frames(self.rate, (seconds * factor).max(spacing * 0.5))
     }
 
     /// A struck note, mostly a chord tone, else a step from the last; a
     /// third or a sixth below it now and then, softer, or with chaos a
-    /// second or a tritone.
+    /// second or a tritone. Driven, closer together, and now and then a
+    /// chord beneath.
     fn piano(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
         let third = self.third(settings);
@@ -817,10 +880,20 @@ impl Composer {
         let degree = self.melody(settings, &mut line, &shape);
         let midi = settings.note(Instrument::Piano, degree);
         let midi = self.unsettle(settings, midi, 0.35);
-        let velocity = self.rng.range(0.3, 0.65);
+        let velocity = self.velocity(settings, 0.3, 0.65);
         let pan = self.rng.range(-0.35, 0.35);
         self.note(at, Instrument::Piano, midi, velocity, pan, 0);
-        if self.rng.chance(0.3) {
+        let drive = drive(settings);
+        if self.maybe(0.5 * drive) {
+            // A chord beneath: a third and a fifth below; suspended, a
+            // fourth and a fifth.
+            let below = if settings.suspended { 3 } else { 2 };
+            for (i, below) in [below, 4].into_iter().enumerate() {
+                let low = settings.note(Instrument::Piano, degree - below);
+                let pan = pan - 0.1 + 0.2 * i as f32;
+                self.note(at, Instrument::Piano, low, velocity * 0.6, pan, 0);
+            }
+        } else if self.rng.chance(0.3) {
             let low = if self.maybe(settings.chaos * 0.7) {
                 midi.saturating_sub([1, 2, 6][self.rng.below(3) as usize])
             } else {
@@ -831,7 +904,8 @@ impl Composer {
             };
             self.note(at, Instrument::Piano, low, velocity * 0.7, pan - 0.1, 0);
         }
-        let gap = self.line_gap(settings, &mut line, spacing, 0.5, 1.7);
+        let (low, high) = (0.5 - 0.2 * drive, 1.7 - 0.9 * drive);
+        let gap = self.line_gap(settings, &mut line, spacing, low, high);
         self.piano = line;
         gap
     }
@@ -850,10 +924,10 @@ impl Composer {
         let degree = self.melody(settings, &mut line, &shape);
         let midi = settings.note(Instrument::Violin, degree);
         let midi = self.unsettle(settings, midi, 0.45);
-        let velocity = self.rng.range(0.35, 0.7);
+        let velocity = self.velocity(settings, 0.35, 0.7);
         let pan = self.rng.range(-0.5, 0.5);
         self.note(at, Instrument::Violin, midi, velocity, pan, 0);
-        if self.rng.chance(0.25) {
+        if self.rng.chance(0.25 + 0.4 * drive(settings)) {
             let step = if self.rng.chance(0.5) { 1 } else { -1 };
             let answer = settings.note(Instrument::Violin, (degree + step).max(0));
             let answer = self.unsettle(settings, answer, 0.45);
@@ -866,38 +940,68 @@ impl Composer {
     }
 
     /// A soft frame drum on the root, or a shaker; now and then two
-    /// together, the second half a beat later.
+    /// together, the second half a beat later. Driven, more often, and
+    /// now and then a third another half beat on.
     fn drums(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
+        let drive = drive(settings);
         let pan = self.rng.range(-0.3, 0.3);
         if self.rng.chance(0.55) {
             let midi = settings.note(Instrument::Drums, 0);
-            let velocity = self.rng.range(0.4, 0.75);
+            let velocity = self.velocity(settings, 0.4, 0.75);
             self.note(at, Instrument::Drums, midi, velocity, pan, 0);
         } else {
-            let velocity = self.rng.range(0.25, 0.5);
+            let velocity = self.velocity(settings, 0.25, 0.5);
             self.note(at, Instrument::Drums, SHAKER, velocity, pan * 2.0, 0);
         }
-        if self.rng.chance(0.3) {
-            let later = at + self.answer(settings, 0.3, 0.5);
-            let velocity = self.rng.range(0.2, 0.4);
-            self.note(later, Instrument::Drums, SHAKER, velocity, -pan, 0);
+        if self.rng.chance(0.3 + 0.5 * drive) {
+            let answer = self.answer(settings, 0.3, 0.5);
+            let velocity = self.velocity(settings, 0.2, 0.4);
+            self.note(at + answer, Instrument::Drums, SHAKER, velocity, -pan, 0);
+            if self.maybe(0.5 * drive) {
+                let velocity = velocity * 0.6;
+                self.note(at + 2 * answer, Instrument::Drums, SHAKER, velocity, pan, 0);
+            }
         }
         frames(self.rate, spacing * self.gap_factor(settings, 0.7, 1.8))
     }
 
-    /// The chord as three slow notes, a little staggered; with chaos, a
-    /// note bent off now and then and a fourth that rubs against them: the
-    /// second, or at high chaos a semitone above the root.
+    /// The chord as three slow notes, a little staggered; fuller, the
+    /// seventh too, and fullest the ninth (suspended, the octave and the
+    /// fifth above it, so no third creeps in); with chaos, a note bent off now
+    /// and then and a fourth that rubs against them: the second, or at high
+    /// chaos a semitone above the root. Driven, held more briefly, never
+    /// past the next chord.
     fn pad(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
-        let seconds = self.rng.range(12.0, 22.0);
+        let drive = drive(settings);
+        let mut seconds = self.rng.range(12.0, 22.0) * (1.0 - 0.5 * drive);
+        if drive > 0.0 {
+            let until = self.next_harmony.saturating_sub(at) as f32 / self.rate as f32;
+            seconds = seconds.min(until + 1.0);
+        }
         let duration = frames(self.rate, seconds);
-        let velocity = self.rng.range(0.5, 0.7);
+        let velocity = self.velocity(settings, 0.5, 0.7);
         for (i, tone) in [0, self.third(settings), 4].into_iter().enumerate() {
             let midi = settings.note(Instrument::Pad, self.chord + tone);
             let midi = self.unsettle(settings, midi, 0.2);
             let stagger = frames(self.rate, 0.35 * i as f32);
             let pan = (i as f32 - 1.0) * 0.4;
             self.note(at + stagger, Instrument::Pad, midi, velocity, pan, duration);
+        }
+        let len = settings.scale.degrees();
+        let (fuller, fullest) = if settings.suspended {
+            (len, len + 4)
+        } else {
+            (len - 1, len + 1)
+        };
+        let colours = [(FULLER, fuller, 0.7, 0.85), (FULLEST, fullest, 1.4, 0.7)];
+        for (energy, tone, after, softer) in colours {
+            // In a pentatonic scale the seventh would be the chord's top.
+            if settings.energy >= energy && tone != 4 {
+                let midi = settings.note(Instrument::Pad, self.chord + tone);
+                let stagger = frames(self.rate, after);
+                let velocity = velocity * softer;
+                self.note(at + stagger, Instrument::Pad, midi, velocity, 0.0, duration);
+            }
         }
         if self.maybe(settings.chaos * 0.8) {
             let midi = if self.maybe(settings.chaos - 0.5) {
@@ -1019,7 +1123,7 @@ mod tests {
         let count = |presence, density| {
             let mut settings = Style::RainStudy.settings();
             settings.enabled = true;
-            settings.presence = presence;
+            settings.set_presence(presence);
             for layer in &mut settings.layers {
                 layer.density = density;
             }
@@ -1029,7 +1133,9 @@ mod tests {
         let ambient = count(Presence::Ambient, Density::SPARSE);
         let lively = count(Presence::Ambient, Density::LIVELY);
         let declarative = count(Presence::Declarative, Density::LIVELY);
+        let vibrant = count(Presence::Vibrant, Density::LIVELY);
         assert!(background < ambient && ambient < lively && lively < declarative);
+        assert!(declarative < vibrant);
         assert!(background * 3 < declarative);
     }
 
@@ -1052,8 +1158,9 @@ mod tests {
     }
 
     #[test]
-    fn declarative_presence_keeps_a_pulse_and_walks_its_cadence() {
+    fn declarative_energy_keeps_a_pulse_and_walks_its_cadence() {
         let mut settings = Style::Affirmation.settings();
+        assert_eq!(settings.presence(), Some(Presence::Declarative));
         settings.enabled = true;
         settings.form = Form::Endless;
         settings.tempo = 60;
@@ -1131,7 +1238,7 @@ mod tests {
         settings.enabled = true;
         let events = play(&settings, 4, 3);
         let drums = of(&events, Instrument::Drums);
-        // Sparse, at the Ambient presence: a hit every ten seconds or more.
+        // Sparse, at Ambient energy: a hit every ten seconds or more.
         assert!(
             (3..=40).contains(&drums.len()),
             "{} hits in three minutes",
@@ -1142,6 +1249,62 @@ mod tests {
             drums.iter().any(|e| e.at % (beat / 2) != 0),
             "free time, not on a grid"
         );
+    }
+
+    #[test]
+    fn vibrant_energy_plays_harder_fuller_and_runs_up_the_chords() {
+        let at = |presence: Presence| {
+            let mut settings = Style::OpenRoad.settings();
+            settings.enabled = true;
+            settings.set_presence(presence);
+            *settings.layer_mut(Instrument::Harp) = Layer::on(0.7, Density::LIVELY);
+            *settings.layer_mut(Instrument::Pad) = Layer::on(0.6, Density::OCCASIONAL);
+            (settings, play(&settings, 7, 3))
+        };
+        let (ambient, quiet) = at(Presence::Ambient);
+        let (vibrant, lively) = at(Presence::Vibrant);
+        let mean = |events: &[Event]| {
+            events.iter().map(|e| e.note.velocity).sum::<f32>() / events.len() as f32
+        };
+        assert!(mean(&lively) > mean(&quiet) + 0.1, "played harder");
+        assert!(lively.len() > quiet.len() * 2, "more notes");
+
+        // The pad's chords: three notes at Ambient, five at Vibrant.
+        let voicing = |events: &[Event]| {
+            let pads = of(events, Instrument::Pad);
+            let first = pads[0].at;
+            pads.iter().filter(|e| e.at < first + 48_000 * 2).count()
+        };
+        assert_eq!(voicing(&quiet), 3);
+        assert_eq!(voicing(&lively), 5);
+
+        // The harp runs up the chord: three or more rising notes in a row,
+        // half a beat apart.
+        let half = 48_000 * 60 / u64::from(vibrant.tempo) / 2;
+        let harp = of(&lively, Instrument::Harp);
+        let runs = harp
+            .windows(3)
+            .filter(|w| {
+                w[0].note.midi < w[1].note.midi
+                    && w[1].note.midi < w[2].note.midi
+                    && w[1].at - w[0].at == half
+                    && w[2].at - w[1].at == half
+            })
+            .count();
+        assert!(runs >= 3, "{runs} runs");
+        // Still on the pulse, the bass's answers on the half beat.
+        for event in lively
+            .iter()
+            .filter(|e| e.note.instrument != Instrument::Pad)
+        {
+            assert_eq!(
+                event.at % half,
+                0,
+                "{:?} off the pulse",
+                event.note.instrument
+            );
+        }
+        assert!(!ambient.pulsed() && vibrant.pulsed());
     }
 
     /// The piano alone, lively, at a character; its main notes (not the
@@ -1296,7 +1459,7 @@ mod tests {
             let mut settings = Style::RainStudy.settings();
             settings.enabled = true;
             settings.scale = Scale { root, kind };
-            settings.presence = presence;
+            settings.set_presence(presence);
             settings.suspended = suspended;
             for layer in &mut settings.layers {
                 *layer = Layer::on(0.8, Density::LIVELY);
@@ -1311,21 +1474,21 @@ mod tests {
                     matches!(class, 3 | 4)
                 })
                 .count();
-            // Pad chords (their notes held alike) with a third or a sixth
-            // between two notes.
-            let mut chords: Vec<(u64, Vec<u8>)> = Vec::new();
+            // Pad chords (their notes held alike, begun within two
+            // seconds) with a third or a sixth between two notes.
+            let mut chords: Vec<(u64, u64, Vec<u8>)> = Vec::new();
             for pad in of(&events, Instrument::Pad) {
                 match chords
                     .iter_mut()
-                    .find(|(held, _)| *held == pad.note.duration)
+                    .find(|(held, start, _)| *held == pad.note.duration && pad.at - *start < 96_000)
                 {
-                    Some((_, chord)) => chord.push(pad.note.midi),
-                    None => chords.push((pad.note.duration, vec![pad.note.midi])),
+                    Some((_, _, chord)) => chord.push(pad.note.midi),
+                    None => chords.push((pad.note.duration, pad.at, vec![pad.note.midi])),
                 }
             }
             let tertian = chords
                 .iter()
-                .filter(|(_, chord)| {
+                .filter(|(_, _, chord)| {
                     chord.iter().any(|a| {
                         chord
                             .iter()
@@ -1341,6 +1504,7 @@ mod tests {
             (9, ScaleKind::Mode(Mode::Aeolian), Presence::Ambient),
             (0, ScaleKind::Mode(Mode::Ionian), Presence::Declarative),
             (4, ScaleKind::MinorPentatonic, Presence::Ambient),
+            (7, ScaleKind::Mode(Mode::Mixolydian), Presence::Vibrant),
         ] {
             let (thirds, tertian, chords) = check(root, kind, presence, true);
             assert_eq!(thirds, 0, "{kind:?}: no note on the third");

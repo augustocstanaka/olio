@@ -960,7 +960,7 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
     open_generator(&mut harness);
     harness.get_by_label("Generate Track");
     // The essentials only, to begin with.
-    assert_eq!(harness.query_all_by_label("Declarative").count(), 0);
+    assert_eq!(harness.query_all_by_label("Pieces").count(), 0);
 
     pick_style(&mut harness, "Cathedral");
     let settings = harness.state().preferences().ambience;
@@ -995,13 +995,42 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
         harness.query_all_by_label("Middle").count() >= 2,
         "a register each"
     );
-    click_in_generator(&mut harness, "Declarative");
-    harness.get_by_label("Pulse");
     click_in_generator(&mut harness, "Pieces");
     assert!(matches!(
         harness.state().preferences().ambience.form,
         Form::Piece { .. }
     ));
+}
+
+#[test]
+fn energy_turns_the_music_up_from_barely_there_to_vibrant() {
+    use olio_audio::ambience::Presence;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    let energy = |harness: &Harness<'static, OlioApp>| harness.state().preferences().ambience;
+    assert_eq!(energy(&harness).presence(), Some(Presence::Ambient));
+    // An essential, with no pulse at Ambient.
+    assert_eq!(harness.query_all_by_label("Pulse").count(), 0);
+
+    click_in_generator(&mut harness, "Vibrant");
+    let settings = energy(&harness);
+    assert_eq!(settings.presence(), Some(Presence::Vibrant));
+    assert_eq!(settings.style, None, "turned up, it is Custom");
+    harness.get_by_label("Pulse");
+
+    set_slider(&mut harness, "Energy", 20.0);
+    let settings = energy(&harness);
+    assert!((settings.energy - 0.2).abs() < 0.01, "{}", settings.energy);
+    assert_eq!(settings.presence(), None);
+    assert_eq!(harness.query_all_by_label("Pulse").count(), 0);
+
+    // A lively style turns it up by itself.
+    pick_style(&mut harness, "Open Road");
+    let settings = energy(&harness);
+    assert_eq!(settings.presence(), Some(Presence::Vibrant));
+    assert!(settings.pulsed());
+    harness.get_by_label("Pulse");
 }
 
 /// Sets the slider named `name` to `value`, as a screen reader would.

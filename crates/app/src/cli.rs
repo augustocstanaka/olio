@@ -168,8 +168,8 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut styles: Vec<Style> = Style::ALL.to_vec();
     let mut seconds = 30.0f32;
     let mut seed = None;
-    // Variety, concentration and chaos, in percent, when asked for.
-    let mut character: [Option<f32>; 3] = [None; 3];
+    // Variety, concentration, chaos and energy, in percent, when asked for.
+    let mut character: [Option<f32>; 4] = [None; 4];
     let mut journey = None;
     let mut synthesised = false;
     let mut out = PathBuf::from("previews");
@@ -206,11 +206,12 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                         .ok_or("--seed needs a whole number")?,
                 );
             }
-            "--variety" | "--concentration" | "--chaos" => {
+            "--variety" | "--concentration" | "--chaos" | "--energy" => {
                 let index = match arg.as_str() {
                     "--variety" => 0,
                     "--concentration" => 1,
-                    _ => 2,
+                    "--chaos" => 2,
+                    _ => 3,
                 };
                 character[index] = Some(
                     args.next()
@@ -252,6 +253,7 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             ("variety", &mut settings.variety),
             ("concentration", &mut settings.concentration),
             ("chaos", &mut settings.chaos),
+            ("energy", &mut settings.energy),
         ];
         for ((name, field), percent) in fields.into_iter().zip(character) {
             if let Some(percent) = percent {
@@ -319,6 +321,8 @@ mod tests {
             "20",
             "--chaos",
             "90",
+            "--energy",
+            "90",
             "--journey",
             "evolve",
             "--out",
@@ -327,13 +331,15 @@ mod tests {
         assert_eq!(generate(args.iter().map(|arg| (*arg).to_owned())), 0);
         assert!(
             dir.path()
-                .join("Campfire (variety 20, chaos 90, evolves).wav")
+                .join("Campfire (variety 20, chaos 90, energy 90, evolves).wav")
                 .exists()
         );
 
         let unknown = ["--style", "Polka"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(unknown), 2);
         let wild = ["--chaos", "150"].iter().map(|arg| (*arg).to_owned());
+        assert_eq!(generate(wild), 2);
+        let wild = ["--energy", "200"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(wild), 2);
         let wandering = ["--journey", "wander"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(wandering), 2);

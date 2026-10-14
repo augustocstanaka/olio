@@ -7,7 +7,8 @@
 //!
 //! The settings are built from independent parts, so each can grow on its
 //! own: the [`Scale`], the [`Layer`]s (one per [`Instrument`]), the
-//! [`Presence`] (how noticeable it is), the [`Form`] (endless, or pieces
+//! energy (how much there is of the music, with [`Presence`] naming
+//! places on it), the [`Form`] (endless, or pieces
 //! with a shape), the character (variety, concentration and chaos), the
 //! [`Journey`] (steady, building up, or evolving over time), and
 //! [`Style`] presets that fill them all in.
@@ -670,9 +671,12 @@ impl<'de> Deserialize<'de> for Layers {
     }
 }
 
-// ----- presence and form ---------------------------------------------------
+// ----- energy and form -----------------------------------------------------
 
-/// How noticeable the bed is.
+/// How much there is of the music, from barely there to lively and full:
+/// its level, how many notes, whether they keep a pulse, how full the
+/// chords and lines are. An amount from 0 to 1 in the settings; these
+/// name four places on it, the way a [`Mood`] names a character.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Presence {
     /// Barely there: very quiet, very sparse, no pulse.
@@ -681,16 +685,25 @@ pub enum Presence {
     Ambient,
     /// Music to notice: louder, denser, on a slow pulse, with cadences.
     Declarative,
+    /// Lively and full: louder still, brisk lines on a pulse, the harp
+    /// running up the chords, fuller chords, chords changing sooner.
+    Vibrant,
 }
 
 impl Presence {
-    pub const ALL: [Self; 3] = [Self::Background, Self::Ambient, Self::Declarative];
+    pub const ALL: [Self; 4] = [
+        Self::Background,
+        Self::Ambient,
+        Self::Declarative,
+        Self::Vibrant,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Background => "Background",
             Self::Ambient => "Ambient",
             Self::Declarative => "Declarative",
+            Self::Vibrant => "Vibrant",
         }
     }
 
@@ -699,29 +712,64 @@ impl Presence {
             Self::Background => "barely there: very quiet and sparse, no pulse",
             Self::Ambient => "a quiet bed with a little movement",
             Self::Declarative => "music to notice: louder, denser, on a slow pulse, with cadences",
+            Self::Vibrant => {
+                "lively and full: brisk lines on a pulse, arpeggios, fuller chords changing sooner"
+            }
         }
     }
 
-    /// Level and spacing multipliers.
-    fn level(self) -> f32 {
+    /// Where it sits on the energy amount.
+    pub fn energy(self) -> f32 {
         match self {
-            Self::Background => 0.45,
-            Self::Ambient => 1.0,
-            Self::Declarative => 1.6,
+            Self::Background => 0.1,
+            Self::Ambient => DEFAULT_ENERGY,
+            Self::Declarative => 0.65,
+            Self::Vibrant => 0.9,
         }
     }
 
-    fn spacing(self) -> f32 {
-        match self {
-            Self::Background => 1.9,
-            Self::Ambient => 1.0,
-            Self::Declarative => 0.6,
+    /// The name nearest an energy amount.
+    pub fn nearest(energy: f32) -> Self {
+        match energy {
+            e if e < 0.22 => Self::Background,
+            e if e < PULSE_ENERGY => Self::Ambient,
+            e if e < 0.78 => Self::Declarative,
+            _ => Self::Vibrant,
         }
     }
+}
 
-    pub fn pulsed(self) -> bool {
-        self == Self::Declarative
+/// Where energy sits unless moved: Ambient.
+pub const DEFAULT_ENERGY: f32 = 0.35;
+
+/// From this energy up the notes keep a pulse.
+pub const PULSE_ENERGY: f32 = 0.5;
+
+/// A value along a curve through the four named energies, straight
+/// between them and flat past the ends.
+fn ramp(energy: f32, through: [f32; 4]) -> f32 {
+    let points = Presence::ALL.map(Presence::energy);
+    if energy <= points[0] {
+        return through[0];
     }
+    for i in 1..4 {
+        if energy <= points[i] {
+            let t = (energy - points[i - 1]) / (points[i] - points[i - 1]);
+            return through[i - 1] + (through[i] - through[i - 1]) * t;
+        }
+    }
+    through[3]
+}
+
+/// The whole bed's gain at an energy: quieter at Background, up to
+/// twice Ambient at Vibrant.
+fn energy_level(energy: f32) -> f32 {
+    ramp(energy, [0.45, 1.0, 1.6, 2.0])
+}
+
+/// How far apart the notes are at an energy, against Ambient.
+fn energy_spacing(energy: f32) -> f32 {
+    ramp(energy, [1.9, 1.0, 0.6, 0.4])
 }
 
 /// A named character: where Variety, Concentration and Chaos sit
@@ -812,7 +860,7 @@ pub const DEFAULT_VARIETY: f32 = 0.5;
 pub const DEFAULT_CONCENTRATION: f32 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, from = "SavedSettings")]
 pub struct AmbienceSettings {
     pub enabled: bool,
     /// The preset these came from, if untouched since.
@@ -823,7 +871,10 @@ pub struct AmbienceSettings {
     pub background: Background,
     /// One per [`Instrument`].
     pub layers: Layers,
-    pub presence: Presence,
+    /// 0 to 1: how much there is of the music. Its level, how many
+    /// notes, whether they keep a pulse (from [`PULSE_ENERGY`]), how full
+    /// the chords and lines are; [`Presence`] names four places on it.
+    pub energy: f32,
     /// Beats per minute of the pulse, when there is one.
     pub tempo: u16,
     pub form: Form,
@@ -863,6 +914,89 @@ impl Default for AmbienceSettings {
     }
 }
 
+/// The settings as saved: with a presence, before energy was an amount.
+#[derive(Deserialize)]
+#[serde(default)]
+struct SavedSettings {
+    enabled: bool,
+    style: Option<Style>,
+    scale: Scale,
+    #[serde(alias = "weather")]
+    background: Background,
+    layers: Layers,
+    presence: Presence,
+    energy: f32,
+    tempo: u16,
+    form: Form,
+    journey: Journey,
+    suspended: bool,
+    variety: f32,
+    concentration: f32,
+    chaos: f32,
+    level: f32,
+    background_level: f32,
+    instruments_level: f32,
+    duck: bool,
+    seed: u64,
+}
+
+impl Default for SavedSettings {
+    fn default() -> Self {
+        let settings = AmbienceSettings::default();
+        Self {
+            enabled: settings.enabled,
+            style: settings.style,
+            scale: settings.scale,
+            background: settings.background,
+            layers: settings.layers,
+            presence: Presence::Ambient,
+            energy: f32::NAN,
+            tempo: settings.tempo,
+            form: settings.form,
+            journey: settings.journey,
+            suspended: settings.suspended,
+            variety: settings.variety,
+            concentration: settings.concentration,
+            chaos: settings.chaos,
+            level: settings.level,
+            background_level: settings.background_level,
+            instruments_level: settings.instruments_level,
+            duck: settings.duck,
+            seed: settings.seed,
+        }
+    }
+}
+
+impl From<SavedSettings> for AmbienceSettings {
+    fn from(saved: SavedSettings) -> Self {
+        let energy = if saved.energy.is_finite() {
+            saved.energy
+        } else {
+            saved.presence.energy()
+        };
+        Self {
+            enabled: saved.enabled,
+            style: saved.style,
+            scale: saved.scale,
+            background: saved.background,
+            layers: saved.layers,
+            energy,
+            tempo: saved.tempo,
+            form: saved.form,
+            journey: saved.journey,
+            suspended: saved.suspended,
+            variety: saved.variety,
+            concentration: saved.concentration,
+            chaos: saved.chaos,
+            level: saved.level,
+            background_level: saved.background_level,
+            instruments_level: saved.instruments_level,
+            duck: saved.duck,
+            seed: saved.seed,
+        }
+    }
+}
+
 impl AmbienceSettings {
     /// The settings with every value in range.
     pub fn clamped(mut self) -> Self {
@@ -877,6 +1011,7 @@ impl AmbienceSettings {
         self.level = unit(self.level, 0.35);
         self.background_level = unit(self.background_level, DEFAULT_PART_LEVEL);
         self.instruments_level = unit(self.instruments_level, DEFAULT_PART_LEVEL);
+        self.energy = unit(self.energy, DEFAULT_ENERGY);
         self.variety = unit(self.variety, DEFAULT_VARIETY);
         self.concentration = unit(self.concentration, DEFAULT_CONCENTRATION);
         self.chaos = unit(self.chaos, 0.0);
@@ -919,6 +1054,22 @@ impl AmbienceSettings {
         (self.variety, self.concentration, self.chaos) = mood.character();
     }
 
+    /// The named energy the amount is at, if it is at one.
+    pub fn presence(&self) -> Option<Presence> {
+        Presence::ALL
+            .into_iter()
+            .find(|presence| (self.energy - presence.energy()).abs() < 0.005)
+    }
+
+    pub fn set_presence(&mut self, presence: Presence) {
+        self.energy = presence.energy();
+    }
+
+    /// True when the notes keep a pulse at this energy.
+    pub fn pulsed(&self) -> bool {
+        self.energy >= PULSE_ENERGY
+    }
+
     /// True when the music is the same: everything but whether it plays,
     /// how it changes over time, the variation and the style it came from.
     /// Those are how a style is played, not what it is.
@@ -950,7 +1101,7 @@ impl AmbienceSettings {
 
     /// Seconds between a layer's notes at these settings, typically.
     pub fn spacing(&self, instrument: Instrument) -> f32 {
-        instrument.spacing() * self.layer(instrument).density.factor() * self.presence.spacing()
+        instrument.spacing() * self.layer(instrument).density.factor() * energy_spacing(self.energy)
     }
 
     /// The MIDI note of a scale degree in a layer's register. Suspended,
@@ -980,6 +1131,8 @@ impl AmbienceSettings {
 /// a control makes the settings Custom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Style {
+    OpenRoad,
+    SpringDance,
     WinterHush,
     RainStudy,
     Cathedral,
@@ -994,7 +1147,7 @@ pub enum Style {
 }
 
 impl Style {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::RainStudy,
         Self::WinterHush,
         Self::NightDrift,
@@ -1006,6 +1159,8 @@ impl Style {
         Self::Campfire,
         Self::DesertNight,
         Self::StormWatch,
+        Self::OpenRoad,
+        Self::SpringDance,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1021,6 +1176,8 @@ impl Style {
             Self::Campfire => "Campfire",
             Self::DesertNight => "Desert Night",
             Self::StormWatch => "Storm Watch",
+            Self::OpenRoad => "Open Road",
+            Self::SpringDance => "Spring Dance",
         }
     }
 
@@ -1037,6 +1194,8 @@ impl Style {
             Self::Campfire => "a crackling fire, plucked violin, a bass string, a soft drum",
             Self::DesertNight => "a dry wind, a drone, a few piano notes and a shaker in Phrygian",
             Self::StormWatch => "distant thunder, slow strings and a drone in harmonic minor",
+            Self::OpenRoad => "no background; piano, bass, strings and a drum on a brisk pulse",
+            Self::SpringDance => "birds, a harp running up the chords, violin, bass and a shaker",
         }
     }
 
@@ -1051,6 +1210,7 @@ impl Style {
             root,
             kind: ScaleKind::Mode(mode),
         };
+        let mut tempo = 60;
         let (scale, background, presence, form, level) = match self {
             Self::RainStudy => {
                 set(Bass, Layer::on(0.8, Density::SPARSE));
@@ -1185,6 +1345,34 @@ impl Style {
                     0.35,
                 )
             }
+            Self::OpenRoad => {
+                set(Piano, Layer::on(0.7, Density::OCCASIONAL));
+                set(Bass, Layer::on(0.8, Density::OCCASIONAL));
+                set(Strings, Layer::on(0.6, Density::SPARSE));
+                set(Drums, Layer::on(0.6, Density::OCCASIONAL));
+                tempo = 96;
+                (
+                    mode(0, Mode::Mixolydian),
+                    Background::None,
+                    Presence::Vibrant,
+                    Form::Endless,
+                    0.45,
+                )
+            }
+            Self::SpringDance => {
+                set(Harp, Layer::on(0.7, Density::LIVELY));
+                set(Violin, Layer::on(0.6, Density::OCCASIONAL));
+                set(Bass, Layer::on(0.7, Density::OCCASIONAL));
+                set(Drums, Layer::on(0.5, Density::OCCASIONAL));
+                tempo = 104;
+                (
+                    mode(2, Mode::Lydian),
+                    Background::Forest,
+                    Presence::Vibrant,
+                    Form::Endless,
+                    0.45,
+                )
+            }
         };
         AmbienceSettings {
             enabled: false,
@@ -1192,8 +1380,8 @@ impl Style {
             scale,
             background,
             layers,
-            presence,
-            tempo: 60,
+            energy: presence.energy(),
+            tempo,
             form,
             journey: Journey::Steady,
             suspended: false,
@@ -1227,7 +1415,7 @@ fn weighted<T: Copy>(rng: &mut Rng, choices: &[(T, f32)]) -> T {
 /// Settings picked at random from what tends to sound well together: a
 /// key (never Locrian, whole tone rarely), a background or none, two to
 /// four instruments with something low or long beneath the rest, a mood
-/// and a presence. Off, endless and steady; the same seed picks the same.
+/// and an energy. Off, endless and steady; the same seed picks the same.
 pub fn surprise(seed: u64) -> AmbienceSettings {
     use Instrument::*;
     let mut rng = Rng::new(seed ^ 0x5DEE_CE66_D1CE_D1CE);
@@ -1271,6 +1459,7 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
             (Presence::Background, 1.0),
             (Presence::Ambient, 3.5),
             (Presence::Declarative, 0.8),
+            (Presence::Vibrant, 0.5),
         ],
     );
 
@@ -1319,10 +1508,10 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
         ],
     );
     let (variety, concentration, chaos) = mood.character();
-    let tempo = if presence.pulsed() {
-        50 + rng.below(23) as u16
-    } else {
-        60
+    let tempo = match presence {
+        Presence::Vibrant => 84 + rng.below(28) as u16,
+        Presence::Declarative => 50 + rng.below(23) as u16,
+        _ => 60,
     };
     AmbienceSettings {
         enabled: false,
@@ -1330,7 +1519,7 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
         scale,
         background,
         layers,
-        presence,
+        energy: presence.energy(),
         tempo,
         form: Form::Endless,
         journey: Journey::Steady,
@@ -1536,7 +1725,7 @@ impl Ambience {
         let level = self.settings.level
             * self.settings.level
             * FULL_LEVEL_GAIN
-            * self.settings.presence.level();
+            * energy_level(self.settings.energy);
         let duck_target = if ducking && self.settings.duck {
             DUCKED
         } else {
@@ -1660,6 +1849,7 @@ mod tests {
         );
         assert_eq!(settings.background_level, DEFAULT_PART_LEVEL);
         assert_eq!(settings.instruments_level, DEFAULT_PART_LEVEL);
+        assert_eq!(settings.energy, DEFAULT_ENERGY, "no presence: Ambient");
         let harp = settings.layer(Instrument::Harp);
         assert!(harp.enabled && harp.register == Register::High);
         assert_eq!(
@@ -1676,9 +1866,20 @@ mod tests {
         let layers: Layers = serde_json::from_str(&format!("[{ten}]")).unwrap();
         assert!(layers.iter().all(|layer| layer.enabled));
 
+        // A presence saved before energy was an amount becomes its place.
+        for presence in [Presence::Background, Presence::Declarative] {
+            let name = presence.name();
+            let old = format!(r#"{{"enabled":true,"presence":"{name}"}}"#);
+            let settings: AmbienceSettings = serde_json::from_str(&old).unwrap();
+            assert_eq!(settings.energy, presence.energy());
+            assert_eq!(settings.presence(), Some(presence));
+        }
+
         let mut settings = Style::Campfire.settings();
         settings.layers[Instrument::Harp].density = Density::new(0.7);
+        settings.energy = 0.8;
         let saved = serde_json::to_string(&settings).unwrap();
+        assert!(saved.contains("\"energy\":0.8") && !saved.contains("presence"));
         assert!(saved.contains("\"background\":\"Fire\""));
         assert!(
             saved.contains("\"notes\":0.7"),
@@ -1706,6 +1907,42 @@ mod tests {
     }
 
     #[test]
+    fn energy_reads_back_its_names_and_turns_everything_up() {
+        let mut settings = Style::RainStudy.settings();
+        assert_eq!(settings.presence(), Some(Presence::Ambient));
+        assert!(!settings.pulsed());
+        for presence in Presence::ALL {
+            settings.set_presence(presence);
+            assert_eq!(settings.presence(), Some(presence));
+            assert_eq!(Presence::nearest(settings.energy), presence);
+            assert_eq!(settings.clamped().presence(), Some(presence));
+        }
+        assert!(settings.pulsed(), "Vibrant keeps a pulse");
+        settings.energy = 0.3;
+        assert_eq!(settings.presence(), None);
+        assert_eq!(Presence::nearest(0.3), Presence::Ambient);
+        // Louder and busier all the way up, without a step.
+        let mut last = (0.0, f32::MAX);
+        for step in 0..=20 {
+            let energy = step as f32 / 20.0;
+            let now = (energy_level(energy), energy_spacing(energy));
+            assert!(now.0 >= last.0 && now.1 <= last.1, "at {energy}");
+            assert!(
+                (now.0 - last.0).abs() < 0.3 || step == 0,
+                "smooth at {energy}"
+            );
+            last = now;
+        }
+        assert_eq!(energy_level(DEFAULT_ENERGY), 1.0, "Ambient as it was");
+        assert_eq!(energy_spacing(DEFAULT_ENERGY), 1.0);
+        for style in [Style::OpenRoad, Style::SpringDance] {
+            let settings = style.settings();
+            assert_eq!(settings.presence(), Some(Presence::Vibrant), "{style:?}");
+            assert!(settings.tempo > 90);
+        }
+    }
+
+    #[test]
     fn the_same_music_ignores_playing_the_variation_and_the_style() {
         let rain = Style::RainStudy.settings();
         let mut other = AmbienceSettings {
@@ -1725,8 +1962,12 @@ mod tests {
     #[test]
     fn a_surprise_is_a_tasteful_handful_and_the_same_seed_picks_the_same() {
         use std::collections::HashSet;
-        let (mut kinds, mut backgrounds, mut instruments) =
-            (HashSet::new(), HashSet::new(), HashSet::new());
+        let (mut kinds, mut backgrounds, mut instruments, mut energies) = (
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+        );
         for seed in 1..500 {
             let settings = surprise(seed);
             assert_eq!(settings, surprise(seed));
@@ -1734,6 +1975,7 @@ mod tests {
             assert_eq!(settings.style, None);
             assert!(!settings.enabled);
             assert!(settings.mood().is_some(), "at a mood");
+            energies.extend(settings.presence());
             let playing: Vec<Instrument> = settings.playing().collect();
             assert!((2..=4).contains(&playing.len()), "{playing:?}");
             assert!(
@@ -1750,6 +1992,7 @@ mod tests {
         assert!(kinds.len() >= 9, "{kinds:?}");
         assert_eq!(backgrounds.len(), Background::ALL.len());
         assert_eq!(instruments.len(), Instrument::COUNT);
+        assert_eq!(energies.len(), Presence::ALL.len(), "every named energy");
         assert_ne!(surprise(1), surprise(2));
     }
 
@@ -1903,12 +2146,16 @@ mod tests {
 
     #[test]
     fn every_instrument_alone_sounds_and_stays_under_the_ceiling() {
-        for instrument in Instrument::ALL {
+        let loudest = [Presence::Declarative, Presence::Vibrant];
+        for (instrument, presence) in Instrument::ALL
+            .into_iter()
+            .flat_map(|instrument| loudest.map(|presence| (instrument, presence)))
+        {
             let mut settings = Style::RainStudy.settings();
             settings.enabled = true;
             settings.background = Background::None;
             settings.level = 1.0;
-            settings.presence = Presence::Declarative;
+            settings.set_presence(presence);
             for layer in &mut settings.layers {
                 layer.enabled = false;
             }
@@ -1919,7 +2166,11 @@ mod tests {
             ambience.render(&mut out, 2, false);
             let peak = out.iter().fold(0.0f32, |p, s| p.max(s.abs()));
             assert!(peak > 0.002, "{} is silent", instrument.name());
-            assert!(peak < 0.6, "{} peaks at {peak}", instrument.name());
+            assert!(
+                peak < 0.6,
+                "{} peaks at {peak}, {presence:?}",
+                instrument.name()
+            );
             assert!(out.iter().all(|s| s.is_finite()));
         }
     }

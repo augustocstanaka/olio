@@ -10,8 +10,8 @@
 //! without opening a window, for scripts (see `docs/BOARD-JSON.md`).
 //!
 //! `olio generate [--style NAME|all] [--seconds N] [--seed N] [--variety
-//! N] [--concentration N] [--chaos N] [--journey NAME] [--synthesised]
-//! [--out DIR]` renders the Generator's styles to WAV files, without a
+//! N] [--concentration N] [--chaos N] [--energy N] [--journey NAME]
+//! [--synthesised] [--out DIR]` renders the Generator's styles to WAV files, without a
 //! window.
 //!
 //! `olio instruments [--from ZIP] [--dir DIR]` downloads and installs the
@@ -49,7 +49,8 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
        olio import [--library DIR] [--set NAME] [--force] PATH...
        olio generate [--style NAME|all] [--seconds N] [--seed N]
                      [--variety N] [--concentration N] [--chaos N]
-                     [--journey steady|build|evolve] [--synthesised]
+                     [--energy N] [--journey steady|build|evolve]
+                     [--synthesised]
                      [--out DIR]
        olio instruments [--from ZIP] [--dir DIR]
 
@@ -73,6 +74,8 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
   --variety N         the character, 0 to 100 percent, in place of the
   --concentration N   style's own; the file name says which were set,
   --chaos N           as in \"Campfire (chaos 90).wav\"
+  --energy N          how much there is of the music, 0 (barely there) to
+                      100 percent (lively and full), in place of the style's
   --journey NAME      steady, build (one instrument at a time) or evolve
                       (builds, then moves on every few minutes)
   --synthesised       synthesised instruments, even where recorded ones
