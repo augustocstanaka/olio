@@ -441,6 +441,11 @@ mod tests {
         assert!(prefs.ambience.enabled);
         assert_eq!(prefs.ambience.background, Background::Winter);
         assert!(prefs.ambience.layer(Instrument::Harp).enabled);
+        assert_eq!(
+            prefs.ambience.layer(Instrument::Harp).density,
+            olio_audio::Density::OCCASIONAL,
+            "saved as a step, read as its amount"
+        );
         assert!(!prefs.ambience.layer(Instrument::Piano).enabled);
         assert!(!prefs.show_generator);
         assert!(!prefs.generator_details, "the essentials first");

@@ -207,6 +207,13 @@ of playing a style, like playing it live: it is kept when another style
 is picked and never makes the settings Custom.
 _Avoid_: progression (that is harmony), automation, arc
 
+**Density**:
+How many notes an instrument plays, from very sparse to busy: the Notes
+slider under its level in the Generator's details. The drone, holding
+one note, has none.
+_Avoid_: rate, frequency, concentration (that is how closely notes keep
+to home)
+
 **Details**:
 The Generator's switch between the essentials (style, mood, journey,
 background, which instruments play) and every setting.

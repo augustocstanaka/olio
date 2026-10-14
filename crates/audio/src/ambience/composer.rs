@@ -927,7 +927,7 @@ mod tests {
             kind: ScaleKind::Mode(Mode::Lydian),
         };
         for layer in &mut settings.layers {
-            *layer = Layer::on(0.8, Density::Lively);
+            *layer = Layer::on(0.8, Density::LIVELY);
         }
         let events = play(&settings, 7, 4);
         assert!(
@@ -992,12 +992,30 @@ mod tests {
             }
             play(&settings, 3, 3).len()
         };
-        let background = count(Presence::Background, Density::Sparse);
-        let ambient = count(Presence::Ambient, Density::Sparse);
-        let lively = count(Presence::Ambient, Density::Lively);
-        let declarative = count(Presence::Declarative, Density::Lively);
+        let background = count(Presence::Background, Density::SPARSE);
+        let ambient = count(Presence::Ambient, Density::SPARSE);
+        let lively = count(Presence::Ambient, Density::LIVELY);
+        let declarative = count(Presence::Declarative, Density::LIVELY);
         assert!(background < ambient && ambient < lively && lively < declarative);
         assert!(background * 3 < declarative);
+    }
+
+    #[test]
+    fn more_density_plays_more_notes_and_less_fewer() {
+        let count = |amount: f32| {
+            let mut settings = Style::SeasidePiano.settings();
+            settings.enabled = true;
+            for instrument in Instrument::ALL {
+                settings.layers[instrument].enabled = instrument == Instrument::Piano;
+            }
+            settings.layers[Instrument::Piano].density = Density::new(amount);
+            of(&play(&settings, 2, 6), Instrument::Piano).len()
+        };
+        let (few, middle, many) = (count(0.0), count(0.5), count(1.0));
+        assert!(
+            few * 2 < middle && middle * 2 < many,
+            "{few} < {middle} < {many} notes in six minutes"
+        );
     }
 
     #[test]
@@ -1007,7 +1025,7 @@ mod tests {
         settings.form = Form::Endless;
         settings.tempo = 60;
         for instrument in [Instrument::Violin, Instrument::Drums, Instrument::Piano] {
-            *settings.layer_mut(instrument) = Layer::on(0.6, Density::Lively);
+            *settings.layer_mut(instrument) = Layer::on(0.6, Density::LIVELY);
         }
         let events = play(&settings, 5, 2);
         for instrument in [Instrument::Violin, Instrument::Drums, Instrument::Piano] {
@@ -1101,7 +1119,7 @@ mod tests {
         for instrument in Instrument::ALL {
             settings.layer_mut(instrument).enabled = false;
         }
-        *settings.layer_mut(Instrument::Piano) = Layer::on(0.7, Density::Lively);
+        *settings.layer_mut(Instrument::Piano) = Layer::on(0.7, Density::LIVELY);
         settings.variety = variety;
         settings.concentration = concentration;
         settings.chaos = chaos;
@@ -1191,7 +1209,7 @@ mod tests {
             let mut settings = Style::RainStudy.settings();
             settings.enabled = true;
             for layer in &mut settings.layers {
-                *layer = Layer::on(0.8, Density::Lively);
+                *layer = Layer::on(0.8, Density::LIVELY);
             }
             settings.chaos = chaos;
             let events = play(&settings, 7, 4);

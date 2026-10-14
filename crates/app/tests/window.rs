@@ -982,8 +982,12 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
             .enabled
     );
     show_details(&mut harness);
-    // Each instrument's level, density and register come with details.
-    assert!(harness.query_all_by_label("Occasional").count() >= 2);
+    // Each instrument's level, notes and register come with details.
+    harness.get_by_role_and_label(egui::accesskit::Role::Slider, "Harp notes");
+    assert!(
+        harness.query_all_by_label("Middle").count() >= 2,
+        "a register each"
+    );
     click_in_generator(&mut harness, "Declarative");
     harness.get_by_label("Pulse");
     click_in_generator(&mut harness, "Pieces");
@@ -993,9 +997,93 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
     ));
 }
 
+/// Sets the slider named `name` to `value`, as a screen reader would.
+fn set_slider(harness: &mut Harness<'static, OlioApp>, name: &str, value: f64) {
+    use egui::accesskit::Role;
+    let slider = harness.get_by_role_and_label(Role::Slider, name);
+    slider.scroll_to_me();
+    let (target_node, target_tree) = slider.accesskit_node().locate();
+    harness.event(egui::Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            target_node,
+            target_tree,
+            action: egui::accesskit::Action::SetValue,
+            data: Some(egui::accesskit::ActionData::NumericValue(value)),
+        },
+    ));
+    harness.run_steps(3);
+}
+
+#[test]
+fn each_instrument_plays_as_many_notes_as_its_slider_says() {
+    use egui::accesskit::Role;
+    use olio_audio::Density;
+    use olio_audio::ambience::Instrument;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    assert_eq!(
+        harness
+            .query_all_by_role_and_label(Role::Slider, "Harp notes")
+            .count(),
+        0,
+        "with details"
+    );
+    show_details(&mut harness);
+    // Rain Study's harp plays now and then: its slider sits in the middle.
+    let harp = harness
+        .state()
+        .preferences()
+        .ambience
+        .layer(Instrument::Harp)
+        .density;
+    assert_eq!(harp, Density::OCCASIONAL);
+
+    set_slider(&mut harness, "Harp notes", 90.0);
+    set_slider(&mut harness, "Bass notes", 5.0);
+    let settings = harness.state().preferences().ambience;
+    assert!((settings.layer(Instrument::Harp).density.amount() - 0.9).abs() < 1e-3);
+    assert_eq!(settings.layer(Instrument::Harp).density.name(), "busy");
+    assert_eq!(
+        settings.layer(Instrument::Bass).density.name(),
+        "very sparse"
+    );
+    assert!(settings.spacing(Instrument::Harp) < settings.spacing(Instrument::Bass));
+    assert_eq!(settings.describe(), "Custom: D Dorian");
+    set_slider(&mut harness, "Harp level", 30.0);
+    assert!(
+        (harness
+            .state()
+            .preferences()
+            .ambience
+            .layer(Instrument::Harp)
+            .level
+            - 0.3)
+            .abs()
+            < 1e-3
+    );
+
+    // The drone holds one note: it has no such slider.
+    click_in_generator(&mut harness, "Drone");
+    assert!(
+        harness
+            .state()
+            .preferences()
+            .ambience
+            .layer(Instrument::Drone)
+            .enabled
+    );
+    harness.get_by_role_and_label(Role::Slider, "Drone level");
+    assert_eq!(
+        harness
+            .query_all_by_role_and_label(Role::Slider, "Drone notes")
+            .count(),
+        0
+    );
+}
+
 #[test]
 fn the_generator_character_sliders_move_and_make_the_settings_custom() {
-    use egui::accesskit::Role;
     use olio_audio::ambience::Mood;
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
@@ -1019,22 +1107,8 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!(before.chaos, 0.0);
 
     // Set to exact values, as a screen reader would.
-    let set = |harness: &mut Harness<'static, OlioApp>, name: &str, percent: f64| {
-        let slider = harness.get_by_role_and_label(Role::Slider, name);
-        slider.scroll_to_me();
-        let (target_node, target_tree) = slider.accesskit_node().locate();
-        harness.event(egui::Event::AccessKitActionRequest(
-            egui::accesskit::ActionRequest {
-                target_node,
-                target_tree,
-                action: egui::accesskit::Action::SetValue,
-                data: Some(egui::accesskit::ActionData::NumericValue(percent)),
-            },
-        ));
-        harness.run_steps(3);
-    };
-    set(&mut harness, "Chaos", 40.0);
-    set(&mut harness, "Variety", 10.0);
+    set_slider(&mut harness, "Chaos", 40.0);
+    set_slider(&mut harness, "Variety", 10.0);
 
     let settings = harness.state().preferences().ambience;
     assert_eq!((settings.chaos, settings.variety), (0.4, 0.1));
@@ -1590,10 +1664,10 @@ fn render_the_window_to_a_png() {
     harness.get_by_label_contains("building up");
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-generator.png")).unwrap();
-    // And with every setting, down to the mood's amounts.
+    // And with every setting, down to each instrument's level and notes.
     show_details(&mut harness);
     harness
-        .get_by_role_and_label(egui::accesskit::Role::Slider, "Chaos")
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "Piano notes")
         .scroll_to_me();
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");

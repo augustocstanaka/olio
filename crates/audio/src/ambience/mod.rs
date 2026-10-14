@@ -394,34 +394,64 @@ impl Instrument {
     }
 }
 
-/// How often a layer plays.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Density {
-    #[default]
-    Sparse,
-    Occasional,
-    Lively,
+/// How many notes a layer plays: from 0, very sparse, to 1, busy. The
+/// three steps it once had sit at [`Density::SPARSE`],
+/// [`Density::OCCASIONAL`] and [`Density::LIVELY`], spaced as they were.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Density(f32);
+
+impl Default for Density {
+    fn default() -> Self {
+        Self::SPARSE
+    }
 }
 
 impl Density {
-    pub const ALL: [Self; 3] = [Self::Sparse, Self::Occasional, Self::Lively];
+    pub const SPARSE: Self = Self(0.25);
+    pub const OCCASIONAL: Self = Self(0.5);
+    pub const LIVELY: Self = Self(0.85);
 
+    /// `amount`, kept between 0 and 1.
+    pub fn new(amount: f32) -> Self {
+        Self(if amount.is_finite() {
+            amount.clamp(0.0, 1.0)
+        } else {
+            Self::OCCASIONAL.0
+        })
+    }
+
+    pub fn amount(self) -> f32 {
+        self.0
+    }
+
+    /// In words: "sparse", "lively".
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Sparse => "Sparse",
-            Self::Occasional => "Occasional",
-            Self::Lively => "Lively",
+        match self.0 {
+            amount if amount < 0.15 => "very sparse",
+            amount if amount < 0.38 => "sparse",
+            amount if amount < 0.65 => "occasional",
+            amount if amount < 0.9 => "lively",
+            _ => "busy",
         }
     }
 
-    /// Multiplies the instrument's spacing.
+    /// Multiplies the instrument's spacing: notes 2.6 times as far apart
+    /// at 0, a third as far at 1, once as far at the middle.
     fn factor(self) -> f32 {
-        match self {
-            Self::Sparse => 1.6,
-            Self::Occasional => 1.0,
-            Self::Lively => 0.5,
-        }
+        2f32.powf(2.8 * (0.5 - self.0))
     }
+}
+
+/// A layer's density as saved before it was an amount.
+#[derive(Clone, Copy, Default, Deserialize)]
+enum Step {
+    #[default]
+    #[serde(skip)]
+    Unset,
+    Sparse,
+    Occasional,
+    Lively,
 }
 
 /// Where a layer sits.
@@ -455,13 +485,61 @@ impl Register {
 
 /// One instrument's part.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "SavedLayer")]
 pub struct Layer {
     pub enabled: bool,
     /// 0 to 1, within the whole bed's level.
     pub level: f32,
+    /// Saved as `notes`: `density` held one of three steps before.
+    #[serde(rename = "notes")]
     pub density: Density,
     pub register: Register,
+}
+
+/// A layer as saved: its density an amount (`notes`), or from before
+/// that, a step (`density`).
+#[derive(Deserialize)]
+#[serde(default)]
+struct SavedLayer {
+    enabled: bool,
+    level: f32,
+    /// NaN when not saved.
+    notes: f32,
+    density: Step,
+    register: Register,
+}
+
+impl Default for SavedLayer {
+    fn default() -> Self {
+        let layer = Layer::default();
+        Self {
+            enabled: layer.enabled,
+            level: layer.level,
+            notes: f32::NAN,
+            density: Step::Unset,
+            register: layer.register,
+        }
+    }
+}
+
+impl From<SavedLayer> for Layer {
+    fn from(saved: SavedLayer) -> Self {
+        let density = if saved.notes.is_finite() {
+            Density::new(saved.notes)
+        } else {
+            match saved.density {
+                Step::Unset | Step::Sparse => Density::SPARSE,
+                Step::Occasional => Density::OCCASIONAL,
+                Step::Lively => Density::LIVELY,
+            }
+        };
+        Self {
+            enabled: saved.enabled,
+            level: saved.level,
+            density,
+            register: saved.register,
+        }
+    }
 }
 
 impl Default for Layer {
@@ -469,7 +547,7 @@ impl Default for Layer {
         Self {
             enabled: false,
             level: 0.8,
-            density: Density::Sparse,
+            density: Density::SPARSE,
             register: Register::Middle,
         }
     }
@@ -771,6 +849,7 @@ impl AmbienceSettings {
         self.chaos = unit(self.chaos, 0.0);
         for layer in &mut self.layers {
             layer.level = unit(layer.level, 0.8);
+            layer.density = Density::new(layer.density.amount());
         }
         self.tempo = self.tempo.clamp(30, 120);
         if let Form::Piece {
@@ -837,7 +916,7 @@ impl AmbienceSettings {
     }
 
     /// Seconds between a layer's notes at these settings, typically.
-    fn spacing(&self, instrument: Instrument) -> f32 {
+    pub fn spacing(&self, instrument: Instrument) -> f32 {
         instrument.spacing() * self.layer(instrument).density.factor() * self.presence.spacing()
     }
 
@@ -935,8 +1014,8 @@ impl Style {
         };
         let (scale, background, presence, form, level) = match self {
             Self::RainStudy => {
-                set(Bass, Layer::on(0.8, Density::Sparse));
-                set(Harp, Layer::on(0.7, Density::Occasional));
+                set(Bass, Layer::on(0.8, Density::SPARSE));
+                set(Harp, Layer::on(0.7, Density::OCCASIONAL));
                 (
                     mode(2, Mode::Dorian),
                     Background::Rain,
@@ -946,8 +1025,8 @@ impl Style {
                 )
             }
             Self::WinterHush => {
-                set(Bass, Layer::on(0.7, Density::Sparse));
-                set(Harp, Layer::on(0.5, Density::Sparse));
+                set(Bass, Layer::on(0.7, Density::SPARSE));
+                set(Harp, Layer::on(0.5, Density::SPARSE));
                 (
                     mode(9, Mode::Aeolian),
                     Background::Winter,
@@ -957,8 +1036,8 @@ impl Style {
                 )
             }
             Self::NightDrift => {
-                set(Drone, Layer::on(0.6, Density::Sparse));
-                set(Pad, Layer::on(0.6, Density::Sparse));
+                set(Drone, Layer::on(0.6, Density::SPARSE));
+                set(Pad, Layer::on(0.6, Density::SPARSE));
                 (
                     mode(5, Mode::Lydian),
                     Background::Wind,
@@ -968,9 +1047,9 @@ impl Style {
                 )
             }
             Self::Cathedral => {
-                set(Drone, Layer::on(0.7, Density::Sparse));
-                set(Pad, Layer::on(0.7, Density::Occasional));
-                set(Bells, Layer::on(0.5, Density::Sparse));
+                set(Drone, Layer::on(0.7, Density::SPARSE));
+                set(Pad, Layer::on(0.7, Density::OCCASIONAL));
+                set(Bells, Layer::on(0.5, Density::SPARSE));
                 (
                     mode(7, Mode::Aeolian),
                     Background::None,
@@ -980,9 +1059,9 @@ impl Style {
                 )
             }
             Self::Pentatonic => {
-                set(Harp, Layer::on(0.8, Density::Occasional));
-                set(Bells, Layer::on(0.4, Density::Sparse));
-                set(Bass, Layer::on(0.6, Density::Sparse));
+                set(Harp, Layer::on(0.8, Density::OCCASIONAL));
+                set(Bells, Layer::on(0.4, Density::SPARSE));
+                set(Bass, Layer::on(0.6, Density::SPARSE));
                 (
                     scale(7, ScaleKind::MajorPentatonic),
                     Background::Rain,
@@ -992,10 +1071,10 @@ impl Style {
                 )
             }
             Self::Affirmation => {
-                set(Strings, Layer::on(0.8, Density::Occasional));
-                set(Bass, Layer::on(0.8, Density::Occasional));
-                set(Pad, Layer::on(0.6, Density::Occasional));
-                set(Bells, Layer::on(0.5, Density::Sparse));
+                set(Strings, Layer::on(0.8, Density::OCCASIONAL));
+                set(Bass, Layer::on(0.8, Density::OCCASIONAL));
+                set(Pad, Layer::on(0.6, Density::OCCASIONAL));
+                set(Bells, Layer::on(0.5, Density::SPARSE));
                 (
                     mode(0, Mode::Mixolydian),
                     Background::None,
@@ -1008,9 +1087,9 @@ impl Style {
                 )
             }
             Self::SeasidePiano => {
-                set(Piano, Layer::on(0.7, Density::Occasional));
-                set(Drone, Layer::on(0.45, Density::Sparse));
-                set(Bass, Layer::on(0.5, Density::Sparse));
+                set(Piano, Layer::on(0.7, Density::OCCASIONAL));
+                set(Drone, Layer::on(0.45, Density::SPARSE));
+                set(Bass, Layer::on(0.5, Density::SPARSE));
                 (
                     mode(2, Mode::Lydian),
                     Background::Waves,
@@ -1020,9 +1099,9 @@ impl Style {
                 )
             }
             Self::ForestMorning => {
-                set(Harp, Layer::on(0.6, Density::Occasional));
-                set(Violin, Layer::on(0.5, Density::Sparse));
-                set(Bells, Layer::on(0.35, Density::Sparse));
+                set(Harp, Layer::on(0.6, Density::OCCASIONAL));
+                set(Violin, Layer::on(0.5, Density::SPARSE));
+                set(Bells, Layer::on(0.35, Density::SPARSE));
                 (
                     scale(4, ScaleKind::MajorPentatonic),
                     Background::Forest,
@@ -1032,9 +1111,9 @@ impl Style {
                 )
             }
             Self::Campfire => {
-                set(Violin, Layer::on(0.6, Density::Occasional));
-                set(Bass, Layer::on(0.6, Density::Sparse));
-                set(Drums, Layer::on(0.55, Density::Sparse));
+                set(Violin, Layer::on(0.6, Density::OCCASIONAL));
+                set(Bass, Layer::on(0.6, Density::SPARSE));
+                set(Drums, Layer::on(0.55, Density::SPARSE));
                 (
                     mode(2, Mode::Mixolydian),
                     Background::Fire,
@@ -1044,9 +1123,9 @@ impl Style {
                 )
             }
             Self::DesertNight => {
-                set(Drone, Layer::on(0.6, Density::Sparse));
-                set(Piano, Layer::on(0.45, Density::Sparse));
-                set(Drums, Layer::on(0.45, Density::Sparse));
+                set(Drone, Layer::on(0.6, Density::SPARSE));
+                set(Piano, Layer::on(0.45, Density::SPARSE));
+                set(Drums, Layer::on(0.45, Density::SPARSE));
                 (
                     mode(4, Mode::Phrygian),
                     Background::Desert,
@@ -1056,9 +1135,9 @@ impl Style {
                 )
             }
             Self::StormWatch => {
-                set(Strings, Layer::on(0.6, Density::Sparse));
-                set(Pad, Layer::on(0.5, Density::Sparse));
-                set(Drone, Layer::on(0.5, Density::Sparse));
+                set(Strings, Layer::on(0.6, Density::SPARSE));
+                set(Pad, Layer::on(0.5, Density::SPARSE));
+                set(Drone, Layer::on(0.5, Density::SPARSE));
                 (
                     scale(9, ScaleKind::HarmonicMinor),
                     Background::Thunder,
@@ -1157,12 +1236,12 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
     // Something low or long beneath, now and then two.
     let grounds = [(Drone, 1.0), (Pad, 1.0), (Bass, 1.2)];
     let ground = weighted(&mut rng, &grounds);
-    layers[ground] = Layer::on(rng.range(0.5, 0.7), Density::Sparse);
+    layers[ground] = Layer::on(rng.range(0.5, 0.7), Density::SPARSE);
     if rng.chance(0.3) {
         let others: Vec<(Instrument, f32)> =
             grounds.into_iter().filter(|(i, _)| *i != ground).collect();
         let second = weighted(&mut rng, &others);
-        layers[second] = Layer::on(rng.range(0.45, 0.6), Density::Sparse);
+        layers[second] = Layer::on(rng.range(0.45, 0.6), Density::SPARSE);
     }
     // One or two above it.
     let mut melodic = vec![
@@ -1179,17 +1258,12 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
             Bells => rng.range(0.35, 0.5),
             _ => rng.range(0.5, 0.75),
         };
-        let density = if rng.chance(0.4) {
-            Density::Occasional
-        } else {
-            Density::Sparse
-        };
-        layers[voice] = Layer::on(level, density);
+        layers[voice] = Layer::on(level, Density::new(rng.range(0.2, 0.6)));
     }
     // Soft drums, sometimes, where there is room and something to notice.
     let playing = layers.iter().filter(|layer| layer.enabled).count();
     if playing < 4 && presence != Presence::Background && rng.chance(0.2) {
-        layers[Drums] = Layer::on(rng.range(0.4, 0.55), Density::Sparse);
+        layers[Drums] = Layer::on(rng.range(0.4, 0.55), Density::SPARSE);
     }
 
     let mood = weighted(
@@ -1490,6 +1564,11 @@ mod tests {
         );
         let harp = settings.layer(Instrument::Harp);
         assert!(harp.enabled && harp.register == Register::High);
+        assert_eq!(
+            harp.density,
+            Density::OCCASIONAL,
+            "a step becomes its amount"
+        );
         for instrument in [Instrument::Piano, Instrument::Violin, Instrument::Drums] {
             assert!(!settings.layer(instrument).enabled);
         }
@@ -1499,9 +1578,14 @@ mod tests {
         let layers: Layers = serde_json::from_str(&format!("[{ten}]")).unwrap();
         assert!(layers.iter().all(|layer| layer.enabled));
 
-        let settings = Style::Campfire.settings();
+        let mut settings = Style::Campfire.settings();
+        settings.layers[Instrument::Harp].density = Density::new(0.7);
         let saved = serde_json::to_string(&settings).unwrap();
         assert!(saved.contains("\"background\":\"Fire\""));
+        assert!(
+            saved.contains("\"notes\":0.7"),
+            "density saved as an amount"
+        );
         assert_eq!(
             serde_json::from_str::<AmbienceSettings>(&saved).unwrap(),
             settings
@@ -1636,7 +1720,7 @@ mod tests {
             for layer in &mut settings.layers {
                 layer.enabled = false;
             }
-            *settings.layer_mut(instrument) = Layer::on(1.0, Density::Lively);
+            *settings.layer_mut(instrument) = Layer::on(1.0, Density::LIVELY);
             let mut ambience = Ambience::new(48_000, 3);
             ambience.set(settings);
             let mut out = vec![0.0; 48_000 * 2 * 40];

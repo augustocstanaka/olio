@@ -471,8 +471,8 @@ mod tests {
         let mut settings = Style::RainStudy.settings();
         settings.enabled = true;
         settings.journey = Journey::Evolve;
-        *settings.layer_mut(Instrument::Pad) = Layer::on(0.6, Density::Sparse);
-        *settings.layer_mut(Instrument::Bells) = Layer::on(0.5, Density::Sparse);
+        *settings.layer_mut(Instrument::Pad) = Layer::on(0.6, Density::SPARSE);
+        *settings.layer_mut(Instrument::Bells) = Layer::on(0.5, Density::SPARSE);
         settings
     }
 

@@ -993,45 +993,77 @@ fn instrument_chips(ui: &mut Ui, settings: &mut AmbienceSettings) {
     });
 }
 
-/// Each instrument on or off with its level; an instrument that is on
-/// also shows its density and register.
+/// The width of the instruments' name column, so their sliders line up.
+const NAME_WIDTH: f32 = 84.0;
+
+/// Each instrument on or off with its level; one that is on also shows
+/// how many notes it plays (the drone holds one) and its register.
 fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
     for instrument in Instrument::ALL {
+        let seconds = settings.spacing(instrument);
         let layer = &mut settings.layers[instrument];
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let name = ui.add_sized(
-                [84.0, 20.0],
+                [NAME_WIDTH, 20.0],
                 egui::Checkbox::new(&mut layer.enabled, instrument.name()),
             );
             name.on_hover_text(instrument.describe());
             ui.add_enabled_ui(layer.enabled, |ui| {
-                let mut percent = layer.level * 100.0;
-                ui.spacing_mut().slider_width = (ui.available_width() - 8.0).clamp(60.0, 200.0);
-                let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-                    .show_value(false)
-                    .trailing_fill(true);
-                if menu::keeps_arrows(ui.add(slider))
-                    .on_hover_text(format!("Level {percent:.0} %"))
-                    .changed()
-                {
-                    layer.level = percent / 100.0;
-                }
+                let hint = format!("Level {:.0} %", layer.level * 100.0);
+                let label = format!("{} level", instrument.name());
+                amount_slider(ui, &mut layer.level, &label, hint);
             });
         });
-        if layer.enabled {
-            ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
-                if instrument != Instrument::Drone {
-                    row(ui, &mut layer.density, &Density::ALL, Density::name);
-                    ui.add_space(8.0);
-                }
-                row(ui, &mut layer.register, &Register::ALL, Register::name);
-            });
-            ui.add_space(2.0);
+        if !layer.enabled {
+            continue;
         }
+        if instrument != Instrument::Drone {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(NAME_WIDTH, 18.0),
+                    Layout::right_to_left(Align::Center),
+                    |ui| ui.weak("Notes"),
+                );
+                let label = format!("{} notes", instrument.name());
+                let hint = format!(
+                    "Notes: {}, about one every {seconds:.0} s. Fewer to the left, more to the \
+                     right",
+                    layer.density.name()
+                );
+                let mut amount = layer.density.amount();
+                if amount_slider(ui, &mut amount, &label, hint) {
+                    layer.density = Density::new(amount);
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(NAME_WIDTH + 6.0);
+            ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+            row(ui, &mut layer.register, &Register::ALL, Register::name);
+        });
+        ui.add_space(4.0);
     }
+}
+
+/// A slider without a value box for a 0-to-1 `value`, as wide as the
+/// row allows, named `label` for screen readers and reading in percent;
+/// true when it moved.
+fn amount_slider(ui: &mut Ui, value: &mut f32, label: &str, hint: String) -> bool {
+    let mut percent = *value * 100.0;
+    ui.spacing_mut().slider_width = (ui.available_width() - 8.0).clamp(60.0, 200.0);
+    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+        .show_value(false)
+        .trailing_fill(true);
+    let response = menu::keeps_arrows(ui.add(slider));
+    let enabled = ui.is_enabled();
+    response.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(percent), label));
+    let moved = response.on_hover_text(hint).changed();
+    if moved {
+        *value = percent / 100.0;
+    }
+    moved
 }
 
 /// Small choices side by side, never wrapping.
