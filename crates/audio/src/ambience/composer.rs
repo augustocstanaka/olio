@@ -145,8 +145,11 @@ pub struct Composer {
     phrase_left: u8,
     piano: Line,
     violin: Line,
-    /// The harmony: a chord on this scale degree, until this frame.
+    /// The harmony: a chord on this scale degree, until this frame; and,
+    /// suspended, the degree above its root in place of its third (1, a
+    /// second, or 3, a fourth).
     chord: i32,
+    sus: i32,
     next_harmony: u64,
     /// Where Declarative presence is in its cadence.
     cadence_step: usize,
@@ -161,6 +164,19 @@ pub struct Composer {
     phase: Phase,
     /// What the instruments play at: 1, falling to 0 as a piece closes.
     music_gain: f32,
+}
+
+/// Suspended, the chords that stay open: the tonic, subdominant and
+/// dominant; any other gives way to the nearest of them.
+fn open_chord(settings: &AmbienceSettings, chord: i32) -> i32 {
+    if !settings.suspended {
+        return chord;
+    }
+    match chord.rem_euclid(settings.scale.degrees()) {
+        0 | 2 => 0,
+        3 | 5 => 3,
+        _ => 4,
+    }
 }
 
 /// Declarative presence walks this, a chord every two bars: I IV V I,
@@ -182,6 +198,7 @@ impl Composer {
             piano: Line::new(4),
             violin: Line::new(2),
             chord: 0,
+            sus: 3,
             next_harmony: 0,
             cadence_step: 0,
             drone_midi: None,
@@ -213,6 +230,7 @@ impl Composer {
         self.phase = Phase::Playing;
         self.music_gain = 1.0;
         self.chord = 0;
+        self.sus = 3;
         self.cadence_step = 0;
         self.next_harmony = now + self.harmony_span(settings);
         self.harp = Line::new(4);
@@ -405,19 +423,28 @@ impl Composer {
             if self.maybe(settings.chaos * 0.5) {
                 chord = self.rng.below(settings.scale.degrees() as u32) as i32;
             }
-            chord
+            open_chord(settings, chord)
         } else {
             // Never the same chord twice running.
             let mut chord = self.chord;
             while chord == self.chord {
-                chord = self.pick_chord(settings);
+                chord = open_chord(settings, self.pick_chord(settings));
             }
             chord
         };
+        if settings.suspended {
+            self.sus = if self.rng.chance(0.5) { 1 } else { 3 };
+        }
         self.next_harmony = now + self.harmony_span(settings);
         // The pad voices the new chord soon.
         let pad = Instrument::Pad.index();
         self.next[pad] = self.next[pad].min(now + frames(self.rate, self.rng.range(0.3, 1.5)));
+    }
+
+    /// The degree above the chord's root standing for its third: the
+    /// third itself, or suspended, a second or a fourth.
+    fn third(&self, settings: &AmbienceSettings) -> i32 {
+        if settings.suspended { self.sus } else { 2 }
     }
 
     /// A chord in free time: mostly home (more so with concentration, less
@@ -688,7 +715,7 @@ impl Composer {
             } else if roll < root + rest * 0.5 {
                 4
             } else if roll < root + rest * 0.8 {
-                2
+                self.third(settings)
             } else {
                 -settings.scale.degrees()
             };
@@ -706,6 +733,7 @@ impl Composer {
     /// rising phrase, more often with variety.
     fn harp(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
+        let third = self.third(settings);
         let mut line = self.harp;
         if self.phrase_left > 0 {
             let (low, high) = span(settings.concentration, len);
@@ -713,7 +741,7 @@ impl Composer {
         } else {
             let shape = Shape {
                 chord: 0.6,
-                tones: &[0, 2, 4, len, len + 2],
+                tones: &[0, third, 4, len, len + third],
                 widest: 3,
             };
             self.melody(settings, &mut line, &shape);
@@ -743,7 +771,8 @@ impl Composer {
         let degree = if self.maybe(settings.concentration - 0.5) {
             len
         } else {
-            let tones = [0, 2, 4, len, len + 2, len + 4];
+            let third = self.third(settings);
+            let tones = [0, third, 4, len, len + third, len + 4];
             self.chord + tones[self.rng.below(tones.len() as u32) as usize]
         };
         let midi = settings.note(Instrument::Bells, degree);
@@ -760,7 +789,7 @@ impl Composer {
         let degree = if self.maybe(settings.concentration - 0.5) {
             0
         } else {
-            self.chord + [0, 2, 4, 0][self.rng.below(4) as usize]
+            self.chord + [0, self.third(settings), 4, 0][self.rng.below(4) as usize]
         };
         let midi = settings.note(Instrument::Strings, degree);
         let midi = self.unsettle(settings, midi, 0.25);
@@ -778,10 +807,11 @@ impl Composer {
     /// second or a tritone.
     fn piano(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
+        let third = self.third(settings);
         let mut line = self.piano;
         let shape = Shape {
             chord: 0.55,
-            tones: &[0, 2, 4, len],
+            tones: &[0, third, 4, len],
             widest: 2,
         };
         let degree = self.melody(settings, &mut line, &shape);
@@ -794,7 +824,9 @@ impl Composer {
             let low = if self.maybe(settings.chaos * 0.7) {
                 midi.saturating_sub([1, 2, 6][self.rng.below(3) as usize])
             } else {
-                let below = [2, 5][self.rng.below(2) as usize];
+                // A third or a sixth below; suspended, a fourth or a fifth.
+                let below = if settings.suspended { [3, 4] } else { [2, 5] };
+                let below = below[self.rng.below(2) as usize];
                 settings.note(Instrument::Piano, degree - below)
             };
             self.note(at, Instrument::Piano, low, velocity * 0.7, pan - 0.1, 0);
@@ -808,10 +840,11 @@ impl Composer {
     /// the time a neighbour answers it.
     fn violin(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let len = settings.scale.degrees();
+        let third = self.third(settings);
         let mut line = self.violin;
         let shape = Shape {
             chord: 0.6,
-            tones: &[0, 2, 4, len, len + 2],
+            tones: &[0, third, 4, len, len + third],
             widest: 2,
         };
         let degree = self.melody(settings, &mut line, &shape);
@@ -859,7 +892,7 @@ impl Composer {
         let seconds = self.rng.range(12.0, 22.0);
         let duration = frames(self.rate, seconds);
         let velocity = self.rng.range(0.5, 0.7);
-        for (i, tone) in [0, 2, 4].into_iter().enumerate() {
+        for (i, tone) in [0, self.third(settings), 4].into_iter().enumerate() {
             let midi = settings.note(Instrument::Pad, self.chord + tone);
             let midi = self.unsettle(settings, midi, 0.2);
             let stagger = frames(self.rate, 0.35 * i as f32);
@@ -1255,6 +1288,72 @@ mod tests {
             wild.1 > 0.4 && wild.1 > some.1,
             "the pad rubs: {some:?} {wild:?}"
         );
+    }
+
+    #[test]
+    fn suspended_harmony_says_neither_major_nor_minor() {
+        let check = |root: u8, kind: ScaleKind, presence: Presence, suspended: bool| {
+            let mut settings = Style::RainStudy.settings();
+            settings.enabled = true;
+            settings.scale = Scale { root, kind };
+            settings.presence = presence;
+            settings.suspended = suspended;
+            for layer in &mut settings.layers {
+                *layer = Layer::on(0.8, Density::LIVELY);
+            }
+            let events = play(&settings, 11, 4);
+            // Notes on the scale's third.
+            let thirds = events
+                .iter()
+                .filter(|e| !(e.note.instrument == Instrument::Drums && e.note.midi == SHAKER))
+                .filter(|e| {
+                    let class = (i32::from(e.note.midi) - i32::from(root)).rem_euclid(12);
+                    matches!(class, 3 | 4)
+                })
+                .count();
+            // Pad chords (their notes held alike) with a third or a sixth
+            // between two notes.
+            let mut chords: Vec<(u64, Vec<u8>)> = Vec::new();
+            for pad in of(&events, Instrument::Pad) {
+                match chords
+                    .iter_mut()
+                    .find(|(held, _)| *held == pad.note.duration)
+                {
+                    Some((_, chord)) => chord.push(pad.note.midi),
+                    None => chords.push((pad.note.duration, vec![pad.note.midi])),
+                }
+            }
+            let tertian = chords
+                .iter()
+                .filter(|(_, chord)| {
+                    chord.iter().any(|a| {
+                        chord
+                            .iter()
+                            .any(|b| matches!(a.abs_diff(*b) % 12, 3 | 4 | 8 | 9))
+                    })
+                })
+                .count();
+            (thirds, tertian, chords.len())
+        };
+        for (root, kind, presence) in [
+            (2, ScaleKind::Mode(Mode::Dorian), Presence::Ambient),
+            (5, ScaleKind::Mode(Mode::Lydian), Presence::Declarative),
+            (9, ScaleKind::Mode(Mode::Aeolian), Presence::Ambient),
+            (0, ScaleKind::Mode(Mode::Ionian), Presence::Declarative),
+            (4, ScaleKind::MinorPentatonic, Presence::Ambient),
+        ] {
+            let (thirds, tertian, chords) = check(root, kind, presence, true);
+            assert_eq!(thirds, 0, "{kind:?}: no note on the third");
+            if matches!(kind, ScaleKind::Mode(_)) {
+                assert!(chords > 4);
+                assert_eq!(tertian, 0, "{kind:?}: no third in a chord");
+            }
+            let (thirds, tertian, _) = check(root, kind, presence, false);
+            assert!(thirds > 0, "{kind:?}: thirds without it");
+            if matches!(kind, ScaleKind::Mode(_)) {
+                assert!(tertian > 0);
+            }
+        }
     }
 
     #[test]

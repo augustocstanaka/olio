@@ -67,8 +67,8 @@ Milestone 0, the playable skeleton, is done. Olio can:
   and Large.
 - **Generate gentle music.** The Generator (⇧⌘G, or the Generator
   button in the status bar) makes up sparse, quiet music as it goes, in
-  place of the inspector. It shows the essentials (a style, a mood, how
-  it changes over time, a background, which instruments play);
+  place of the inspector. It shows the essentials (a style, the key, a
+  mood, how it changes over time, a background, which instruments play);
   **Details** adds every setting
   for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
@@ -85,7 +85,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
     the pad, and a frame drum and shaker play instead, each loaded as
     the music uses it; the Recorded instruments switch turns them off;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
-    minor or whole tone;
+    minor or whole tone, among the essentials, and **Suspended**: chords
+    with a second or a fourth in place of their third and no third in the
+    tunes, so the music is neither major nor minor;
   - **character**: *Variety* (a short motif that keeps coming back, up to
     ever-new melodies and chords), *Concentration* (notes wandering wide,
     down to gathered close around the chord and the home note) and

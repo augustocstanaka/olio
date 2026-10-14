@@ -157,6 +157,14 @@ four variations, the style in each mood, or every style ("Rain Study
 Moods", tiles "Rain Study Still", "Rain Study Gentle"…).
 _Avoid_: recording, export, song
 
+**Suspended**:
+The Generator's harmony without thirds: chords voiced with a second or a
+fourth in place of their third (sus2, sus4), kept to the tonic,
+subdominant and dominant, and no note on the scale's third, so the music
+is neither major nor minor. A switch under the key.
+_Avoid_: modal (every scale here is), ambiguous, open chords (for the
+switch)
+
 **Recorded instruments**:
 The Generator's instruments played from recordings rather than
 synthesised, from the instrument pack: downloaded once (Download
@@ -230,8 +238,8 @@ _Avoid_: rate, frequency, concentration (that is how closely notes keep
 to home)
 
 **Details**:
-The Generator's switch between the essentials (style, mood, journey,
-background, which instruments play) and every setting.
+The Generator's switch between the essentials (style, key, mood,
+journey, background, which instruments play) and every setting.
 _Avoid_: advanced, expert mode
 
 **Bubble**:

@@ -202,6 +202,14 @@ impl Scale {
         semis.clamp(0, 127) as u8
     }
 
+    /// True if a degree is the scale's third: a minor or major third above
+    /// the root, the note that says minor or major.
+    pub fn is_third(&self, degree: i32) -> bool {
+        let intervals = self.kind.intervals();
+        let step = degree.rem_euclid(intervals.len() as i32) as usize;
+        matches!(intervals[step], 3 | 4)
+    }
+
     /// True if the note's pitch class is in the scale.
     pub fn contains(&self, midi: u8) -> bool {
         let pitch_class = (i32::from(midi) - i32::from(self.root)).rem_euclid(12) as u8;
@@ -821,6 +829,10 @@ pub struct AmbienceSettings {
     pub form: Form,
     /// How it changes over time: steady, building up, or evolving.
     pub journey: Journey,
+    /// Suspended harmony: chords with a second or a fourth in place of
+    /// their third, and no note on the scale's third, so the music is
+    /// neither major nor minor.
+    pub suspended: bool,
     /// 0 to 1: how much the music keeps changing. Low comes back to a
     /// short motif and stays on few chords; high keeps finding new
     /// melodies, more chords and freer rhythms.
@@ -941,11 +953,17 @@ impl AmbienceSettings {
         instrument.spacing() * self.layer(instrument).density.factor() * self.presence.spacing()
     }
 
-    /// The MIDI note of a scale degree in a layer's register.
+    /// The MIDI note of a scale degree in a layer's register. Suspended,
+    /// the scale's third gives way to the fourth above it.
     fn note(&self, instrument: Instrument, degree: i32) -> u8 {
         let base = i32::from(self.scale.base())
             + instrument.register()
             + self.layer(instrument).register.semitones();
+        let degree = if self.suspended && self.scale.is_third(degree) {
+            degree + 1
+        } else {
+            degree
+        };
         self.scale.note(base.clamp(0, 115) as u8, degree)
     }
 
@@ -1178,6 +1196,7 @@ impl Style {
             tempo: 60,
             form,
             journey: Journey::Steady,
+            suspended: false,
             variety: DEFAULT_VARIETY,
             concentration: DEFAULT_CONCENTRATION,
             chaos: 0.0,
@@ -1315,6 +1334,7 @@ pub fn surprise(seed: u64) -> AmbienceSettings {
         tempo,
         form: Form::Endless,
         journey: Journey::Steady,
+        suspended: false,
         variety,
         concentration,
         chaos,

@@ -1280,6 +1280,26 @@ fn write_instrument_pack(dir: &Path) {
 }
 
 #[test]
+fn the_modes_and_suspended_harmony_are_among_the_essentials() {
+    use egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    assert!(!harness.state().preferences().generator_details);
+    // The key's root and scale (the Greek modes among them) show without
+    // details.
+    harness.get_by_role_and_label(Role::ComboBox, "Root");
+    harness.get_by_role_and_label(Role::ComboBox, "Scale");
+    harness.get_by_label_contains("D Dorian: ");
+
+    click_in_generator(&mut harness, "Suspended");
+    let settings = harness.state().preferences().ambience;
+    assert!(settings.suspended);
+    assert_eq!(settings.describe(), "Custom: D Dorian");
+    harness.get_by_label("D Dorian, suspended: neither major nor minor; open, floating.");
+}
+
+#[test]
 fn without_recorded_instruments_the_generator_offers_their_download() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
@@ -1788,9 +1808,8 @@ fn render_the_window_to_a_png() {
     let mut harness = window(library(dir.path()), true);
     open_generator(&mut harness);
     pick_style(&mut harness, "Seaside Piano");
-    harness.get_by_label("Evolves").click();
-    harness.run_steps(2);
-    harness.get_by_label("Play live").click();
+    click_in_generator(&mut harness, "Evolves");
+    click_in_generator(&mut harness, "Play live");
     harness.run_steps(20);
     harness.get_by_label_contains("building up");
     let image = harness.render().expect("a GPU adapter to render with");

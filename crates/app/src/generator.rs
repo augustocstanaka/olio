@@ -614,6 +614,8 @@ pub fn show(
                     None => style_actions(ui, settings, view, &mut actions),
                 }
             });
+            section(ui, "Key");
+            key(ui, settings);
             section(ui, "Mood");
             mood(ui, settings, details);
             section(ui, "Over time");
@@ -641,8 +643,6 @@ pub fn show(
                 ui.weak("No instruments: the background only.");
             }
             if details {
-                section(ui, "Key");
-                key(ui, settings);
                 section(ui, "Presence");
                 presence(ui, settings);
                 section(ui, "Form");
@@ -761,11 +761,7 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
     ui.weak(match (settings.style, saved) {
         (Some(style), _) => sentence(style.describe()),
         (None, Some(_)) => format!("Your style: {}", summary(settings)),
-        (None, None) => format!(
-            "{}: {}.",
-            settings.scale.name(),
-            settings.scale.kind.character()
-        ),
+        (None, None) => sentence(summary(settings).trim_end_matches('.')),
     });
 }
 
@@ -965,6 +961,24 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
                 }
             });
         let _ = combo.response.labelled_by(scale.id);
+    });
+    ui.add_space(4.0);
+    ui.checkbox(&mut settings.suspended, "Suspended")
+        .on_hover_text(
+            "Chords with a second or a fourth in place of their third, and no third in the \
+             tunes: neither major nor minor, open and floating",
+        );
+    ui.weak(if settings.suspended {
+        format!(
+            "{}, suspended: neither major nor minor; open, floating.",
+            settings.scale.name()
+        )
+    } else {
+        format!(
+            "{}: {}.",
+            settings.scale.name(),
+            settings.scale.kind.character()
+        )
     });
 }
 
