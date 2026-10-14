@@ -506,6 +506,35 @@ fn the_ambience_is_silent_until_turned_on_and_stays_quiet() {
 }
 
 #[test]
+fn a_building_ambience_says_what_it_plays_and_a_steady_one_does_not() {
+    use olio_audio::ambience::{Journey, Style};
+    let (mut engine, mut mixer) = Engine::offline(RATE);
+    let mut settings = AmbienceSettings {
+        enabled: true,
+        ..Style::RainStudy.settings()
+    };
+    engine.set_ambience(settings);
+    render(&mut mixer, 4800, 2);
+    assert_eq!(engine.ambience_now(), None, "steady");
+
+    settings.journey = Journey::Evolve;
+    engine.set_ambience(settings);
+    render(&mut mixer, 4800, 2);
+    let now = engine.ambience_now().expect("evolving");
+    assert!(now.building);
+    assert_eq!(now.scale, settings.scale);
+    assert_eq!(now.background, Background::Rain);
+    assert_eq!(now.resting, None);
+
+    engine.set_ambience(AmbienceSettings {
+        enabled: false,
+        ..settings
+    });
+    render(&mut mixer, 4800, 2);
+    assert_eq!(engine.ambience_now(), None, "off");
+}
+
+#[test]
 fn the_ambience_ducks_under_a_playing_sound() {
     let settings = AmbienceSettings {
         enabled: true,

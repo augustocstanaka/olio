@@ -1040,6 +1040,36 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     harness.get_by_label_contains("Repeats a short motif, around the chord, with clashes");
 }
 
+#[test]
+fn an_evolving_ambience_builds_up_and_says_where_it_has_got_to() {
+    use olio_audio::ambience::Journey;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    open_generator(&mut harness);
+    click_in_generator(&mut harness, "Evolves");
+    let prefs = harness.state().preferences();
+    assert_eq!(prefs.ambience.journey, Journey::Evolve);
+    // A way of playing the style, not another style.
+    assert_eq!(prefs.style_name(), "Rain Study");
+    pick_style(&mut harness, "Campfire");
+    assert_eq!(
+        harness.state().preferences().ambience.journey,
+        Journey::Evolve,
+        "kept across styles"
+    );
+    assert_eq!(harness.query_all_by_label_contains("Now:").count(), 0);
+
+    // Playing live, it starts with one instrument and says so.
+    click_in_generator(&mut harness, "Play live");
+    harness.run_steps(5);
+    harness.get_by_label("Now: D Mixolydian, fire; building up.");
+
+    // Steady has nothing to say.
+    click_in_generator(&mut harness, "Steady");
+    harness.run_steps(3);
+    assert_eq!(harness.query_all_by_label_contains("Now:").count(), 0);
+}
+
 /// Types `name` over whatever the focused field holds, then Return.
 fn type_name(harness: &mut Harness<'static, OlioApp>, name: &str) {
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
@@ -1438,13 +1468,16 @@ fn render_the_window_to_a_png() {
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-large.png")).unwrap();
 
-    // The Generator, on Seaside Piano, playing live.
+    // The Generator, on Seaside Piano, evolving, playing live.
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), true);
     open_generator(&mut harness);
     pick_style(&mut harness, "Seaside Piano");
+    harness.get_by_label("Evolves").click();
+    harness.run_steps(2);
     harness.get_by_label("Play live").click();
     harness.run_steps(20);
+    harness.get_by_label_contains("building up");
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-generator.png")).unwrap();
     // And with every setting, down to the mood's amounts.

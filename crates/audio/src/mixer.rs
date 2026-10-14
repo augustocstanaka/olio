@@ -10,7 +10,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::ambience::{Ambience, AmbienceSettings};
+use crate::ambience::{Ambience, AmbienceSettings, Now};
 use crate::clip::Clip;
 use crate::reverb::Reverb;
 
@@ -103,6 +103,9 @@ pub(crate) struct Shared {
     /// The loudest sample of the first two output channels since the app
     /// last read them.
     output_peaks: [Peak; 2],
+    /// What a building or evolving ambience plays now, packed; 0 when
+    /// there is nothing to show.
+    ambience: AtomicU64,
 }
 
 #[derive(Default)]
@@ -143,7 +146,14 @@ impl Shared {
         Self {
             slots: std::array::from_fn(|_| PublishedVoice::default()),
             output_peaks: Default::default(),
+            ambience: AtomicU64::new(0),
         }
+    }
+
+    /// What a building or evolving ambience plays now, as of the last
+    /// buffer.
+    pub(crate) fn ambience_now(&self) -> Option<Now> {
+        Now::unpack(self.ambience.load(Ordering::Relaxed))
     }
 
     /// The loudest output sample on the first two channels since the last
@@ -568,6 +578,8 @@ impl Mixer {
     /// Publishes positions and levels, and hands finished voices back to
     /// the engine.
     fn publish(&mut self) {
+        let now = self.ambience.now().map_or(0, Now::pack);
+        self.shared.ambience.store(now, Ordering::Relaxed);
         for (peak, published) in self.output_peaks.iter_mut().zip(&self.shared.output_peaks) {
             published.raise(*peak);
             *peak = 0.0;

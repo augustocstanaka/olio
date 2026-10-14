@@ -1502,6 +1502,14 @@ impl OlioApp {
         self.generation = Some(generation);
     }
 
+    /// Where a building or evolving ambience playing live has got to.
+    fn ambience_now(&self) -> Option<olio_audio::ambience::Now> {
+        match &self.audio {
+            Audio::Running(engine) => engine.ambience_now(),
+            Audio::Unavailable { .. } => None,
+        }
+    }
+
     /// True while a track is being generated.
     pub fn is_generating(&self) -> bool {
         self.generation.is_some()
@@ -1927,7 +1935,11 @@ impl OlioApp {
             if ambience.enabled {
                 // The ambience's own bubble: its background and style; a
                 // click switches it off.
-                let emoji = generator::emoji(ambience.background);
+                // Where an evolving one has crossed to, if it has.
+                let background = self
+                    .ambience_now()
+                    .map_or(ambience.background, |now| now.background);
+                let emoji = generator::emoji(background);
                 let color = ui.visuals().weak_text_color();
                 let text = RichText::new(format!("■ {style_name}")).color(color);
                 let bubble = match self.images.texture(ui.ctx(), emoji) {
@@ -2250,6 +2262,7 @@ impl eframe::App for OlioApp {
                 details: self.prefs.generator_details,
                 styles: &self.prefs.styles,
                 saved: self.prefs.saved_style(),
+                now: self.ambience_now(),
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)

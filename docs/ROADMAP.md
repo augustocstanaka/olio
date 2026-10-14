@@ -45,8 +45,9 @@ are intentions, reordered as real use dictates.
   forest, desert, fire) and nine instruments (bass, harp, bells,
   strings, pad, drone, piano, plucked violin, hand drums) in a chosen
   mode or scale, with styles (built-in, or saved under your own name), a
-  character (variety, concentration, chaos), presence, endless or
-  pieces. It plays live
+  character (variety, concentration, chaos), a journey over time
+  (steady, building up, or evolving through related keys, moods and
+  backgrounds), presence, endless or pieces. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, undoable; `olio generate` and `cargo xtask

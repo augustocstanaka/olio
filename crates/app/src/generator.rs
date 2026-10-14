@@ -1,7 +1,7 @@
 //! The Generator: a panel in place of the inspector where the ambience is
 //! shaped, played live under the sounds, and rendered to tracks that land
-//! on tiles. It shows the essentials (style, mood, background,
-//! instruments); Details adds every setting (the character's amounts,
+//! on tiles. It shows the essentials (style, mood, how it changes over
+//! time, background, instruments); Details adds every setting (the character's amounts,
 //! each instrument's level, density and register, the key, presence and
 //! form) under the essential it belongs to. Custom settings can be saved
 //! as a style of one's own, listed after the built-in styles.
@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Key, Layout, RichText, Ui};
 use olio_audio::ambience::{
-    AmbienceSettings, Background, Density, Form, Instrument, Mood, Presence, ROOT_NAMES, Register,
-    ScaleKind, Style,
+    AmbienceSettings, Background, Density, Form, Instrument, Journey, Mood, Now, Presence,
+    ROOT_NAMES, Register, ScaleKind, Style,
 };
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Sound, Store};
@@ -85,6 +85,32 @@ pub fn character_words(settings: &AmbienceSettings) -> String {
         _ => "dissonant and unsettled",
     };
     format!("{variety}, {concentration}, {chaos}.")
+}
+
+/// `text` as a sentence: capitalised, with a full stop.
+fn sentence(text: &str) -> String {
+    let mut chars = text.chars();
+    let first = chars.next().map(|c| c.to_uppercase().to_string());
+    format!("{}{}.", first.unwrap_or_default(), chars.as_str())
+}
+
+/// Where a building or evolving ambience has got to: "Now: E Dorian,
+/// thunder; the harp resting."
+pub fn now_words(now: &Now) -> String {
+    let mut words = format!("Now: {}", now.scale.name());
+    if now.background != Background::None {
+        words.push_str(&format!(", {}", now.background.name().to_lowercase()));
+    }
+    if now.building {
+        words.push_str("; building up");
+    } else if let Some(instrument) = now.resting {
+        words.push_str(&format!(
+            "; the {} resting",
+            instrument.name().to_lowercase()
+        ));
+    }
+    words.push('.');
+    words
 }
 
 /// A track's title: its name (its style, saved or built-in, or its key
@@ -268,6 +294,8 @@ pub struct View<'a> {
     /// Styles of one's own, and the one the settings are, if any.
     pub styles: &'a [UserStyle],
     pub saved: Option<usize>,
+    /// Where a building or evolving ambience playing live has got to.
+    pub now: Option<Now>,
 }
 
 /// What the person did in the panel.
@@ -342,6 +370,10 @@ pub fn show(
             });
             section(ui, "Mood");
             mood(ui, settings, details);
+            section(ui, "Over time");
+            // One scope, so the line saying where it has got to never
+            // moves the ids of the widgets below.
+            ui.scope(|ui| over_time(ui, settings, view.now.as_ref()));
             section(ui, "Background");
             background(ui, settings, view.images);
             section(ui, "Instruments");
@@ -423,8 +455,9 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
             .width(width)
             .height(560.0)
             .show_ui(ui, |ui| {
-                // Whether it plays stays as it was, whichever is picked.
-                let enabled = settings.enabled;
+                // Whether it plays, and how it changes over time, stay as
+                // they were, whichever is picked.
+                let (enabled, journey) = (settings.enabled, settings.journey);
                 for style in Style::ALL {
                     let chosen = settings.style == Some(style);
                     if ui
@@ -435,6 +468,7 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
                     {
                         *settings = AmbienceSettings {
                             enabled,
+                            journey,
                             ..style.settings()
                         };
                     }
@@ -452,6 +486,7 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
                     {
                         *settings = AmbienceSettings {
                             enabled,
+                            journey,
                             ..style.settings
                         };
                     }
@@ -469,12 +504,7 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
         });
     });
     ui.weak(match (settings.style, saved) {
-        (Some(style), _) => {
-            let describe = style.describe();
-            let mut chars = describe.chars();
-            let first = chars.next().map(|c| c.to_uppercase().to_string());
-            format!("{}{}.", first.unwrap_or_default(), chars.as_str())
-        }
+        (Some(style), _) => sentence(style.describe()),
         (None, Some(_)) => format!("Your style: {}", summary(settings)),
         (None, None) => format!(
             "{}: {}.",
@@ -549,6 +579,22 @@ fn naming_row(ui: &mut Ui, naming: &mut Naming, styles: &[UserStyle], actions: &
         && let Some(style) = style_named(styles, &naming.text).and_then(|index| styles.get(index))
     {
         ui.weak(format!("Replaces the style “{}”", style.name));
+    }
+}
+
+/// Steady, building up or evolving, and where it has got to.
+fn over_time(ui: &mut Ui, settings: &mut AmbienceSettings, now: Option<&Now>) {
+    choose(
+        ui,
+        &mut settings.journey,
+        &Journey::ALL,
+        Journey::name,
+        Journey::describe,
+    );
+    ui.add_space(2.0);
+    ui.weak(sentence(settings.journey.describe()));
+    if let Some(now) = now {
+        ui.label(now_words(now));
     }
 }
 
@@ -910,6 +956,24 @@ mod tests {
         for background in Background::ALL {
             assert!(!emoji(background).is_empty());
         }
+    }
+
+    #[test]
+    fn where_an_evolving_ambience_has_got_to_reads_in_words() {
+        use olio_audio::ambience::{Mode, Scale};
+        let mut now = Now {
+            scale: Scale {
+                root: 4,
+                kind: ScaleKind::Mode(Mode::Dorian),
+            },
+            background: Background::Thunder,
+            resting: Some(Instrument::Harp),
+            building: false,
+        };
+        assert_eq!(now_words(&now), "Now: E Dorian, thunder; the harp resting.");
+        now.building = true;
+        now.background = Background::None;
+        assert_eq!(now_words(&now), "Now: E Dorian; building up.");
     }
 
     #[test]

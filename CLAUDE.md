@@ -12,7 +12,8 @@ and UI text.
   `reverb.rs` effect, `spectrum.rs` (FFT and spectrograms), `ambience/`
   (the Generator's music: `mod.rs` settings, scales and styles,
   `composer.rs` what plays when, `synth.rs` the instruments,
-  `background.rs` rain, waves, fire and the rest, `dsp.rs` shared
+  `background.rs` rain, waves, fire and the rest, `journey.rs` building
+  up and evolving over time, `dsp.rs` shared
   filters, `track.rs` rendering a track offline), and `engine.rs` (the
   app's handle on the mixer plus the cpal output stream). No UI or
   library dependency.

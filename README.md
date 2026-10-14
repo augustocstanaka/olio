@@ -17,7 +17,7 @@ raised buttons that press in while they play:
 The Generator makes gentle music and backgrounds, live or as tracks on
 tiles:
 
-![The Generator panel: Seaside Piano playing live, with its style, mood, background and instruments](docs/images/window-generator.png)
+![The Generator panel: Seaside Piano evolving as it plays live, building up from its first instrument, with its style, mood and background](docs/images/window-generator.png)
 
 > *Olio* is a medley, the same meaning as *farrago*.
 
@@ -67,8 +67,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
   and Large.
 - **Generate gentle music.** The Generator (⇧⌘G, or the Generator
   button in the status bar) makes up sparse, quiet music as it goes, in
-  place of the inspector. It shows the essentials (a style, a mood, a
-  background, which instruments play); **Details** adds every setting
+  place of the inspector. It shows the essentials (a style, a mood, how
+  it changes over time, a background, which instruments play);
+  **Details** adds every setting
   for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
@@ -84,6 +85,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
     down to gathered close around the chord and the home note) and
     *Chaos* (from in the key to notes outside it, clashing seconds,
     tritones and clusters);
+  - **over time**: *Steady*; *Builds up*, one instrument first and the
+    others joining one at a time as the mood opens; or *Evolves*, which
+    builds up and then every few minutes moves on to a related key, a
+    nearby mood, a related background, or lets an instrument rest; the
+    panel says where it has got to while it plays;
   - **presence**, from *Background* (barely there) to *Declarative*
     (louder, on a slow pulse, with cadences), and **form**: endless, or
     pieces that close on the root and pause.

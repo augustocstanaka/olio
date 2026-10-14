@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use olio_audio::ambience::Style;
+use olio_audio::ambience::{Journey, Style};
 use olio_audio::{WavFormat, render_track};
 use olio_library::{Set, Store};
 
@@ -115,6 +115,7 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut seed = None;
     // Variety, concentration and chaos, in percent, when asked for.
     let mut character: [Option<f32>; 3] = [None; 3];
+    let mut journey = None;
     let mut out = PathBuf::from("previews");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -162,6 +163,15 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                         .ok_or_else(|| format!("{arg} needs a percentage from 0 to 100"))?,
                 );
             }
+            "--journey" => {
+                let name = args.next().unwrap_or_default().to_lowercase();
+                journey = Some(match name.as_str() {
+                    "steady" => Journey::Steady,
+                    "build" | "builds up" => Journey::Build,
+                    "evolve" | "evolves" => Journey::Evolve,
+                    _ => return Err("--journey needs steady, build or evolve".to_owned()),
+                });
+            }
             "--out" => out = PathBuf::from(args.next().ok_or("--out needs a directory")?),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -184,6 +194,10 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                 *field = percent / 100.0;
                 asked.push(format!("{name} {percent}"));
             }
+        }
+        if let Some(journey) = journey {
+            settings.journey = journey;
+            asked.push(journey.name().to_lowercase());
         }
         let name = match asked.is_empty() {
             true => style.name().to_owned(),
@@ -227,13 +241,15 @@ mod tests {
             "20",
             "--chaos",
             "90",
+            "--journey",
+            "evolve",
             "--out",
             dir.path().to_str().unwrap(),
         ];
         assert_eq!(generate(args.iter().map(|arg| (*arg).to_owned())), 0);
         assert!(
             dir.path()
-                .join("Campfire (variety 20, chaos 90).wav")
+                .join("Campfire (variety 20, chaos 90, evolves).wav")
                 .exists()
         );
 
@@ -241,5 +257,7 @@ mod tests {
         assert_eq!(generate(unknown), 2);
         let wild = ["--chaos", "150"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(wild), 2);
+        let wandering = ["--journey", "wander"].iter().map(|arg| (*arg).to_owned());
+        assert_eq!(generate(wandering), 2);
     }
 }

@@ -259,6 +259,32 @@ impl Composer {
         self.music_gain
     }
 
+    /// True once the music has begun: from the first poll after a reset.
+    pub fn is_started(&self) -> bool {
+        self.started
+    }
+
+    /// Where the piece (or the endless music) began, in frames.
+    pub fn origin(&self) -> u64 {
+        self.origin
+    }
+
+    /// The key changed at `now`: what was waiting is dropped, the harmony
+    /// goes home in the new key, and the pad and strings voice it soon.
+    pub fn modulate(&mut self, settings: &AmbienceSettings, now: u64) {
+        if !self.started {
+            return;
+        }
+        self.clear_queue();
+        self.chord = 0;
+        self.cadence_step = 0;
+        self.next_harmony = now + self.harmony_span(settings);
+        for (instrument, seconds) in [(Instrument::Pad, 0.6), (Instrument::Strings, 1.5)] {
+            let next = &mut self.next[instrument.index()];
+            *next = (*next).min(now + frames(self.rate, seconds));
+        }
+    }
+
     /// Takes the next event due at or before `now`.
     pub fn due(&mut self, now: u64) -> Option<Event> {
         let first = self.queue[0]?;
@@ -323,6 +349,10 @@ impl Composer {
         for instrument in Instrument::ALL {
             let layer = settings.layer(instrument);
             if !layer.enabled {
+                if instrument == Instrument::Drone {
+                    // Sounded again when it comes back.
+                    self.drone_midi = None;
+                }
                 continue;
             }
             match instrument {

@@ -8,7 +8,8 @@
 //! The settings are built from independent parts, so each can grow on its
 //! own: the [`Scale`], the [`Layer`]s (one per [`Instrument`]), the
 //! [`Presence`] (how noticeable it is), the [`Form`] (endless, or pieces
-//! with a shape), the character (variety, concentration and chaos), and
+//! with a shape), the character (variety, concentration and chaos), the
+//! [`Journey`] (steady, building up, or evolving over time), and
 //! [`Style`] presets that fill them all in.
 //!
 //! [`composer`] decides what plays when with no audio in it, so the musical
@@ -19,6 +20,7 @@
 mod background;
 mod composer;
 mod dsp;
+mod journey;
 mod synth;
 mod track;
 
@@ -31,6 +33,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::mixer::Ramp;
 use background::Bed;
 pub use composer::{Composer, Event, Note, SHAKER};
+use journey::Course;
+pub use journey::{Journey, Now};
 use synth::Synth;
 pub use track::{TRACK_RATE, render_track};
 
@@ -724,6 +728,8 @@ pub struct AmbienceSettings {
     /// Beats per minute of the pulse, when there is one.
     pub tempo: u16,
     pub form: Form,
+    /// How it changes over time: steady, building up, or evolving.
+    pub journey: Journey,
     /// 0 to 1: how much the music keeps changing. Low comes back to a
     /// short motif and stays on few chords; high keeps finding new
     /// melodies, more chords and freer rhythms.
@@ -802,10 +808,12 @@ impl AmbienceSettings {
     }
 
     /// True when the music is the same: everything but whether it plays,
-    /// the variation and the style it came from.
+    /// how it changes over time, the variation and the style it came from.
+    /// Those are how a style is played, not what it is.
     pub fn same_music(&self, other: &Self) -> bool {
         Self {
             enabled: other.enabled,
+            journey: other.journey,
             seed: other.seed,
             style: other.style,
             ..*self
@@ -1069,6 +1077,7 @@ impl Style {
             presence,
             tempo: 60,
             form,
+            journey: Journey::Steady,
             variety: DEFAULT_VARIETY,
             concentration: DEFAULT_CONCENTRATION,
             chaos: 0.0,
@@ -1138,6 +1147,9 @@ const REVERB_SEND: f32 = 0.4;
 pub struct Ambience {
     rate: u32,
     settings: AmbienceSettings,
+    /// What plays now: the settings as the journey has taken them.
+    heard: AmbienceSettings,
+    course: Course,
     composer: Composer,
     synth: Synth,
     bed: Bed,
@@ -1157,6 +1169,8 @@ impl Ambience {
         Self {
             rate,
             settings,
+            heard: settings,
+            course: Course::new(rate, seed),
             composer: Composer::new(rate, seed),
             synth: Synth::new(rate, seed ^ 0x9E37_79B9_7F4A_7C15),
             bed: Bed::new(rate, seed.rotate_left(17)),
@@ -1172,25 +1186,46 @@ impl Ambience {
 
     /// Applies new settings: on and off fade over a second; the background
     /// crosses over; the key, layers and form take effect from the next
-    /// event, and a new seed starts the music afresh.
+    /// event, and a new seed, form or journey starts the music afresh.
     pub fn set(&mut self, settings: AmbienceSettings) {
         let settings = settings.clamped();
         let was_on = self.settings.enabled;
-        if settings.enabled != was_on {
+        let afresh = if settings.enabled != was_on {
             let target = if settings.enabled { 1.0 } else { 0.0 };
             self.gain.towards(target, self.rate);
-            if settings.enabled {
-                self.composer.reset(settings.seed);
-            }
-        } else if settings.seed != self.settings.seed || settings.form != self.settings.form {
-            self.composer.reset(settings.seed);
-        }
-        self.bed.set_background(if settings.enabled {
-            settings.background
+            settings.enabled
         } else {
-            self.settings.background
-        });
+            settings.seed != self.settings.seed
+                || settings.form != self.settings.form
+                || settings.journey != self.settings.journey
+        };
+        if afresh {
+            self.composer.reset(settings.seed);
+            self.course.reset(settings.seed, self.clock);
+        }
         self.settings = settings;
+    }
+
+    /// What a building or evolving ambience plays now; `None` when it is
+    /// off or steady.
+    pub fn now(&self) -> Option<Now> {
+        (self.settings.enabled && self.settings.journey != Journey::Steady)
+            .then(|| self.course.now(&self.heard))
+    }
+
+    /// Takes up what the journey says plays now: the background crosses
+    /// over, a change of key lets held notes go and voices the new chord,
+    /// and the synth follows the layers.
+    fn follow(&mut self, heard: AmbienceSettings, now: u64) {
+        let before = std::mem::replace(&mut self.heard, heard);
+        self.bed.set_background(heard.background);
+        if heard.scale != before.scale {
+            self.synth.release_held();
+            self.composer.modulate(&heard, now);
+        }
+        if heard.layers != before.layers {
+            self.synth.follow(&heard);
+        }
     }
 
     /// True while anything may be heard.
@@ -1221,14 +1256,22 @@ impl Ambience {
         }
         let (from, to) = (self.clock, self.clock + frames as u64);
         if self.settings.enabled {
-            self.composer.poll(&self.settings, from, to);
+            // A composer about to start begins its first piece now.
+            let piece = if self.composer.is_started() {
+                self.composer.origin()
+            } else {
+                from
+            };
+            let heard = self.course.settings(&self.settings, from, piece);
+            self.follow(heard, from);
+            self.composer.poll(&self.heard, from, to);
         }
         let music_gain = self.composer.music_gain();
         let (sends, _) = bus.as_chunks_mut::<2>();
         for (i, (frame, send)) in out.chunks_exact_mut(channels).zip(sends).enumerate() {
             let now = from + i as u64;
             while let Some(event) = self.composer.due(now) {
-                self.synth.play(event, &self.settings);
+                self.synth.play(event, &self.heard);
             }
             let gain = self.gain.next() * self.duck.next() * level;
             let (mut left, mut right) = self.bed.next();
@@ -1351,9 +1394,48 @@ mod tests {
             ..rain
         };
         assert!(rain.same_music(&other));
+        other.journey = Journey::Evolve;
+        assert!(rain.same_music(&other), "a way of playing it");
         other.chaos = 0.3;
         assert!(!rain.same_music(&other));
         assert!(!rain.same_music(&Style::Campfire.settings()));
+    }
+
+    #[test]
+    fn the_drone_follows_its_level_and_stops_when_switched_off() {
+        let mut settings = Style::Cathedral.settings();
+        settings.enabled = true;
+        for instrument in Instrument::ALL {
+            settings.layers[instrument].enabled = instrument == Instrument::Drone;
+        }
+        let rate = 48_000;
+        // The level over the last second of `seconds` more.
+        let level = |ambience: &mut Ambience, seconds: usize| {
+            let mut out = vec![0.0; rate * seconds * 2];
+            let mut bus = vec![0.0; rate * seconds * 2];
+            ambience.render(&mut out, &mut bus, 2, false);
+            let last = &out[out.len() - rate * 2..];
+            (last.iter().map(|s| s * s).sum::<f32>() / last.len() as f32).sqrt()
+        };
+        let mut ambience = Ambience::new(rate as u32, 3);
+        ambience.set(settings);
+        let full = level(&mut ambience, 8);
+        assert!(full > 0.0);
+        settings.layers[Instrument::Drone].level = 0.25;
+        ambience.set(settings);
+        let quiet = level(&mut ambience, 4);
+        assert!(
+            quiet < full * 0.6 && quiet > full * 0.1,
+            "{quiet} from {full}"
+        );
+        settings.layers[Instrument::Drone].enabled = false;
+        ambience.set(settings);
+        let off = level(&mut ambience, 6);
+        assert!(off < full * 0.01, "{off}");
+        settings.layers[Instrument::Drone].enabled = true;
+        ambience.set(settings);
+        let again = level(&mut ambience, 8);
+        assert!(again > full * 0.2, "back: {again}");
     }
 
     #[test]

@@ -342,6 +342,10 @@ impl Sustained {
 struct DroneVoice {
     phases: [f32; 4],
     steps: [f32; 4],
+    /// The layer's level, followed smoothly so a slider never clicks.
+    level: f32,
+    level_target: f32,
+    level_step: f32,
     env: f32,
     target: f32,
     rate_in: f32,
@@ -356,6 +360,9 @@ impl DroneVoice {
         Self {
             phases: [0.0; 4],
             steps: [0.0; 4],
+            level: 0.0,
+            level_target: 0.0,
+            level_step: 0.0,
             env: 0.0,
             target: 0.0,
             rate_in: 0.0,
@@ -366,7 +373,12 @@ impl DroneVoice {
         }
     }
 
-    fn tune(&mut self, rate: u32, midi: u8) {
+    fn tune(&mut self, rate: u32, midi: u8, level: f32) {
+        if !self.active {
+            self.level = level;
+        }
+        self.level_target = level;
+        self.level_step = 1.0 - (-1.0 / (0.5 * rate as f32)).exp();
         let base = hz(midi) / rate as f32;
         self.steps = [base, base * 2.0, base * 3.0, base * 1.5];
         self.rate_in = 1.0 - (-1.0 / (4.0 * rate as f32)).exp();
@@ -392,6 +404,7 @@ impl DroneVoice {
             }
         }
         self.breath = (self.breath + self.breath_step).fract();
+        self.level += (self.level_target - self.level) * self.level_step;
         let swell = 0.75 + 0.25 * (self.breath * TAU).sin();
         let amps = [1.0, 0.45, 0.18, 0.3];
         let mut out = 0.0;
@@ -399,7 +412,9 @@ impl DroneVoice {
             out += (*phase * TAU).sin() * amp;
             *phase = (*phase + step).fract();
         }
-        out * self.env * swell * 0.16
+        // At the styles' usual level, about 0.6, as loud as before the
+        // drone followed its level.
+        out * self.env * swell * 0.27 * self.level
     }
 }
 
@@ -669,6 +684,28 @@ impl Synth {
             || self.drums.iter().any(|d| d.active)
     }
 
+    /// Lets every held note go: the strings and pad fade from here, as at
+    /// the end of their hold. For a change of key.
+    pub(super) fn release_held(&mut self) {
+        for voice in self.strings.iter_mut().chain(self.pad.iter_mut()) {
+            voice.hold = 0;
+        }
+    }
+
+    /// Follows the layers between notes: the drone takes its level, and
+    /// fades out when its layer is off. Other instruments take theirs with
+    /// each note.
+    pub(super) fn follow(&mut self, settings: &AmbienceSettings) {
+        let layer = settings.layer(Instrument::Drone);
+        for drone in &mut self.drone {
+            if !layer.enabled {
+                drone.release();
+            } else if drone.target > 0.0 {
+                drone.level_target = layer.level;
+            }
+        }
+    }
+
     /// Starts a note. A full pool takes the voice nearest its end.
     pub(super) fn play(&mut self, event: Event, settings: &AmbienceSettings) {
         let note = event.note;
@@ -727,7 +764,7 @@ impl Synth {
             Instrument::Drone => {
                 self.drone[self.drone_live].release();
                 self.drone_live = 1 - self.drone_live;
-                self.drone[self.drone_live].tune(self.rate, note.midi);
+                self.drone[self.drone_live].tune(self.rate, note.midi, velocity);
             }
             Instrument::Piano => {
                 let index = self
@@ -875,6 +912,40 @@ mod tests {
 
     fn peak(samples: &[f32]) -> f32 {
         samples.iter().map(|s| s.abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn held_notes_let_go_at_once_for_a_change_of_key() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let settings = AmbienceSettings {
+            enabled: true,
+            ..Style::Affirmation.settings()
+        };
+        let note = Note {
+            instrument: Instrument::Pad,
+            midi: 60,
+            velocity: 0.8,
+            pan: 0.0,
+            duration: rate as u64 * 20,
+        };
+        synth.play(Event { at: 0, note }, &settings);
+        for _ in 0..rate {
+            synth.next(1.0);
+        }
+        assert!(
+            synth
+                .pad
+                .iter()
+                .any(|voice| voice.active && !voice.releasing)
+        );
+        synth.release_held();
+        // Well before its twenty seconds, gone within its release.
+        for _ in 0..rate * 8 {
+            synth.next(1.0);
+        }
+        assert!(!synth.pad.iter().any(|voice| voice.active));
     }
 
     #[test]

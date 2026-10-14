@@ -186,9 +186,20 @@ Restless or Unsettled. Picking one sets Variety, Concentration and Chaos;
 moving any of them leaves the mood Custom.
 _Avoid_: feel, vibe, character preset
 
+**Journey**:
+How the Generator's music changes over time, in the panel's Over time
+row: **Steady** (the same all the way through), **Builds up** (one
+instrument first, the others joining one at a time as the mood opens) or
+**Evolves** (builds up, then every few minutes moves on: to a related
+key, a nearby mood, a background related to the chosen one, an
+instrument resting or coming back; with pieces, between pieces). A way
+of playing a style, like playing it live: it is kept when another style
+is picked and never makes the settings Custom.
+_Avoid_: progression (that is harmony), automation, arc
+
 **Details**:
-The Generator's switch between the essentials (style, mood, background,
-which instruments play) and every setting.
+The Generator's switch between the essentials (style, mood, journey,
+background, which instruments play) and every setting.
 _Avoid_: advanced, expert mode
 
 **Bubble**:

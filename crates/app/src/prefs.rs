@@ -177,7 +177,8 @@ fn seconds(value: f32) -> String {
     format!("{text} s")
 }
 
-/// A style of one's own: Generator settings saved under a name.
+/// A style of one's own: Generator settings saved under a name. Picking
+/// it keeps whether the ambience plays and how it changes over time.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserStyle {

@@ -238,6 +238,13 @@ impl Engine {
         self.shared.position(voice)
     }
 
+    /// What a building or evolving ambience plays now (its key,
+    /// background, an instrument resting, whether it is still building),
+    /// as of the last buffer; `None` when it is off or steady.
+    pub fn ambience_now(&self) -> Option<crate::ambience::Now> {
+        self.shared.ambience_now()
+    }
+
     /// The loudest output sample on the first two channels since the last
     /// call, linear: 1.0 is full scale, and above it the output clipped.
     /// Measured after the master gain. For level meters.

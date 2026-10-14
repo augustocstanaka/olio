@@ -10,8 +10,8 @@
 //! without opening a window, for scripts (see `docs/BOARD-JSON.md`).
 //!
 //! `olio generate [--style NAME|all] [--seconds N] [--seed N] [--variety
-//! N] [--concentration N] [--chaos N] [--out DIR]` renders the Generator's
-//! styles to WAV files, without a window.
+//! N] [--concentration N] [--chaos N] [--journey NAME] [--out DIR]`
+//! renders the Generator's styles to WAV files, without a window.
 
 pub mod app;
 pub mod cli;
@@ -43,7 +43,8 @@ pub const USAGE: &str = "\
 usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
        olio import [--library DIR] [--set NAME] [--force] PATH...
        olio generate [--style NAME|all] [--seconds N] [--seed N]
-                     [--variety N] [--concentration N] [--chaos N] [--out DIR]
+                     [--variety N] [--concentration N] [--chaos N]
+                     [--journey steady|build|evolve] [--out DIR]
 
   --library DIR       use the library in DIR (default: $OLIO_LIBRARY, or the
                       per-user data folder)
@@ -65,6 +66,8 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
   --variety N         the character, 0 to 100 percent, in place of the
   --concentration N   style's own; the file name says which were set,
   --chaos N           as in \"Campfire (chaos 90).wav\"
+  --journey NAME      steady, build (one instrument at a time) or evolve
+                      (builds, then moves on every few minutes)
   --out DIR           where the files go (default: previews)
 ";
 
