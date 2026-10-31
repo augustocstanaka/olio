@@ -9,11 +9,14 @@
 //!
 //! The settings live in the preferences and go to the engine when they
 //! change. A track is rendered on a thread of its own ([`Generation`]),
-//! written as a WAV into the library and placed on a tile by the app.
+//! written as a WAV into the library and placed on a tile by the app. With
+//! the music model installed, a track can be made from a prompt instead
+//! (From a prompt): the same thread asks the model for it.
 
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,6 +31,9 @@ use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
 use crate::instruments::{PACK_BYTES, megabytes};
+use crate::music_model::client::{Client, Request};
+use crate::music_model::server::{START_TIMEOUT, Server};
+use crate::music_model::{DISK_BYTES, about_gigabytes};
 use crate::prefs::{UserStyle, style_name_problem, style_named};
 use crate::{inspector, menu};
 
@@ -120,6 +126,47 @@ pub fn now_words(now: &Now) -> String {
 /// when Custom) and its length: "Rain Study 2 min", "D Dorian 30 s".
 pub fn track_title(name: &str, seconds: u32) -> String {
     format!("{name} {}", length_name(seconds))
+}
+
+/// The emoji on a prompted track's tile.
+pub const PROMPT_EMOJI: &str = "🎼";
+
+/// How much of a prompt a track's title keeps.
+const TITLE_CHARS: usize = 40;
+
+/// A prompted track's title: the prompt, tidied and cut at a word to
+/// about forty characters, and its length: "Warm piano over soft rain 2
+/// min". Characters a file name cannot hold become dashes.
+pub fn prompt_track_title(prompt: &str, seconds: u32) -> String {
+    let words: Vec<&str> = prompt.split_whitespace().collect();
+    let mut title = String::new();
+    for word in words {
+        let next = if title.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{title} {word}")
+        };
+        if !title.is_empty() && next.chars().count() > TITLE_CHARS {
+            break;
+        }
+        title = next;
+    }
+    if title.chars().count() > TITLE_CHARS {
+        title = title.chars().take(TITLE_CHARS).collect();
+    }
+    let mut title: String = title
+        .chars()
+        .map(|c| if "/\\:*?\"<>|".contains(c) { '-' } else { c })
+        .collect();
+    if let Some(first) = title.chars().next()
+        && first.is_lowercase()
+    {
+        title = first.to_uppercase().chain(title.chars().skip(1)).collect();
+    }
+    if title.is_empty() {
+        title = "Prompt".to_owned();
+    }
+    track_title(title.trim_end_matches(['.', ',', ' ']), seconds)
 }
 
 /// The settings in a line: "G Aeolian, rain; harp and bass."
@@ -266,20 +313,43 @@ pub struct Made {
     pub stopped: Option<Stop>,
 }
 
-/// Tracks being rendered, one after another, on a thread of their own.
+/// How far something has got: a generation, or the music model's install.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Progress {
+    /// 0 to 1.
+    Fraction(f32),
+    /// Unknown: what is going on, and for how long.
+    Indeterminate {
+        words: &'static str,
+        elapsed: Duration,
+    },
+}
+
+/// Tracks being rendered, one after another, or a prompted track being
+/// made by the music model, on a thread of their own.
 pub struct Generation {
     /// A track's title, or the new set's name.
     pub title: String,
     pub destination: Destination,
     /// Each track's emoji, for its tile.
     pub emojis: Vec<&'static str>,
-    /// How far, as `f32` bits, 0 to 1, over every track.
+    /// How far, as `f32` bits, 0 to 1, over every track; NaN while
+    /// unknown (the music model says nothing of how far it is).
     progress: Arc<AtomicU32>,
     /// The track being rendered.
     current: Arc<AtomicUsize>,
+    /// For a prompted track: `STARTING` while the music model starts.
+    phase: Arc<AtomicU8>,
     cancel: Arc<AtomicBool>,
     done: mpsc::Receiver<Made>,
+    started: Instant,
+    /// The music model a prompted track comes from: stopped on Cancel, so
+    /// a request it is still loading for ends at once.
+    server: Option<Arc<Mutex<Server>>>,
+    prompted: bool,
 }
+
+const STARTING: u8 = 1;
 
 impl Generation {
     /// Starts rendering `seconds` of each track into the library in
@@ -296,23 +366,72 @@ impl Generation {
         pack: Option<Pack>,
         destination: Destination,
     ) -> Self {
-        let progress = Arc::new(AtomicU32::new(0));
-        let current = Arc::new(AtomicUsize::new(0));
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (sender, done) = mpsc::channel();
         let emojis = tracks
             .iter()
             .map(|track| emoji(track.settings.background))
             .collect();
-        let job = Job {
-            ctx: ctx.clone(),
-            store,
+        let work = Work::Ambience {
             tracks,
             seconds,
             recorded,
             pack,
+        };
+        Self::spawn(ctx, store, title, emojis, destination, work, None)
+    }
+
+    /// Starts making a track from `request` with the music model `client`
+    /// talks to (running as `server`, if the app started it).
+    pub fn start_prompted(
+        ctx: egui::Context,
+        store: Store,
+        title: String,
+        request: Request,
+        client: Client,
+        server: Option<Arc<Mutex<Server>>>,
+        destination: Destination,
+    ) -> Self {
+        let work = Work::Prompt {
+            title: title.clone(),
+            request,
+            client,
+        };
+        Self::spawn(
+            ctx,
+            store,
+            title,
+            vec![PROMPT_EMOJI],
+            destination,
+            work,
+            server,
+        )
+    }
+
+    fn spawn(
+        ctx: egui::Context,
+        store: Store,
+        title: String,
+        emojis: Vec<&'static str>,
+        destination: Destination,
+        work: Work,
+        server: Option<Arc<Mutex<Server>>>,
+    ) -> Self {
+        let prompted = matches!(work, Work::Prompt { .. });
+        let progress = Arc::new(AtomicU32::new(if prompted {
+            f32::NAN.to_bits()
+        } else {
+            0
+        }));
+        let current = Arc::new(AtomicUsize::new(0));
+        let phase = Arc::new(AtomicU8::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (sender, done) = mpsc::channel();
+        let job = Job {
+            ctx: ctx.clone(),
+            store,
+            work,
             progress: Arc::clone(&progress),
             current: Arc::clone(&current),
+            phase: Arc::clone(&phase),
             cancel: Arc::clone(&cancel),
         };
         let spawned = thread::Builder::new()
@@ -332,14 +451,31 @@ impl Generation {
             emojis,
             progress,
             current,
+            phase,
             cancel,
             done,
+            started: Instant::now(),
+            server,
+            prompted,
         }
     }
 
-    /// 0 to 1, over every track.
-    pub fn progress(&self) -> f32 {
-        f32::from_bits(self.progress.load(Ordering::Relaxed))
+    /// How far: 0 to 1 over every track, or, for a prompted track, what is
+    /// going on and for how long.
+    pub fn progress(&self) -> Progress {
+        let done = f32::from_bits(self.progress.load(Ordering::Relaxed));
+        if done.is_finite() {
+            return Progress::Fraction(done);
+        }
+        let words = if self.phase.load(Ordering::Relaxed) == STARTING {
+            "Starting the music model for"
+        } else {
+            "Generating"
+        };
+        Progress::Indeterminate {
+            words,
+            elapsed: self.started.elapsed(),
+        }
     }
 
     /// The track being rendered, from 1, and how many there are.
@@ -349,8 +485,20 @@ impl Generation {
         (current.min(count), count)
     }
 
+    /// True for a track made by the music model.
+    pub fn is_prompted(&self) -> bool {
+        self.prompted
+    }
+
+    /// Stops: a prompted track's music model too, so a request it is still
+    /// loading for ends at once (the next prompt starts it again).
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
+        if let Some(server) = &self.server
+            && let Ok(mut server) = server.lock()
+        {
+            server.stop();
+        }
     }
 
     /// What was made, once it is done.
@@ -368,27 +516,74 @@ impl Generation {
     }
 }
 
+/// What a generation makes its tracks from.
+enum Work {
+    /// The ambience rendered, track after track.
+    Ambience {
+        tracks: Vec<TrackPlan>,
+        seconds: u32,
+        recorded: Recordings,
+        pack: Option<Pack>,
+    },
+    /// The music model asked for one track.
+    Prompt {
+        title: String,
+        request: Request,
+        client: Client,
+    },
+}
+
 struct Job {
     ctx: egui::Context,
     store: Store,
-    tracks: Vec<TrackPlan>,
-    seconds: u32,
-    recorded: Recordings,
-    pack: Option<Pack>,
+    work: Work,
     progress: Arc<AtomicU32>,
     current: Arc<AtomicUsize>,
+    phase: Arc<AtomicU8>,
     cancel: Arc<AtomicBool>,
 }
 
 impl Job {
     fn run(mut self) -> Made {
+        let work = std::mem::replace(
+            &mut self.work,
+            Work::Ambience {
+                tracks: Vec::new(),
+                seconds: 0,
+                recorded: Recordings::default(),
+                pack: None,
+            },
+        );
+        match work {
+            Work::Ambience {
+                tracks,
+                seconds,
+                mut recorded,
+                pack,
+            } => self.render_all(&tracks, seconds, &mut recorded, pack.as_ref()),
+            Work::Prompt {
+                title,
+                request,
+                client,
+            } => self.prompt(&title, &request, &client),
+        }
+    }
+
+    fn render_all(
+        &self,
+        tracks: &[TrackPlan],
+        seconds: u32,
+        recorded: &mut Recordings,
+        pack: Option<&Pack>,
+    ) -> Made {
         let mut sounds = Vec::new();
-        let count = self.tracks.len().max(1) as f32;
-        let tracks = std::mem::take(&mut self.tracks);
+        let count = tracks.len().max(1) as f32;
         for (index, track) in tracks.iter().enumerate() {
             self.current.store(index, Ordering::Relaxed);
-            self.load_for(track);
-            match self.render(track, |done| (index as f32 + done) / count) {
+            load_for(track, recorded, pack);
+            match self.render(track, seconds, recorded, |done| {
+                (index as f32 + done) / count
+            }) {
                 Ok(Some(sound)) => sounds.push(sound),
                 Ok(None) => {
                     return Made {
@@ -410,64 +605,112 @@ impl Job {
         }
     }
 
-    /// Loads from the pack any recorded instrument the track plays that is
-    /// not loaded yet; one that will not load stays synthesised.
-    fn load_for(&mut self, track: &TrackPlan) {
-        let Some(pack) = &self.pack else {
-            return;
-        };
-        for instrument in track.settings.playing() {
-            if self.recorded.get(instrument).is_none()
-                && pack.instruments().any(|i| i == instrument)
-                && let Ok(Some(samples)) = pack.load(instrument)
-            {
-                self.recorded.set(instrument, Some(Arc::new(samples)));
-            }
-        }
-    }
-
     /// Renders one track and imports it: `None` if cancelled. `overall`
     /// turns its own progress into the whole generation's.
     fn render(
         &self,
         track: &TrackPlan,
+        seconds: u32,
+        recorded: &Recordings,
         overall: impl Fn(f32) -> f32,
     ) -> Result<Option<Sound>, String> {
         let mut shown = Instant::now();
-        let clip = render_track(
-            &track.settings,
-            self.seconds as f32,
-            &self.recorded,
-            |done| {
-                self.progress
-                    .store(overall(done).to_bits(), Ordering::Relaxed);
-                if shown.elapsed() > Duration::from_millis(100) {
-                    shown = Instant::now();
-                    self.ctx.request_repaint();
-                }
-                !self.cancel.load(Ordering::Relaxed)
-            },
-        );
+        let clip = render_track(&track.settings, seconds as f32, recorded, |done| {
+            self.progress
+                .store(overall(done).to_bits(), Ordering::Relaxed);
+            if shown.elapsed() > Duration::from_millis(100) {
+                shown = Instant::now();
+                self.ctx.request_repaint();
+            }
+            !self.cancel.load(Ordering::Relaxed)
+        });
         let Some(clip) = clip else {
             return Ok(None);
         };
-        // Written beside the library, then imported like any sound: the
-        // file name gives the tile its title.
-        let folder = self.store.root().join("generating");
-        fs::create_dir_all(&folder).map_err(|err| err.to_string())?;
-        let name: String = track
-            .title
-            .chars()
-            .map(|c| if "/\\:*?\"<>|".contains(c) { '-' } else { c })
-            .collect();
-        let path = folder.join(format!("{name}.wav"));
-        clip.write_wav(&path, WavFormat::Int16)
-            .map_err(|err| err.to_string())?;
-        let sound = self.store.import_sound(&path);
-        let _ = fs::remove_file(&path);
-        let _ = fs::remove_dir(&folder);
-        sound.map(Some).map_err(|err| err.to_string())
+        import_track(&self.store, &track.title, |path| {
+            clip.write_wav(path, WavFormat::Int16)
+                .map(|()| true)
+                .map_err(|err| err.to_string())
+        })
     }
+
+    /// Waits for the music model, asks it for the track and imports it.
+    fn prompt(&self, title: &str, request: &Request, client: &Client) -> Made {
+        let stopped = |stop| Made {
+            sounds: Vec::new(),
+            stopped: Some(stop),
+        };
+        self.phase.store(STARTING, Ordering::Relaxed);
+        self.ctx.request_repaint();
+        match client.wait_healthy(START_TIMEOUT, &self.cancel) {
+            Ok(true) => {}
+            Ok(false) => return stopped(Stop::Cancelled),
+            Err(err) => return stopped(Stop::Failed(err)),
+        }
+        self.phase.store(0, Ordering::Relaxed);
+        self.ctx.request_repaint();
+        let made = import_track(&self.store, title, |path| {
+            client
+                .generate(request, path, &self.cancel)
+                .map(|made| made.is_some())
+        });
+        match made {
+            Ok(Some(sound)) => Made {
+                sounds: vec![sound],
+                stopped: None,
+            },
+            Ok(None) => stopped(Stop::Cancelled),
+            // A request the model was stopped under fails: that was the
+            // cancel.
+            Err(_) if self.cancel.load(Ordering::Relaxed) => stopped(Stop::Cancelled),
+            Err(err) => stopped(Stop::Failed(err)),
+        }
+    }
+}
+
+/// Loads from the pack any recorded instrument the track plays that is
+/// not loaded yet; one that will not load stays synthesised.
+fn load_for(track: &TrackPlan, recorded: &mut Recordings, pack: Option<&Pack>) {
+    let Some(pack) = pack else {
+        return;
+    };
+    for instrument in track.settings.playing() {
+        if recorded.get(instrument).is_none()
+            && pack.instruments().any(|i| i == instrument)
+            && let Ok(Some(samples)) = pack.load(instrument)
+        {
+            recorded.set(instrument, Some(Arc::new(samples)));
+        }
+    }
+}
+
+/// Imports a track `write` puts at the path it is given, beside the
+/// library: the file is named after the title, which so becomes the
+/// tile's. `write` gives false when it stopped short (`None` here).
+fn import_track(
+    store: &Store,
+    title: &str,
+    write: impl FnOnce(&Path) -> Result<bool, String>,
+) -> Result<Option<Sound>, String> {
+    let folder = store.root().join("generating");
+    fs::create_dir_all(&folder).map_err(|err| err.to_string())?;
+    let name: String = title
+        .chars()
+        .map(|c| if "/\\:*?\"<>|".contains(c) { '-' } else { c })
+        .collect();
+    let path = folder.join(format!("{name}.wav"));
+    let written = write(&path);
+    let sound = match written {
+        Ok(true) => store
+            .import_sound(&path)
+            .map(Some)
+            .map_err(|err| err.to_string()),
+        Ok(false) => Ok(None),
+        Err(err) => Err(err),
+    };
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_dir(&folder);
+    sound
 }
 
 // ----- the panel -----------------------------------------------------------
@@ -494,8 +737,7 @@ impl Naming {
 pub struct Busy<'a> {
     /// A track's title, or a new set's name.
     pub title: &'a str,
-    /// 0 to 1, over every track.
-    pub progress: f32,
+    pub progress: Progress,
     /// For a set: the track being rendered, from 1, and how many.
     pub track: Option<(usize, usize)>,
 }
@@ -519,6 +761,26 @@ pub struct View<'a> {
     pub before_surprise: Option<&'a str>,
     /// Whether the recorded instruments are installed, downloading or on.
     pub recorded: Recorded,
+    /// Whether the music model is installed, installing or running.
+    pub music_model: MusicModel,
+}
+
+/// Where the music model is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MusicModel {
+    /// Nowhere to install it.
+    Unavailable,
+    /// Not installed: the panel offers the install.
+    Missing,
+    /// Installing: what is going on, and how far where known.
+    Installing {
+        words: &'static str,
+        done: Option<f32>,
+    },
+    /// Installed, its process running or not.
+    Installed { running: bool },
+    /// Being removed.
+    Removing,
 }
 
 /// Where the recorded instruments are.
@@ -566,6 +828,13 @@ pub enum Action {
     CancelDownload,
     /// Play the recorded instruments (or the synthesised ones).
     RecordedInstruments(bool),
+    /// Install the music model, or stop installing it.
+    InstallMusicModel,
+    CancelInstall,
+    /// Generate a track of the picked length from the prompt.
+    GeneratePrompt,
+    /// Remove the music model, once confirmed.
+    RemoveMusicModel,
 }
 
 pub fn show(
@@ -573,6 +842,7 @@ pub fn show(
     settings: &mut AmbienceSettings,
     view: &View,
     naming: &mut Option<Naming>,
+    prompt: &mut String,
 ) -> Vec<Action> {
     let before = *settings;
     let mut actions = Vec::new();
@@ -639,6 +909,13 @@ pub fn show(
             }
             if settings.layers.iter().all(|layer| !layer.enabled) {
                 ui.weak("No instruments: the background only.");
+            }
+            if view.music_model != MusicModel::Unavailable {
+                section(ui, "From a prompt").on_hover_text(
+                    "A track the music model makes from words, not from the settings above",
+                );
+                // In one scope: it changes as the model installs.
+                ui.scope(|ui| prompt_section(ui, view, prompt, &mut actions));
             }
             if details {
                 section(ui, "Form");
@@ -1152,6 +1429,91 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
     }
 }
 
+/// The music model: offered for install, installing, or, installed, the
+/// prompt and the button that makes a track of it.
+fn prompt_section(ui: &mut Ui, view: &View, prompt: &mut String, actions: &mut Vec<Action>) {
+    const ABOUT: &str = "ACE-Step 1.5, an open-source music model, installed once into the \
+                         per-user data folder with the Python it needs. It runs on this \
+                         computer; nothing you type leaves it. It takes about 8 GB of memory \
+                         while it runs";
+    match view.music_model {
+        MusicModel::Unavailable => {}
+        MusicModel::Missing => {
+            let label = format!("Install Music Model ({})", about_gigabytes(DISK_BYTES));
+            if ui.button(label).on_hover_text(ABOUT).clicked() {
+                actions.push(Action::InstallMusicModel);
+            }
+            ui.weak("Tracks from a few words, once the music model is installed.");
+        }
+        MusicModel::Installing { words, done } => {
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Stop Install")
+                    .on_hover_text("Stop; Install Music Model later goes on from here")
+                    .clicked()
+                {
+                    actions.push(Action::CancelInstall);
+                }
+                let text = match done {
+                    Some(done) => {
+                        format!("Installing the music model: {words} {:.0} %", done * 100.0)
+                    }
+                    None => format!("Installing the music model: {words}…"),
+                };
+                let bar = egui::ProgressBar::new(done.unwrap_or(0.0))
+                    .animate(done.is_none())
+                    .text(text);
+                ui.add(bar);
+            });
+        }
+        MusicModel::Removing => {
+            ui.weak("Removing the music model…");
+        }
+        MusicModel::Installed { running } => {
+            let edit = egui::TextEdit::multiline(prompt)
+                .desired_rows(3)
+                .desired_width(f32::INFINITY)
+                .hint_text("Instruments, mood, tempo: “warm piano over soft rain, slow”");
+            ui.add(edit)
+                .on_hover_text("What the track is made from. Prompted tracks are instrumental");
+            ui.add_space(4.0);
+            let ready = view.busy.is_none() && !prompt.trim().is_empty();
+            let generate = egui::Button::new("Generate from Prompt")
+                .min_size(egui::vec2(ui.available_width(), 28.0));
+            if ui
+                .add_enabled(ready, generate)
+                .on_hover_text(
+                    "Asks the music model for this much music from these words, then puts \
+                     it on a tile to play, loop and polish like any other",
+                )
+                .clicked()
+            {
+                actions.push(Action::GeneratePrompt);
+            }
+            ui.weak(format!(
+                "{} onto a tile in “{}”",
+                length_name(view.track_seconds),
+                view.set_name
+            ));
+            if view.details {
+                ui.add_space(4.0);
+                ui.weak(if running {
+                    "The music model is running (about 6 GB); it stops after ten minutes unused."
+                } else {
+                    "The music model is installed and stopped."
+                });
+                if ui
+                    .button("Remove Music Model…")
+                    .on_hover_text("Its files (about 10 GB) go; tracks made from it stay")
+                    .clicked()
+                {
+                    actions.push(Action::RemoveMusicModel);
+                }
+            }
+        }
+    }
+}
+
 /// Each instrument on or off, side by side.
 fn instrument_chips(ui: &mut Ui, settings: &mut AmbienceSettings) {
     ui.horizontal_wrapped(|ui| {
@@ -1403,15 +1765,30 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
                 {
                     actions.push(Action::Cancel);
                 }
-                let percent = busy.progress * 100.0;
-                let text = match busy.track {
-                    Some((track, count)) => format!(
-                        "Generating “{}”: {track} of {count}, {percent:.0} %",
-                        busy.title
-                    ),
-                    None => format!("Generating “{}” {percent:.0} %", busy.title),
+                let bar = match busy.progress {
+                    Progress::Fraction(done) => {
+                        let percent = done * 100.0;
+                        let text = match busy.track {
+                            Some((track, count)) => format!(
+                                "Generating “{}”: {track} of {count}, {percent:.0} %",
+                                busy.title
+                            ),
+                            None => format!("Generating “{}” {percent:.0} %", busy.title),
+                        };
+                        egui::ProgressBar::new(done).text(text)
+                    }
+                    Progress::Indeterminate { words, elapsed } => {
+                        let seconds = elapsed.as_secs();
+                        let text = format!(
+                            "{words} “{}”… {}:{:02}",
+                            busy.title,
+                            seconds / 60,
+                            seconds % 60
+                        );
+                        egui::ProgressBar::new(0.0).animate(true).text(text)
+                    }
                 };
-                ui.add(egui::ProgressBar::new(busy.progress).text(text));
+                ui.add(bar);
             });
         }
         None => {
@@ -1487,6 +1864,75 @@ mod tests {
             tracks.iter().all(|t| t.settings.journey == Journey::Evolve),
             "played the way chosen"
         );
+    }
+
+    #[test]
+    fn prompted_tracks_are_titled_by_their_prompt_cut_at_a_word() {
+        assert_eq!(
+            prompt_track_title("  warm piano   over soft rain, slow ", 120),
+            "Warm piano over soft rain, slow 2 min"
+        );
+        assert_eq!(
+            prompt_track_title(
+                "a gentle lo-fi beat with vinyl crackle and a warm upright bass under it all",
+                30
+            ),
+            "A gentle lo-fi beat with vinyl crackle 30 s"
+        );
+        assert_eq!(
+            prompt_track_title("Supercalifragilisticexpialidociousandthensomemorewords", 60),
+            "Supercalifragilisticexpialidociousandthe 1 min"
+        );
+        assert_eq!(
+            prompt_track_title("rain/thunder: 2 pm?", 60),
+            "Rain-thunder- 2 pm- 1 min"
+        );
+        assert_eq!(prompt_track_title("   ", 60), "Prompt 1 min");
+    }
+
+    #[test]
+    fn a_prompted_generation_imports_the_music_models_wav() {
+        use crate::music_model::client::fake::{Fake, Settings};
+        let fake = Fake::start(Settings {
+            audio: crate::music_model::client::tests::wav(),
+            ..Settings::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("library")).unwrap();
+        let ctx = egui::Context::default();
+        let request = Request {
+            prompt: "soft piano".to_owned(),
+            seconds: 30,
+            seed: None,
+        };
+        let generation = Generation::start_prompted(
+            ctx,
+            store.clone(),
+            prompt_track_title(&request.prompt, request.seconds),
+            request,
+            Client::new(fake.base.clone(), None),
+            None,
+            Destination::NewSet,
+        );
+        assert!(generation.is_prompted());
+        assert_eq!(generation.emojis, [PROMPT_EMOJI]);
+        assert!(matches!(
+            generation.progress(),
+            Progress::Indeterminate { .. }
+        ));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let made = loop {
+            if let Some(made) = generation.poll() {
+                break made;
+            }
+            assert!(Instant::now() < deadline, "never finished");
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(made.stopped, None);
+        assert_eq!(made.sounds.len(), 1);
+        assert_eq!(made.sounds[0].original_name, "Soft piano 30 s.wav");
+        assert!(store.sound_path(&made.sounds[0]).is_file());
+        assert!(!store.root().join("generating").exists(), "tidied");
     }
 
     #[test]

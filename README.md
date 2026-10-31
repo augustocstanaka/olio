@@ -108,6 +108,18 @@ Milestone 0, the playable skeleton, is done. Olio can:
     that close on the root and pause.
 
   Every control in the Generator says what it does when you hover it.
+- **Make music from a few words.** The Generator's **From a prompt**
+  section offers **Install Music Model** (about 10 GB, once, by choice):
+  Olio installs [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5),
+  an open-source music model, with the Python it needs, into the per-user
+  data folder. Then type a prompt ("warm piano over soft rain, slow"),
+  pick a length and press **Generate from Prompt**: the model runs on your
+  computer (nothing you type leaves it), and the track lands on a tile
+  titled after the prompt, to play, loop and polish like any other. It
+  takes about 6 GB of memory while it runs and stops after ten minutes
+  unused; **Remove Music Model** (under Details) takes it all away again.
+  Apple Silicon runs it through MLX; on Windows it uses CUDA where there
+  is one, else the CPU, slowly.
 
   Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
   Desert Night and Storm Watch fill it all in, and Open Road and Spring
@@ -145,7 +157,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
   styles to WAV files the same way; `--variety`, `--concentration` and
   `--chaos` (0 to 100) set their character, and they play the recorded
   instruments where installed (`olio instruments` installs them;
-  `--synthesised` leaves them out).
+  `--synthesised` leaves them out). `olio generate --prompt "soft piano
+  and rain" --seconds 60` makes a track with the music model (`olio
+  music-model install` installs it).
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 
@@ -215,8 +229,8 @@ Windows. Enable the pre-commit hook once per clone with
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
 offscreen in both themes and both tile styles to `target/screenshots/`
 (`window.png`, `window-light.png`, `window-soft.png`,
-`window-soft-light.png`, and the Generator in `window-generator.png` and
-`window-generator-details.png`).
+`window-soft-light.png`, and the Generator in `window-generator.png`,
+`window-generator-details.png` and `window-prompt.png`).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.
@@ -239,3 +253,8 @@ and [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) by
 Sam Gossner and Versilian Studios, released into the public domain
 (CC0 1.0); Olio's instrument pack trims, loops, levels and re-encodes
 them and is CC0 as well (`crates/packer`, `cargo xtask instruments`).
+
+The music model is [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5)
+by the ACE-Step team (StepFun and ACE Studio), code and weights under the
+MIT license; Olio installs it unchanged, pinned to one release, when you
+ask for it. Music it makes is yours to use.

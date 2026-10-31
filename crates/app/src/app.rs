@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -31,10 +31,13 @@ use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
+use crate::music_model::client::{Client, Request};
+use crate::music_model::install::Install;
+use crate::music_model::server::{IDLE_STOP, Server};
 use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
-use crate::{instruments, keys, palette, polish};
+use crate::{instruments, keys, music_model, palette, polish};
 use olio_audio::ambience::Instrument;
 use olio_audio::instruments::{Pack, Recorded};
 
@@ -164,6 +167,14 @@ pub struct OlioApp {
     pack: Option<Pack>,
     instruments_dir: Option<PathBuf>,
     download: Option<instruments::Download>,
+    /// The music model: where it is installed, whether it is, its install
+    /// while it runs, its process while it runs, and its removal.
+    music_model_dir: Option<PathBuf>,
+    music_model_url: Option<String>,
+    music_model: Option<music_model::Installed>,
+    model_install: Option<Install>,
+    model_server: Option<Arc<Mutex<Server>>>,
+    model_removal: Option<mpsc::Receiver<Result<(), String>>>,
     /// A style's name being typed in the Generator.
     naming: Option<generator::Naming>,
     /// What played before a surprise, and its name, while Back can return
@@ -256,6 +267,15 @@ impl OlioApp {
                 .and_then(instruments::installed),
             instruments_dir: options.instruments.clone(),
             download: None,
+            music_model: options
+                .music_model
+                .as_deref()
+                .and_then(music_model::installed),
+            music_model_dir: options.music_model.clone(),
+            music_model_url: options.music_model_url.clone(),
+            model_install: None,
+            model_server: None,
+            model_removal: None,
             naming: None,
             before_surprise: None,
             surprises: 0,
@@ -527,6 +547,226 @@ impl OlioApp {
                 true,
             ),
         }
+    }
+
+    // ----- the music model ------------------------------------------------
+
+    /// Starts installing the music model (or goes on with it).
+    fn install_music_model(&mut self, ctx: &egui::Context) {
+        if self.model_install.is_some() || self.model_removal.is_some() {
+            return;
+        }
+        let Some(dir) = self.music_model_dir.clone() else {
+            return;
+        };
+        self.model_install = Some(Install::start(ctx.clone(), dir));
+        self.set_status("Installing the music model…", false);
+    }
+
+    fn poll_install(&mut self) {
+        let Some(result) = self.model_install.as_ref().and_then(Install::poll) else {
+            return;
+        };
+        self.model_install = None;
+        match result {
+            Ok(true) => {
+                self.music_model = self
+                    .music_model_dir
+                    .as_deref()
+                    .and_then(music_model::installed);
+                self.set_status("Music model installed", false);
+            }
+            Ok(false) => self.set_status(
+                "Stopped installing the music model; Install goes on from here",
+                false,
+            ),
+            Err(err) => self.set_status(format!("Could not install the music model: {err}"), true),
+        }
+    }
+
+    /// Starts making a track from the prompt, for the front set, with the
+    /// music model: started here unless `OLIO_MUSIC_MODEL_URL` names one.
+    fn start_prompt_generation(&mut self, ctx: &egui::Context) {
+        if self.generation.is_some() {
+            return;
+        }
+        let prompt = self.prefs.prompt.trim().to_owned();
+        if prompt.is_empty() {
+            return;
+        }
+        if self.music_model_url.is_none() && self.music_model.is_none() {
+            self.set_status("The music model is not installed", true);
+            return;
+        }
+        let mut status = None;
+        let (client, server) = match self.music_model_url.clone() {
+            Some(url) => (Client::new(url, None), None),
+            None => {
+                let Some(dir) = self.music_model_dir.clone() else {
+                    return;
+                };
+                let running = self
+                    .model_server
+                    .as_ref()
+                    .is_some_and(|server| server.lock().is_ok_and(|mut server| server.alive()));
+                if !running {
+                    match Server::start(&dir) {
+                        Ok(server) => {
+                            self.model_server = Some(Arc::new(Mutex::new(server)));
+                            status = Some(
+                                "Starting the music model… the first track takes a few \
+                                 minutes while it loads"
+                                    .to_owned(),
+                            );
+                        }
+                        Err(err) => {
+                            self.set_status(
+                                format!("Could not start the music model: {err}"),
+                                true,
+                            );
+                            return;
+                        }
+                    }
+                }
+                let Some(server) = self.model_server.clone() else {
+                    return;
+                };
+                let client = match server.lock() {
+                    Ok(mut server) => {
+                        server.touch();
+                        server.client()
+                    }
+                    Err(_) => return,
+                };
+                (client, Some(server))
+            }
+        };
+        let seconds = self.prefs.track_seconds;
+        let title = generator::prompt_track_title(&prompt, seconds);
+        let request = Request {
+            prompt,
+            seconds,
+            seed: None,
+        };
+        let generation = Generation::start_prompted(
+            ctx.clone(),
+            self.store.clone(),
+            title,
+            request,
+            client,
+            server,
+            Destination::Tile(self.current),
+        );
+        let status = status.unwrap_or_else(|| format!("Generating “{}”…", generation.title));
+        self.set_status(status, false);
+        self.generation = Some(generation);
+    }
+
+    /// Stops the music model once it has idled, or notes that it died;
+    /// finishes its removal.
+    fn poll_music_model(&mut self, ctx: &egui::Context) {
+        if let Some(removal) = &self.model_removal {
+            let result = match removal.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("the removal stopped unexpectedly".to_owned()))
+                }
+            };
+            match result {
+                None => {}
+                Some(Ok(())) => {
+                    self.model_removal = None;
+                    self.music_model = None;
+                    self.set_status("Music model removed", false);
+                }
+                Some(Err(err)) => {
+                    self.model_removal = None;
+                    self.music_model = self
+                        .music_model_dir
+                        .as_deref()
+                        .and_then(music_model::installed);
+                    self.set_status(format!("Could not remove the music model: {err}"), true);
+                }
+            }
+        }
+        let Some(server) = self.model_server.clone() else {
+            return;
+        };
+        let generating = self
+            .generation
+            .as_ref()
+            .is_some_and(Generation::is_prompted);
+        let Ok(mut server) = server.lock() else {
+            return;
+        };
+        if !server.alive() {
+            drop(server);
+            self.model_server = None;
+            if !generating {
+                self.set_status("The music model stopped (see server.log beside it)", true);
+            }
+            return;
+        }
+        if generating {
+            server.touch();
+            return;
+        }
+        let idle = server.idle();
+        if idle >= IDLE_STOP {
+            server.stop();
+            drop(server);
+            self.model_server = None;
+            self.set_status("The music model stopped after ten minutes unused", false);
+        } else {
+            ctx.request_repaint_after(IDLE_STOP - idle);
+        }
+    }
+
+    fn ask_remove_music_model(&mut self) {
+        if self.music_model.is_none() || self.model_removal.is_some() {
+            return;
+        }
+        self.confirm = Some(Confirm {
+            title: "Remove the music model?".to_owned(),
+            body: format!(
+                "Its files ({}) go; tracks made from it stay.",
+                music_model::about_gigabytes(music_model::DISK_BYTES)
+            ),
+            verb: "Remove",
+            pending: Pending::RemoveMusicModel,
+        });
+    }
+
+    /// Stops the music model and removes everything installed for it, on
+    /// a thread: it is about 10 GB.
+    fn remove_music_model(&mut self) {
+        if let Some(generation) = &self.generation
+            && generation.is_prompted()
+        {
+            generation.cancel();
+        }
+        if let Some(server) = self.model_server.take()
+            && let Ok(mut server) = server.lock()
+        {
+            server.stop();
+        }
+        let Some(dir) = self.music_model_dir.clone() else {
+            return;
+        };
+        let (sender, receiver) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("olio-music-model-remove".to_owned())
+            .spawn(move || {
+                let _ = sender.send(music_model::remove(&dir));
+            });
+        if let Err(err) = spawned {
+            self.set_status(format!("Could not remove the music model: {err}"), true);
+            return;
+        }
+        self.music_model = None;
+        self.model_removal = Some(receiver);
+        self.set_status("Removing the music model…", false);
     }
 
     fn apply_master_gain(&mut self) {
@@ -1584,6 +1824,7 @@ impl OlioApp {
         match pending {
             Pending::RemoveSet(id) => self.remove_set(id),
             Pending::RemoveStyle(index) => self.remove_style(index),
+            Pending::RemoveMusicModel => self.remove_music_model(),
         }
     }
 
@@ -2451,6 +2692,8 @@ impl eframe::App for OlioApp {
         self.clips.poll();
         self.poll_generation();
         self.poll_download();
+        self.poll_install();
+        self.poll_music_model(&ctx);
         self.maintain_audio(&ctx);
         self.follow_instruments(&ctx);
         self.update_meters(&ctx);
@@ -2579,13 +2822,41 @@ impl eframe::App for OlioApp {
                         loading: !self.loading.is_empty(),
                     },
                 },
+                music_model: match (
+                    &self.music_model_dir,
+                    &self.music_model,
+                    &self.model_install,
+                    &self.model_removal,
+                ) {
+                    (None, _, _, _) => generator::MusicModel::Unavailable,
+                    (_, _, Some(install), _) => {
+                        let (phase, done) = install.progress();
+                        generator::MusicModel::Installing {
+                            words: phase.words(),
+                            done,
+                        }
+                    }
+                    (_, _, _, Some(_)) => generator::MusicModel::Removing,
+                    (_, None, None, None) if self.music_model_url.is_none() => {
+                        generator::MusicModel::Missing
+                    }
+                    (_, _, None, None) => generator::MusicModel::Installed {
+                        running: self.model_server.is_some(),
+                    },
+                },
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
                 .default_size(380.0)
                 .min_size(320.0)
                 .show(ui, |ui| {
-                    generator::show(ui, &mut self.prefs.ambience, &view, &mut self.naming)
+                    generator::show(
+                        ui,
+                        &mut self.prefs.ambience,
+                        &view,
+                        &mut self.naming,
+                        &mut self.prefs.prompt,
+                    )
                 })
                 .inner;
             Vec::new()
@@ -2687,6 +2958,11 @@ impl eframe::App for OlioApp {
                 generator::Action::Cancel => {
                     if let Some(generation) = &self.generation {
                         generation.cancel();
+                        // A prompted track's cancel stops the music model:
+                        // forgotten here, so its end is not reported.
+                        if generation.is_prompted() {
+                            self.model_server = None;
+                        }
                     }
                 }
                 generator::Action::SaveStyle => self.start_naming(None),
@@ -2696,6 +2972,14 @@ impl eframe::App for OlioApp {
                 generator::Action::RemoveStyle(index) => self.ask_remove_style(index),
                 generator::Action::Surprise => self.surprise(),
                 generator::Action::BackFromSurprise => self.back_from_surprise(),
+                generator::Action::InstallMusicModel => self.install_music_model(&ctx),
+                generator::Action::CancelInstall => {
+                    if let Some(install) = &self.model_install {
+                        install.cancel();
+                    }
+                }
+                generator::Action::GeneratePrompt => self.start_prompt_generation(&ctx),
+                generator::Action::RemoveMusicModel => self.ask_remove_music_model(),
             }
         }
         // A surprise picked as, or saved as, a style is kept: no going back.
@@ -2803,5 +3087,11 @@ impl eframe::App for OlioApp {
 
     fn on_exit(&mut self) {
         self.save_now();
+        // Dropped here, the music model's process is stopped with the app.
+        if let Some(server) = self.model_server.take()
+            && let Ok(mut server) = server.lock()
+        {
+            server.stop();
+        }
     }
 }

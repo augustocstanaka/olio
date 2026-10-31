@@ -7,10 +7,14 @@ use olio_library::SetId;
 
 use crate::palette;
 
+// Everything confirmed so far is a removal; the verb says so.
+#[allow(clippy::enum_variant_names)]
 pub enum Pending {
     RemoveSet(SetId),
     /// A saved style, by its place in the list.
     RemoveStyle(usize),
+    /// The music model, with everything installed for it.
+    RemoveMusicModel,
 }
 
 pub struct Confirm {

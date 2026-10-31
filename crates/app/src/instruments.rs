@@ -7,8 +7,9 @@
 //! `cargo xtask instruments`; published as a release of the repository.
 
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
@@ -18,6 +19,9 @@ use olio_audio::ambience::Instrument;
 use olio_audio::instruments::{Multisample, Pack};
 use olio_library::Store;
 use sha2::{Digest, Sha256};
+
+use crate::fetch;
+pub use crate::fetch::megabytes;
 
 /// The published pack: where it is, what it hashes to, how big it is.
 pub const PACK_URL: &str = "https://github.com/augustocstanaka/olio/releases/download/instruments-1/olio-instruments-1.zip";
@@ -38,21 +42,12 @@ pub fn installed(dir: &Path) -> Option<Pack> {
     Pack::open(&dir.join(PACK_NAME)).ok()
 }
 
-/// "71 MB".
-pub fn megabytes(bytes: u64) -> String {
-    format!("{} MB", (bytes as f64 / 1e6).round())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 /// Installs the zipped pack at `zip_path` into `dir`, checking its
 /// SHA-256 first when one is given; a pack already there is replaced.
 pub fn install_zip(zip_path: &Path, sha256: Option<&str>, dir: &Path) -> Result<(), String> {
     let data = fs::read(zip_path).map_err(|err| format!("{}: {err}", zip_path.display()))?;
     if let Some(expected) = sha256 {
-        let actual = hex(&Sha256::digest(&data));
+        let actual = fetch::hex(&Sha256::digest(&data));
         if actual != expected {
             return Err("the download is damaged (its checksum is wrong)".to_owned());
         }
@@ -93,45 +88,13 @@ pub fn install_zip(zip_path: &Path, sha256: Option<&str>, dir: &Path) -> Result<
     Ok(())
 }
 
-/// Downloads `url` to `path`, telling `progress` how far, 0 to 1; stops
-/// (with `None`) when it says to.
-fn download(
-    url: &str,
-    path: &Path,
-    mut progress: impl FnMut(f32) -> bool,
-) -> Result<Option<()>, String> {
-    let response = ureq::get(url).call().map_err(|err| err.to_string())?;
-    let total = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(PACK_BYTES);
-    let mut body = response.into_body().into_reader();
-    let mut file = fs::File::create(path).map_err(|err| format!("{}: {err}", path.display()))?;
-    let mut buffer = vec![0u8; 256 * 1024];
-    let mut done = 0u64;
-    loop {
-        let read = body.read(&mut buffer).map_err(|err| err.to_string())?;
-        if read == 0 {
-            return Ok(Some(()));
-        }
-        file.write_all(&buffer[..read])
-            .map_err(|err| format!("{}: {err}", path.display()))?;
-        done += read as u64;
-        if !progress((done as f32 / total.max(1) as f32).min(1.0)) {
-            return Ok(None);
-        }
-    }
-}
-
 /// Downloads the published pack into `dir` and installs it: `true` once
 /// installed, `false` if `progress` (told how far, 0 to 1) said to stop.
 pub fn download_and_install(dir: &Path, progress: impl FnMut(f32) -> bool) -> Result<bool, String> {
     fs::create_dir_all(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
     let part = dir.join("download.part");
-    let result = match download(PACK_URL, &part, progress) {
-        Ok(Some(())) => install_zip(&part, Some(PACK_SHA256), dir).map(|()| true),
+    let result = match fetch::download(PACK_URL, &part, false, Some(PACK_BYTES), progress) {
+        Ok(Some(_)) => install_zip(&part, Some(PACK_SHA256), dir).map(|()| true),
         Ok(None) => Ok(false),
         Err(err) => Err(err),
     };
@@ -234,6 +197,8 @@ impl Loading {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::io::Write;
+
     use super::*;
     use olio_audio::instruments::{
         InstrumentManifest, MANIFEST, Manifest, PACK_VERSION, ZoneManifest,
@@ -310,7 +275,7 @@ pub(crate) mod tests {
         write_pack(built.path());
         let zip_path = built.path().join("pack.zip");
         zip_pack(built.path(), &zip_path);
-        let sha = hex(&Sha256::digest(fs::read(&zip_path).unwrap()));
+        let sha = fetch::hex(&Sha256::digest(fs::read(&zip_path).unwrap()));
 
         let dir = tempfile::tempdir().unwrap();
         assert!(installed(dir.path()).is_none());

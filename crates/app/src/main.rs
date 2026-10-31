@@ -18,6 +18,10 @@ fn main() -> eframe::Result {
             args.next();
             std::process::exit(cli::install_instruments(args));
         }
+        Some("music-model") => {
+            args.next();
+            std::process::exit(cli::music_model(args));
+        }
         _ => {}
     }
     let options = match parse_args(args) {

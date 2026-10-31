@@ -261,6 +261,8 @@ pub struct Preferences {
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
+    /// What the music model last made a track from.
+    pub prompt: String,
 }
 
 impl Default for Preferences {
@@ -282,9 +284,13 @@ impl Default for Preferences {
             styles: Vec::new(),
             recorded_instruments: true,
             click_plays: false,
+            prompt: String::new(),
         }
     }
 }
+
+/// How long a prompt may be.
+pub const MAX_PROMPT_CHARS: usize = 2000;
 
 const KEY: &str = "preferences";
 
@@ -311,6 +317,7 @@ impl Preferences {
         {
             prefs.track_seconds = crate::generator::DEFAULT_TRACK_SECONDS;
         }
+        prefs.prompt = prefs.prompt.trim().chars().take(MAX_PROMPT_CHARS).collect();
         prefs
     }
 
@@ -554,5 +561,6 @@ mod tests {
         assert!(prefs.show_spectrograms);
         assert_eq!(prefs.tile_size, TileSize::Regular);
         assert!(!prefs.ambience.enabled);
+        assert_eq!(prefs.prompt, "");
     }
 }

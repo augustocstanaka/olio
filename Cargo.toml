@@ -20,11 +20,15 @@ cpal = "0.18"
 # Every codec and container Symphonia has; all are royalty-free to decode.
 symphonia = { version = "0.6", default-features = false, features = ["all", "opt-simd"] }
 rtrb = "0.4"
-# The Generator's instrument pack: fetched over HTTPS, a zip checked by
-# its SHA-256 (the pack builder also encodes FLAC, in crates/packer).
+# The Generator's instrument pack and music model: fetched over HTTPS,
+# archives checked by their SHA-256 (the pack builder also encodes FLAC, in
+# crates/packer). Deflate for the music model's zips; tar and gzip for
+# uv's macOS archive.
 ureq = "3"
-zip = { version = "9", default-features = false }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 sha2 = "0.11"
+tar = "0.4"
+flate2 = "1"
 
 # library (ADR 0003)
 serde = { version = "1", features = ["derive"] }
