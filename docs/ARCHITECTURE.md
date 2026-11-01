@@ -54,7 +54,9 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    is not loaded yet. For a prompted track it instead waits for the music
    model to answer, asks it for the track over its local API
    (`music_model/client.rs`), downloads the WAV and imports it the same
-   way.
+   way; then, when a bed was picked, renders the background alone
+   through `render_track`, 12 dB down, and imports that too, so the UI
+   puts the track on one tile and its bed, looping, on the next.
 5. **Instrument threads** (`instruments.rs`): one downloads and installs
    the instrument pack when asked; one per instrument decodes its
    recordings when the live ambience starts playing it, and the UI hands

@@ -192,8 +192,20 @@ _Avoid_: AI, LLM, ACE-Step (in the UI), backend, sidecar
 **Prompt**:
 The words the music model makes a track from ("warm piano over soft
 rain, slow"), typed in the Generator's From a prompt section and kept in
-the preferences. Prompted tracks are instrumental.
+the preferences. Prompted tracks are instrumental. With Keep it ambient
+on (the default), the **hints** "ambient, sparse, slow, spacious, soft,
+no drums" go with the words, so the track stays behind the sounds; the
+title keeps the words alone.
 _Avoid_: description, query
+
+**Bed**:
+The Generator's background alone (rain, waves, fire…), rendered quietly
+(12 dB under a track) to a second tile beside a prompted track, looping,
+with slow fades and its own level kept: a world for the music model's
+track to sit in. Picked in the From a prompt section; titled after its
+background and length ("Rain bed 30 s"); undone together with its track.
+The live ambience is not a bed.
+_Avoid_: layer (an instrument's part of the ambience), underlay, pad
 
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,

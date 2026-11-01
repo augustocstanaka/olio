@@ -13,8 +13,8 @@
 //! N] [--concentration N] [--chaos N] [--energy N] [--journey NAME]
 //! [--synthesised] [--out DIR]` renders the Generator's styles to WAV
 //! files, without a window; `olio generate --prompt TEXT [--seconds N]
-//! [--seed N] [--out DIR]` makes a track from a prompt with the music
-//! model.
+//! [--seed N] [--bed NAME] [--no-hints] [--out DIR]` makes a track from a
+//! prompt with the music model, and a bed beside it.
 //!
 //! `olio instruments [--from ZIP] [--dir DIR]` downloads and installs the
 //! Generator's recorded instruments (or a pack built here). `olio
@@ -58,7 +58,8 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
                      [--energy N] [--journey steady|build|evolve]
                      [--synthesised]
                      [--out DIR]
-       olio generate --prompt TEXT [--seconds N] [--seed N] [--out DIR]
+       olio generate --prompt TEXT [--seconds N] [--seed N] [--bed NAME]
+                     [--no-hints] [--out DIR]
        olio instruments [--from ZIP] [--dir DIR]
        olio music-model install|remove [--dir DIR]
 
@@ -92,6 +93,12 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
   --prompt TEXT       make one track from these words with the music model
                       instead (the style options do not apply); --seconds
                       10 to 600; the file is named after the prompt
+  --bed NAME          and a bed beside it: the Generator's rain, thunder,
+                      wind, winter, waves, forest, desert or fire alone,
+                      quietly, as \"Rain bed 30 s.wav\"
+  --no-hints          send the words as they are, without the ambient hints
+                      (\"ambient, sparse, slow…\") that keep a track behind
+                      the sounds
 
   instruments         download the Generator's recorded instruments and
                       install them, then exit

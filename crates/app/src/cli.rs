@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use olio_audio::ambience::{Journey, Style};
+use olio_audio::ambience::{Background, Journey, Style};
 use olio_audio::instruments::Recorded;
 
 use crate::instruments;
@@ -259,13 +259,17 @@ impl Model {
 }
 
 /// Makes `seconds` of music from `prompt` with the music model and writes
-/// it under `out`, named after the prompt.
+/// it under `out`, named after the prompt; with `hints`, the ambient hints
+/// go with the prompt; with a `bed`, that background is rendered quietly
+/// beside it.
 fn generate_prompted(
     prompt: &str,
     seconds: u32,
     seed: Option<u64>,
     out: &Path,
     model: Model,
+    bed: Option<Background>,
+    hints: bool,
 ) -> Result<(), String> {
     let cancel = AtomicBool::new(false);
     let (client, mut server) = match model {
@@ -287,7 +291,11 @@ fn generate_prompted(
     let title = generator::prompt_track_title(prompt, seconds);
     let path = out.join(format!("{title}.wav"));
     let request = Request {
-        prompt: prompt.to_owned(),
+        prompt: if hints {
+            generator::hinted(prompt)
+        } else {
+            prompt.to_owned()
+        },
         seconds,
         seed,
     };
@@ -317,7 +325,37 @@ fn generate_prompted(
     }
     made?.ok_or("stopped")?;
     println!("wrote {}", path.display());
+    let Some(background) = bed else {
+        return Ok(());
+    };
+    let title = generator::bed_title(background, seconds);
+    let path = out.join(format!("{title}.wav"));
+    println!("rendering “{title}”");
+    let seed = seed.unwrap_or_else(generator::fresh_seed);
+    let clip = generator::render_bed(background, seconds, seed, |_| true).ok_or("stopped")?;
+    clip.write_wav(&path, WavFormat::Int16)
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+    println!("wrote {}", path.display());
     Ok(())
+}
+
+/// The background `name` names, for `--bed`: "rain", "Waves"…; "none" for
+/// no bed.
+fn parse_bed(name: &str) -> Result<Option<Background>, String> {
+    Background::ALL
+        .iter()
+        .find(|background| background.name().eq_ignore_ascii_case(name.trim()))
+        .map(|&background| match background {
+            Background::None => None,
+            background => Some(background),
+        })
+        .ok_or_else(|| {
+            let names: Vec<String> = Background::ALL
+                .iter()
+                .map(|background| background.name().to_ascii_lowercase())
+                .collect();
+            format!("--bed needs one of {}", names.join(", "))
+        })
 }
 
 /// Runs `olio generate` with the arguments after `generate`; returns the
@@ -342,6 +380,8 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut synthesised = false;
     let mut out = PathBuf::from("previews");
     let mut prompt: Option<String> = None;
+    let mut bed = None;
+    let mut hints = true;
     // Whether any of the style options was given: none applies to a prompt.
     let mut styled = false;
     while let Some(arg) = args.next() {
@@ -417,6 +457,11 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                 synthesised = true;
             }
             "--out" => out = PathBuf::from(args.next().ok_or("--out needs a directory")?),
+            "--bed" => {
+                let name = args.next().ok_or("--bed needs a background's name")?;
+                bed = parse_bed(&name)?;
+            }
+            "--no-hints" => hints = false,
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -431,7 +476,18 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         if seconds < 10.0 {
             return Err("--seconds needs a number from 10 to 600 for a prompt".to_owned());
         }
-        return generate_prompted(&prompt, seconds as u32, seed, &out, Model::from_env()?);
+        return generate_prompted(
+            &prompt,
+            seconds as u32,
+            seed,
+            &out,
+            Model::from_env()?,
+            bed,
+            hints,
+        );
+    }
+    if bed.is_some() || !hints {
+        return Err("--bed and --no-hints go with --prompt".to_owned());
     }
     // The recorded instruments where installed, loaded as styles need them.
     let pack = if synthesised {
@@ -508,6 +564,8 @@ mod tests {
             Some(7),
             dir.path(),
             Model::At(fake.base.clone()),
+            None,
+            false,
         )
         .unwrap();
         let clip =
@@ -520,6 +578,37 @@ mod tests {
     }
 
     #[test]
+    fn a_bed_is_written_beside_the_prompted_track_and_the_hints_go_with_the_prompt() {
+        use crate::music_model::client::fake::{Fake, Settings};
+        let fake = Fake::start(Settings {
+            audio: crate::music_model::client::tests::wav(),
+            ..Settings::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        generate_prompted(
+            "soft piano",
+            10,
+            Some(7),
+            dir.path(),
+            Model::At(fake.base.clone()),
+            Some(Background::Fire),
+            true,
+        )
+        .unwrap();
+        assert!(dir.path().join("Soft piano 10 s.wav").is_file());
+        let bed = olio_audio::decode_file(&dir.path().join("Fire bed 10 s.wav")).unwrap();
+        assert_eq!(bed.channels(), 2);
+        assert!((bed.duration().as_secs_f32() - 10.0).abs() < 0.1);
+        assert_eq!(
+            fake.bodies()[0]["prompt"],
+            format!("soft piano, {}", generator::PROMPT_HINTS)
+        );
+        assert_eq!(parse_bed("WAVES").unwrap(), Some(Background::Waves));
+        assert_eq!(parse_bed("none").unwrap(), None);
+        assert!(parse_bed("sunshine").unwrap_err().contains("rain, thunder"));
+    }
+
+    #[test]
     fn a_prompt_needs_the_music_model_installed() {
         let dir = tempfile::tempdir().unwrap();
         let err = generate_prompted(
@@ -528,6 +617,8 @@ mod tests {
             None,
             dir.path(),
             Model::In(dir.path().join("MusicModel")),
+            None,
+            true,
         )
         .unwrap_err();
         assert!(err.contains("olio music-model install"), "{err}");

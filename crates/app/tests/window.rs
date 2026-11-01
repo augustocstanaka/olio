@@ -1570,6 +1570,87 @@ fn a_prompted_track_lands_on_a_tile_and_undo_takes_it_off() {
 /// The real music model, installed where `OLIO_MUSIC_MODEL` says (an
 /// absolute path): `OLIO_MUSIC_MODEL=$PWD/target/music-model cargo test
 /// -p olio-app --test window real_music_model -- --ignored`. The app
+/// Picks a bed in the From a prompt section: the last chip of that name,
+/// the Background section having the first.
+fn pick_bed(harness: &mut Harness<'static, OlioApp>, name: &str) {
+    harness
+        .query_all_by_label(name)
+        .last()
+        .expect("the bed's chip")
+        .scroll_to_me();
+    harness.run_steps(3);
+    harness
+        .query_all_by_label(name)
+        .last()
+        .expect("the bed's chip")
+        .click();
+    harness.run_steps(2);
+}
+
+#[test]
+fn a_prompted_track_comes_with_its_bed_on_a_second_tile_and_undo_takes_both_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = tempfile::tempdir().unwrap();
+    write_music_model(model.path());
+    let mut harness = window_with_model(
+        library(dir.path()),
+        false,
+        tempfile::tempdir().unwrap().keep(),
+        model.path().to_path_buf(),
+        Some(fake_music_model()),
+    );
+    open_generator(&mut harness);
+    type_prompt(&mut harness, "warm piano, slow");
+    harness.get_by_label("30 s").click();
+    harness.run_steps(2);
+    pick_bed(&mut harness, "Waves");
+    assert_eq!(
+        harness.state().preferences().prompt_bed,
+        olio_audio::ambience::Background::Waves
+    );
+    harness.get_by_label_contains("onto two tiles in “Show”");
+    // Keep it ambient is on unless switched off.
+    assert!(harness.state().preferences().prompt_hints);
+    click_in_generator(&mut harness, "Generate from Prompt");
+    assert!(harness.state().is_generating());
+
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while harness.state().is_generating() {
+        assert!(Instant::now() < deadline, "the track never finished");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.run_steps(3);
+    harness.get_by_label("Generated “Warm piano, slow 30 s” and “Waves bed 30 s”");
+    let tile = harness
+        .state()
+        .selected_tile()
+        .expect("the track's tile, selected");
+    assert_eq!(tile.title, "Warm piano, slow 30 s");
+    assert_eq!(tile.emoji, "🎼");
+    // Polished, as the preset says.
+    assert_eq!(tile.fade_in_seconds, 1.0);
+    assert!(tile.reverb > 0.0);
+    harness.get_by_label("Waves bed 30 s");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.query_all_by_label("Warm piano, slow 30 s").count(),
+        0
+    );
+    assert_eq!(harness.query_all_by_label("Waves bed 30 s").count(), 0);
+    harness.get_by_label("Removed the track “Warm piano, slow 30 s” and its bed");
+    // And redo brings both back.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    harness.run_steps(2);
+    harness.get_by_label("Warm piano, slow 30 s");
+    harness.get_by_label("Waves bed 30 s");
+}
+
 /// starts it, waits for it to load, makes a short track and stops it.
 #[test]
 #[ignore = "needs the music model installed; see the comment"]
@@ -1587,6 +1668,7 @@ fn the_real_music_model_makes_a_track_from_the_app() {
     type_prompt(&mut harness, "soft piano and rain");
     harness.get_by_label("30 s").click();
     harness.run_steps(2);
+    pick_bed(&mut harness, "Rain");
     click_in_generator(&mut harness, "Generate from Prompt");
     assert!(harness.state().is_generating());
     // Said in the status bar and over the Track panel's bar.
@@ -1603,7 +1685,8 @@ fn the_real_music_model_makes_a_track_from_the_app() {
         std::thread::sleep(Duration::from_millis(10));
     }
     harness.run_steps(3);
-    harness.get_by_label("Generated “Soft piano and rain 30 s”");
+    harness.get_by_label("Generated “Soft piano and rain 30 s” and “Rain bed 30 s”");
+    harness.get_by_label("Rain bed 30 s");
     assert_eq!(
         harness.state().selected_title(),
         Some("Soft piano and rain 30 s")
@@ -2144,6 +2227,7 @@ fn render_the_window_to_a_png() {
     harness.ctx.set_theme(egui::Theme::Light);
     open_generator(&mut harness);
     type_prompt(&mut harness, "warm piano over soft rain, slow");
+    pick_bed(&mut harness, "Rain");
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-prompt.png")).unwrap();

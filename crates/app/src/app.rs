@@ -38,12 +38,14 @@ use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
 use crate::{instruments, keys, music_model, palette, polish};
-use olio_audio::ambience::Instrument;
+use olio_audio::ambience::{Background, Instrument};
 use olio_audio::instruments::{Pack, Recorded};
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
 const STOP_ALL_HOLD: Duration = Duration::from_millis(300);
+/// A bed swells in and sinks out over this long: slower than a polish.
+const BED_FADE_SECONDS: f32 = 3.0;
 /// How long Fade All takes.
 const FADE_ALL: Duration = Duration::from_secs(2);
 /// How long a status message stays up; mistakes stay longer.
@@ -644,9 +646,17 @@ impl OlioApp {
         let seconds = self.prefs.track_seconds;
         let title = generator::prompt_track_title(&prompt, seconds);
         let request = Request {
-            prompt,
+            prompt: if self.prefs.prompt_hints {
+                generator::hinted(&prompt)
+            } else {
+                prompt
+            },
             seconds,
             seed: None,
+        };
+        let bed = match self.prefs.prompt_bed {
+            Background::None => None,
+            background => Some(background),
         };
         let generation = Generation::start_prompted(
             ctx.clone(),
@@ -656,6 +666,7 @@ impl OlioApp {
             client,
             server,
             Destination::Tile(self.current),
+            bed,
         );
         let status = status.unwrap_or_else(|| format!("Generating “{}”…", generation.title));
         self.set_status(status, false);
@@ -1478,6 +1489,24 @@ impl OlioApp {
                 Ok((set, tile)) => Ok(Change::Generated { set, tile }),
                 Err(tile) => Err(Change::Generated { set, tile }),
             },
+            Change::GeneratedWithBed { set, tile, bed } => {
+                let (set, tile) = match self.insert_tile(set, tile) {
+                    Ok(placed) => placed,
+                    Err(tile) => return Err(Change::GeneratedWithBed { set, tile, bed }),
+                };
+                match self.insert_tile(set, bed) {
+                    Ok((set, bed)) => {
+                        // The track stays selected, as when it was made.
+                        self.selected = Some(tile.id);
+                        Ok(Change::GeneratedWithBed { set, tile, bed })
+                    }
+                    Err(bed) => {
+                        // Neither, rather than one of the two.
+                        self.take_tile(tile.id);
+                        Err(Change::GeneratedWithBed { set, tile, bed })
+                    }
+                }
+            }
             Change::GeneratedSet { index, set } => {
                 // Back where it was, after the sets before it.
                 let id = set.id;
@@ -1614,6 +1643,23 @@ impl OlioApp {
                 Some(Change::RemovedTile { set, tile }) => Ok(Change::Generated { set, tile }),
                 _ => Err(Change::Generated { set, tile }),
             },
+            Change::GeneratedWithBed { set, tile, bed } => {
+                let Some(Change::RemovedTile { set, tile: bed }) = self.take_tile(bed.id) else {
+                    return Err(Change::GeneratedWithBed { set, tile, bed });
+                };
+                match self.take_tile(tile.id) {
+                    Some(Change::RemovedTile { set, tile }) => {
+                        Ok(Change::GeneratedWithBed { set, tile, bed })
+                    }
+                    _ => {
+                        // Both or neither: the bed goes back.
+                        let bed = match self.insert_tile(set, bed) {
+                            Ok((_, bed)) | Err(bed) => bed,
+                        };
+                        Err(Change::GeneratedWithBed { set, tile, bed })
+                    }
+                }
+            }
             Change::GeneratedSet { index, set } => match self.take_set(set.id) {
                 Some(Change::RemovedSet { index, set }) => Ok(Change::GeneratedSet { index, set }),
                 _ => Err(Change::GeneratedSet { index, set }),
@@ -2025,12 +2071,110 @@ impl OlioApp {
         }
         match generation.destination {
             Destination::Tile(set) => {
-                if let Some(sound) = sounds.into_iter().next() {
-                    self.place_track(&generation, set, sound);
+                let mut sounds = sounds.into_iter();
+                let Some(sound) = sounds.next() else {
+                    return;
+                };
+                match sounds.next() {
+                    Some(bed) => self.place_with_bed(&generation, set, sound, bed),
+                    None => {
+                        self.place_track(&generation, set, sound);
+                        // The track is there; only its bed went missing.
+                        match stopped {
+                            Some(Stop::Failed(err)) => self.set_status(
+                                format!("“{}” has no bed: {err}", generation.title),
+                                true,
+                            ),
+                            Some(Stop::Cancelled) if generation.emojis.len() > 1 => self
+                                .set_status(
+                                    format!("“{}” has no bed: stopped", generation.title),
+                                    false,
+                                ),
+                            _ => {}
+                        }
+                    }
                 }
             }
             Destination::NewSet => self.place_set(&generation, sounds, stopped),
         }
+    }
+
+    /// Puts a prompted track on a tile, polished, and its bed on the next
+    /// free tile, looping and left at its own quiet level. Undo takes both
+    /// off.
+    fn place_with_bed(&mut self, generation: &Generation, set: SetId, sound: Sound, bed: Sound) {
+        let set = if self.library.set(set).is_some() {
+            set
+        } else {
+            self.current
+        };
+        let Some(target) = self.library.set_mut(set) else {
+            return;
+        };
+        let Some(id) = target.place(sound, None) else {
+            self.set_status(
+                format!(
+                    "There is no free slot in this set for “{}”",
+                    generation.title
+                ),
+                true,
+            );
+            return;
+        };
+        let slot = target.tile(id).map(|tile| tile.slot);
+        let bed_id = target.place(bed, slot.and_then(|slot| target.free_slot_after(slot)));
+        let polish = self.prefs.polish;
+        if let Some(tile) = self.library.tile_mut(id) {
+            tile.emoji = generation
+                .emojis
+                .first()
+                .copied()
+                .unwrap_or_default()
+                .to_owned();
+            tile.fade_in_seconds = polish.fade_in_seconds;
+            tile.fade_out_seconds = polish.fade_out_seconds;
+            tile.reverb = polish.reverb;
+        }
+        let Some(bed_id) = bed_id else {
+            // Room for one: the track alone, as without a bed.
+            let Some((_, tile)) = self.library.tile(id) else {
+                return;
+            };
+            let tile = Box::new(tile.clone());
+            self.execute(Command::SelectSet(set));
+            self.selected = Some(id);
+            self.reveal_selected = true;
+            self.changed();
+            self.record(Change::Generated { set, tile });
+            self.set_status(
+                "There is no free slot in this set for the bed".to_owned(),
+                true,
+            );
+            return;
+        };
+        if let Some(tile) = self.library.tile_mut(bed_id) {
+            tile.emoji = generation
+                .emojis
+                .get(1)
+                .copied()
+                .unwrap_or_default()
+                .to_owned();
+            tile.looping = true;
+            // Rendered well under the track: left there.
+            tile.normalize = false;
+            tile.fade_in_seconds = BED_FADE_SECONDS;
+            tile.fade_out_seconds = BED_FADE_SECONDS;
+        }
+        let (Some((_, tile)), Some((_, bed))) = (self.library.tile(id), self.library.tile(bed_id))
+        else {
+            return;
+        };
+        let (tile, bed) = (Box::new(tile.clone()), Box::new(bed.clone()));
+        self.execute(Command::SelectSet(set));
+        self.selected = Some(id);
+        self.reveal_selected = true;
+        self.changed();
+        self.record(Change::GeneratedWithBed { set, tile, bed });
     }
 
     fn place_track(&mut self, generation: &Generation, set: SetId, sound: Sound) {
@@ -2855,7 +2999,11 @@ impl eframe::App for OlioApp {
                         &mut self.prefs.ambience,
                         &view,
                         &mut self.naming,
-                        &mut self.prefs.prompt,
+                        generator::Prompted {
+                            prompt: &mut self.prefs.prompt,
+                            bed: &mut self.prefs.prompt_bed,
+                            hints: &mut self.prefs.prompt_hints,
+                        },
                     )
                 })
                 .inner;

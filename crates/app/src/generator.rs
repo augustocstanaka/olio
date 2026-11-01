@@ -11,7 +11,9 @@
 //! change. A track is rendered on a thread of its own ([`Generation`]),
 //! written as a WAV into the library and placed on a tile by the app. With
 //! the music model installed, a track can be made from a prompt instead
-//! (From a prompt): the same thread asks the model for it.
+//! (From a prompt): the same thread asks the model for it, and can render
+//! a bed, the Generator's background alone, quietly, to loop on a second
+//! tile under it.
 
 use std::fs;
 use std::path::Path;
@@ -26,7 +28,7 @@ use olio_audio::ambience::{
     ROOT_NAMES, Register, ScaleKind, Style,
 };
 use olio_audio::instruments::{Pack, Recorded as Recordings};
-use olio_audio::{WavFormat, render_track};
+use olio_audio::{Clip, WavFormat, render_track};
 use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
@@ -167,6 +169,56 @@ pub fn prompt_track_title(prompt: &str, seconds: u32) -> String {
         title = "Prompt".to_owned();
     }
     track_title(title.trim_end_matches(['.', ',', ' ']), seconds)
+}
+
+/// What a prompted track is asked to sound like when Keep it ambient is
+/// on: added to the prompt, so the track stays behind the sounds.
+pub const PROMPT_HINTS: &str = "ambient, sparse, slow, spacious, soft, no drums";
+
+/// The prompt with the hints after it; the title keeps the words alone.
+pub fn hinted(prompt: &str) -> String {
+    let prompt = prompt.trim().trim_end_matches([',', '.', ' ']);
+    format!("{prompt}, {PROMPT_HINTS}")
+}
+
+/// A bed sits this far under the track: -12 dB.
+pub const BED_GAIN: f32 = 0.25;
+
+/// A bed's title: "Rain bed 30 s".
+pub fn bed_title(background: Background, seconds: u32) -> String {
+    track_title(&format!("{} bed", background.name()), seconds)
+}
+
+/// The Generator's settings that render a bed: the background alone.
+pub fn bed_settings(background: Background, seed: u64) -> AmbienceSettings {
+    AmbienceSettings {
+        style: None,
+        background,
+        balance: 0.0,
+        seed,
+        ..AmbienceSettings::default()
+    }
+}
+
+/// Renders `seconds` of a bed of `background`, [`BED_GAIN`] under a
+/// track; `None` when `progress` stopped it (see [`render_track`]).
+pub fn render_bed(
+    background: Background,
+    seconds: u32,
+    seed: u64,
+    progress: impl FnMut(f32) -> bool,
+) -> Option<Clip> {
+    let settings = bed_settings(background, seed);
+    let clip = render_track(&settings, seconds as f32, &Recordings::default(), progress)?;
+    let samples = clip.samples().iter().map(|s| s * BED_GAIN).collect();
+    Some(Clip::new(clip.rate(), clip.channels(), samples))
+}
+
+/// A seed for a bed no one picked: a new one each time.
+pub fn fresh_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |since| since.as_nanos() as u64 | 1)
 }
 
 /// The settings in a line: "G Aeolian, rain; harp and bass."
@@ -338,7 +390,8 @@ pub struct Generation {
     progress: Arc<AtomicU32>,
     /// The track being rendered.
     current: Arc<AtomicUsize>,
-    /// For a prompted track: `STARTING` while the music model starts.
+    /// For a prompted track: `STARTING` while the music model starts,
+    /// `BEDDING` while its bed is rendered.
     phase: Arc<AtomicU8>,
     cancel: Arc<AtomicBool>,
     done: mpsc::Receiver<Made>,
@@ -350,6 +403,7 @@ pub struct Generation {
 }
 
 const STARTING: u8 = 1;
+const BEDDING: u8 = 2;
 
 impl Generation {
     /// Starts rendering `seconds` of each track into the library in
@@ -381,6 +435,7 @@ impl Generation {
 
     /// Starts making a track from `request` with the music model `client`
     /// talks to (running as `server`, if the app started it).
+    #[allow(clippy::too_many_arguments)]
     pub fn start_prompted(
         ctx: egui::Context,
         store: Store,
@@ -389,21 +444,19 @@ impl Generation {
         client: Client,
         server: Option<Arc<Mutex<Server>>>,
         destination: Destination,
+        bed: Option<Background>,
     ) -> Self {
+        let mut emojis = vec![PROMPT_EMOJI];
+        if let Some(background) = bed {
+            emojis.push(emoji(background));
+        }
         let work = Work::Prompt {
             title: title.clone(),
             request,
             client,
+            bed,
         };
-        Self::spawn(
-            ctx,
-            store,
-            title,
-            vec![PROMPT_EMOJI],
-            destination,
-            work,
-            server,
-        )
+        Self::spawn(ctx, store, title, emojis, destination, work, server)
     }
 
     fn spawn(
@@ -467,10 +520,10 @@ impl Generation {
         if done.is_finite() {
             return Progress::Fraction(done);
         }
-        let words = if self.phase.load(Ordering::Relaxed) == STARTING {
-            "Starting the music model for"
-        } else {
-            "Generating"
+        let words = match self.phase.load(Ordering::Relaxed) {
+            STARTING => "Starting the music model for",
+            BEDDING => "Adding the bed to",
+            _ => "Generating",
         };
         Progress::Indeterminate {
             words,
@@ -525,11 +578,13 @@ enum Work {
         recorded: Recordings,
         pack: Option<Pack>,
     },
-    /// The music model asked for one track.
+    /// The music model asked for one track, with a bed of this background
+    /// rendered after it.
     Prompt {
         title: String,
         request: Request,
         client: Client,
+        bed: Option<Background>,
     },
 }
 
@@ -565,7 +620,8 @@ impl Job {
                 title,
                 request,
                 client,
-            } => self.prompt(&title, &request, &client),
+                bed,
+            } => self.prompt(&title, &request, &client, bed),
         }
     }
 
@@ -634,8 +690,15 @@ impl Job {
         })
     }
 
-    /// Waits for the music model, asks it for the track and imports it.
-    fn prompt(&self, title: &str, request: &Request, client: &Client) -> Made {
+    /// Waits for the music model, asks it for the track and imports it;
+    /// then renders and imports its bed, if it has one.
+    fn prompt(
+        &self,
+        title: &str,
+        request: &Request,
+        client: &Client,
+        bed: Option<Background>,
+    ) -> Made {
         let stopped = |stop| Made {
             sounds: Vec::new(),
             stopped: Some(stop),
@@ -654,15 +717,49 @@ impl Job {
                 .generate(request, path, &self.cancel)
                 .map(|made| made.is_some())
         });
-        match made {
-            Ok(Some(sound)) => Made {
+        let sound = match made {
+            Ok(Some(sound)) => sound,
+            Ok(None) => return stopped(Stop::Cancelled),
+            // A request the model was stopped under fails: that was the
+            // cancel.
+            Err(_) if self.cancel.load(Ordering::Relaxed) => return stopped(Stop::Cancelled),
+            Err(err) => return stopped(Stop::Failed(err)),
+        };
+        let Some(background) = bed else {
+            return Made {
                 sounds: vec![sound],
+                stopped: None,
+            };
+        };
+        // The track is made; what goes wrong from here loses only the bed.
+        let stopped = |stop| Made {
+            sounds: vec![sound.clone()],
+            stopped: Some(stop),
+        };
+        self.phase.store(BEDDING, Ordering::Relaxed);
+        self.ctx.request_repaint();
+        let mut shown = Instant::now();
+        let clip = render_bed(background, request.seconds, fresh_seed(), |_| {
+            if shown.elapsed() > Duration::from_millis(100) {
+                shown = Instant::now();
+                self.ctx.request_repaint();
+            }
+            !self.cancel.load(Ordering::Relaxed)
+        });
+        let Some(clip) = clip else {
+            return stopped(Stop::Cancelled);
+        };
+        let title = bed_title(background, request.seconds);
+        match import_track(&self.store, &title, |path| {
+            clip.write_wav(path, WavFormat::Int16)
+                .map(|()| true)
+                .map_err(|err| err.to_string())
+        }) {
+            Ok(Some(bed)) => Made {
+                sounds: vec![sound, bed],
                 stopped: None,
             },
             Ok(None) => stopped(Stop::Cancelled),
-            // A request the model was stopped under fails: that was the
-            // cancel.
-            Err(_) if self.cancel.load(Ordering::Relaxed) => stopped(Stop::Cancelled),
             Err(err) => stopped(Stop::Failed(err)),
         }
     }
@@ -837,12 +934,21 @@ pub enum Action {
     RemoveMusicModel,
 }
 
+/// The prompt and what goes with it, edited in place: preferences all.
+pub struct Prompted<'a> {
+    pub prompt: &'a mut String,
+    /// The bed under a prompted track; `None` for the track alone.
+    pub bed: &'a mut Background,
+    /// Keep it ambient: the [`PROMPT_HINTS`] go with the prompt.
+    pub hints: &'a mut bool,
+}
+
 pub fn show(
     ui: &mut Ui,
     settings: &mut AmbienceSettings,
     view: &View,
     naming: &mut Option<Naming>,
-    prompt: &mut String,
+    prompted: Prompted,
 ) -> Vec<Action> {
     let before = *settings;
     let mut actions = Vec::new();
@@ -915,7 +1021,7 @@ pub fn show(
                     "A track the music model makes from words, not from the settings above",
                 );
                 // In one scope: it changes as the model installs.
-                ui.scope(|ui| prompt_section(ui, view, prompt, &mut actions));
+                ui.scope(|ui| prompt_section(ui, view, prompted, &mut actions));
             }
             if details {
                 section(ui, "Form");
@@ -1321,10 +1427,24 @@ fn amount(ui: &mut Ui, name: &str, value: &mut f32, hint: &str) {
 }
 
 fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages) {
+    background_chips(ui, &mut settings.background, images);
+    ui.weak(settings.background.describe());
+    // Its balance with the instruments: in one scope, so whether it shows
+    // never moves the ids of the widgets below.
+    ui.scope(|ui| {
+        if settings.background != Background::None {
+            ui.add_space(2.0);
+            balance(ui, settings);
+        }
+    });
+}
+
+/// Each background as a chip with its picture, the chosen one lit.
+fn background_chips(ui: &mut Ui, value: &mut Background, images: &EmojiImages) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for choice in Background::ALL {
-            let chosen = settings.background == choice;
+            let chosen = *value == choice;
             let button = match images.texture(ui.ctx(), emoji(choice)) {
                 Some(texture) => {
                     let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
@@ -1336,17 +1456,8 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
                 None => egui::Button::selectable(chosen, choice.name()),
             };
             if ui.add(button).on_hover_text(choice.describe()).clicked() {
-                settings.background = choice;
+                *value = choice;
             }
-        }
-    });
-    ui.weak(settings.background.describe());
-    // Its balance with the instruments: in one scope, so whether it shows
-    // never moves the ids of the widgets below.
-    ui.scope(|ui| {
-        if settings.background != Background::None {
-            ui.add_space(2.0);
-            balance(ui, settings);
         }
     });
 }
@@ -1431,7 +1542,8 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
 
 /// The music model: offered for install, installing, or, installed, the
 /// prompt and the button that makes a track of it.
-fn prompt_section(ui: &mut Ui, view: &View, prompt: &mut String, actions: &mut Vec<Action>) {
+fn prompt_section(ui: &mut Ui, view: &View, prompted: Prompted, actions: &mut Vec<Action>) {
+    let Prompted { prompt, bed, hints } = prompted;
     const ABOUT: &str = "ACE-Step 1.5, an open-source music model, installed once into the \
                          per-user data folder with the Python it needs. It runs on this \
                          computer; nothing you type leaves it. It takes about 8 GB of memory \
@@ -1477,6 +1589,24 @@ fn prompt_section(ui: &mut Ui, view: &View, prompt: &mut String, actions: &mut V
             ui.add(edit)
                 .on_hover_text("What the track is made from. Prompted tracks are instrumental");
             ui.add_space(4.0);
+            ui.checkbox(hints, "Keep it ambient").on_hover_text(format!(
+                "Asks for “{PROMPT_HINTS}” along with your words, so the track stays \
+                 behind the sounds; off, the words go as they are"
+            ));
+            ui.add_space(4.0);
+            ui.label("Bed").on_hover_text(
+                "The Generator's background alone, rendered quietly onto a second tile \
+                 that loops under the track: a world for the music to sit in",
+            );
+            background_chips(ui, bed, view.images);
+            ui.weak(match *bed {
+                Background::None => "No bed: the track alone.".to_owned(),
+                background => format!(
+                    "{}: on a tile of its own, looping, well under the track.",
+                    background.describe()
+                ),
+            });
+            ui.add_space(4.0);
             let ready = view.busy.is_none() && !prompt.trim().is_empty();
             let generate = egui::Button::new("Generate from Prompt")
                 .min_size(egui::vec2(ui.available_width(), 28.0));
@@ -1484,17 +1614,25 @@ fn prompt_section(ui: &mut Ui, view: &View, prompt: &mut String, actions: &mut V
                 .add_enabled(ready, generate)
                 .on_hover_text(
                     "Asks the music model for this much music from these words, then puts \
-                     it on a tile to play, loop and polish like any other",
+                     it on a tile to play, loop and polish like any other; with a bed, the \
+                     track comes polished and the bed loops on the next tile",
                 )
                 .clicked()
             {
                 actions.push(Action::GeneratePrompt);
             }
-            ui.weak(format!(
-                "{} onto a tile in “{}”",
-                length_name(view.track_seconds),
-                view.set_name
-            ));
+            ui.weak(match *bed {
+                Background::None => format!(
+                    "{} onto a tile in “{}”",
+                    length_name(view.track_seconds),
+                    view.set_name
+                ),
+                _ => format!(
+                    "{} onto two tiles in “{}”: the track and its bed",
+                    length_name(view.track_seconds),
+                    view.set_name
+                ),
+            });
             if view.details {
                 ui.add_space(4.0);
                 ui.weak(if running {
@@ -1913,6 +2051,7 @@ mod tests {
             Client::new(fake.base.clone(), None),
             None,
             Destination::NewSet,
+            None,
         );
         assert!(generation.is_prompted());
         assert_eq!(generation.emojis, [PROMPT_EMOJI]);
@@ -1933,6 +2072,77 @@ mod tests {
         assert_eq!(made.sounds[0].original_name, "Soft piano 30 s.wav");
         assert!(store.sound_path(&made.sounds[0]).is_file());
         assert!(!store.root().join("generating").exists(), "tidied");
+    }
+
+    #[test]
+    fn a_prompted_track_can_come_with_a_bed_of_the_background_alone() {
+        use crate::music_model::client::fake::{Fake, Settings};
+        let fake = Fake::start(Settings {
+            audio: crate::music_model::client::tests::wav(),
+            ..Settings::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("library")).unwrap();
+        let request = Request {
+            prompt: hinted("soft piano"),
+            seconds: 10,
+            seed: None,
+        };
+        let generation = Generation::start_prompted(
+            egui::Context::default(),
+            store.clone(),
+            prompt_track_title("soft piano", 10),
+            request,
+            Client::new(fake.base.clone(), None),
+            None,
+            Destination::Tile(olio_library::SetId::random()),
+            Some(Background::Waves),
+        );
+        assert_eq!(generation.emojis, [PROMPT_EMOJI, "🌊"]);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let made = loop {
+            if let Some(made) = generation.poll() {
+                break made;
+            }
+            assert!(Instant::now() < deadline, "never finished");
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(made.stopped, None);
+        let names: Vec<_> = made
+            .sounds
+            .iter()
+            .map(|s| s.original_name.as_str())
+            .collect();
+        assert_eq!(names, ["Soft piano 10 s.wav", "Waves bed 10 s.wav"]);
+        let bed = olio_audio::decode_file(&store.sound_path(&made.sounds[1])).unwrap();
+        assert_eq!(bed.channels(), 2);
+        assert!((bed.duration().as_secs_f32() - 10.0).abs() < 0.1);
+        // Well under a track: a track is about -20 dBFS, the bed 12 dB less.
+        let rms = bed.rms(0..bed.frames());
+        assert!(rms > 0.01 && rms < 0.04, "{rms}");
+        assert_eq!(
+            fake.bodies()[0]["prompt"],
+            "soft piano, ambient, sparse, slow, spacious, soft, no drums"
+        );
+    }
+
+    #[test]
+    fn hints_follow_the_prompt_and_beds_are_titled_by_their_background() {
+        assert_eq!(
+            hinted("soft piano, "),
+            "soft piano, ambient, sparse, slow, spacious, soft, no drums"
+        );
+        assert_eq!(
+            hinted("  rain. "),
+            "rain, ambient, sparse, slow, spacious, soft, no drums"
+        );
+        assert_eq!(bed_title(Background::Rain, 30), "Rain bed 30 s");
+        assert_eq!(bed_title(Background::Forest, 120), "Forest bed 2 min");
+        let settings = bed_settings(Background::Fire, 9);
+        assert_eq!(settings.background, Background::Fire);
+        assert_eq!(settings.balance, 0.0, "the background alone");
+        assert_eq!(settings.seed, 9);
+        assert!(fresh_seed() != 0);
     }
 
     #[test]

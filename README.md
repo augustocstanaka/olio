@@ -115,7 +115,10 @@ Milestone 0, the playable skeleton, is done. Olio can:
   data folder. Then type a prompt ("warm piano over soft rain, slow"),
   pick a length and press **Generate from Prompt**: the model runs on your
   computer (nothing you type leaves it), and the track lands on a tile
-  titled after the prompt, to play, loop and polish like any other. It
+  titled after the prompt, to play, loop and polish like any other. Keep
+  it ambient (on by default) asks for sparse, slow, spacious music that
+  stays behind the sounds, and a **Bed** puts the Generator's rain, waves
+  or fire, quietly and looping, on a second tile under it. It
   takes about 6 GB of memory while it runs and stops after ten minutes
   unused; **Remove Music Model** (under Details) takes it all away again.
   Apple Silicon runs it through MLX; on Windows it uses CUDA where there
@@ -158,8 +161,8 @@ Milestone 0, the playable skeleton, is done. Olio can:
   `--chaos` (0 to 100) set their character, and they play the recorded
   instruments where installed (`olio instruments` installs them;
   `--synthesised` leaves them out). `olio generate --prompt "soft piano
-  and rain" --seconds 60` makes a track with the music model (`olio
-  music-model install` installs it).
+  and rain" --seconds 60 --bed rain` makes a track with the music model
+  (`olio music-model install` installs it) and a bed beside it.
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 

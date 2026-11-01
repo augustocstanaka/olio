@@ -7,7 +7,7 @@
 
 use egui::ThemePreference;
 use olio_audio::AmbienceSettings;
-use olio_audio::ambience::Style;
+use olio_audio::ambience::{Background, Style};
 use olio_control::TileSetting;
 use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
@@ -263,6 +263,10 @@ pub struct Preferences {
     pub click_plays: bool,
     /// What the music model last made a track from.
     pub prompt: String,
+    /// The bed rendered under a prompted track; `None` for the track alone.
+    pub prompt_bed: Background,
+    /// Keep it ambient: the hints go with the prompt.
+    pub prompt_hints: bool,
 }
 
 impl Default for Preferences {
@@ -285,6 +289,8 @@ impl Default for Preferences {
             recorded_instruments: true,
             click_plays: false,
             prompt: String::new(),
+            prompt_bed: Background::None,
+            prompt_hints: true,
         }
     }
 }
@@ -562,5 +568,7 @@ mod tests {
         assert_eq!(prefs.tile_size, TileSize::Regular);
         assert!(!prefs.ambience.enabled);
         assert_eq!(prefs.prompt, "");
+        assert_eq!(prefs.prompt_bed, Background::None);
+        assert!(prefs.prompt_hints);
     }
 }

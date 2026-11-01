@@ -57,7 +57,9 @@ are intentions, reordered as real use dictates.
   every style), undoable; `olio generate` and `cargo xtask
   previews` render the styles to WAV files. With the **music model**
   installed (ACE-Step 1.5, about 10 GB, by choice), a track can be made
-  from a prompt instead, in the panel or with `olio generate --prompt`.
+  from a prompt instead, in the panel or with `olio generate --prompt`,
+  kept ambient by hints and with a bed of the Generator's background on
+  a second tile.
 - **Grid size**: columns per set (⌘] / ⌘[, Fit to Window ⌘\\, Set ▸
   Columns, the inspector), never narrower than the tiles allow, undoable; Compact,
   Regular and Large tile sizes.
