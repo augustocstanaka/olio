@@ -229,6 +229,12 @@ demo board through the real binary. CI runs the same command on macOS and
 Windows. Enable the pre-commit hook once per clone with
 `git config core.hooksPath .githooks`.
 
+`cargo xtask check-windows` runs clippy for the Windows target from a Mac
+(after `rustup target add x86_64-pc-windows-msvc` and `brew install llvm`),
+so the Windows-only code is type-checked and linted without a Windows
+machine; nothing is linked or run, so CI's Windows run is still the real
+one.
+
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
 offscreen in both themes and both tile styles to `target/screenshots/`
 (`window.png`, `window-light.png`, `window-soft.png`,

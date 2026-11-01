@@ -63,7 +63,9 @@ and UI text.
 ## Commands
 
 - `cargo fmt --all && cargo xtask check` before committing; CI runs
-  `cargo xtask check` on Windows and macOS.
+  `cargo xtask check` on Windows and macOS. `cargo xtask check-windows`
+  type-checks and lints the Windows-only code from a Mac (clippy for the
+  Windows target; nothing linked or run), for when CI is not running.
 - `cargo xtask run [args]` to try the app (runs a copy of the binary, so
   you can rebuild while a window is open). `cargo xtask demo` builds a demo
   library to open with `--library target/demo/library`. `cargo xtask
