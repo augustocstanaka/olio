@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -30,21 +30,16 @@ use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
-use crate::music_model::client::{Client, Request};
-use crate::music_model::install::Install;
-use crate::music_model::server::{IDLE_STOP, Server};
 use crate::prefs::{self, Polish, Preferences, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
-use crate::{instruments, keys, music_model, palette, polish, skin};
-use olio_audio::ambience::{Background, Instrument};
+use crate::{instruments, keys, palette, polish, skin};
+use olio_audio::ambience::Instrument;
 use olio_audio::instruments::{Pack, Recorded};
 
 /// Escape must be held this long to stop everything, so a stray tap does
 /// not.
 const STOP_ALL_HOLD: Duration = Duration::from_millis(300);
-/// A bed swells in and sinks out over this long: slower than a polish.
-const BED_FADE_SECONDS: f32 = 3.0;
 /// How long Fade All takes.
 const FADE_ALL: Duration = Duration::from_secs(2);
 /// How long a status message stays up; mistakes stay longer.
@@ -168,14 +163,6 @@ pub struct OlioApp {
     pack: Option<Pack>,
     instruments_dir: Option<PathBuf>,
     download: Option<instruments::Download>,
-    /// The music model: where it is installed, whether it is, its install
-    /// while it runs, its process while it runs, and its removal.
-    music_model_dir: Option<PathBuf>,
-    music_model_url: Option<String>,
-    music_model: Option<music_model::Installed>,
-    model_install: Option<Install>,
-    model_server: Option<Arc<Mutex<Server>>>,
-    model_removal: Option<mpsc::Receiver<Result<(), String>>>,
     /// A style's name being typed in the Generator.
     naming: Option<generator::Naming>,
     /// What played before a surprise, and its name, while Back can return
@@ -252,15 +239,6 @@ impl OlioApp {
                 .and_then(instruments::installed),
             instruments_dir: options.instruments.clone(),
             download: None,
-            music_model: options
-                .music_model
-                .as_deref()
-                .and_then(music_model::installed),
-            music_model_dir: options.music_model.clone(),
-            music_model_url: options.music_model_url.clone(),
-            model_install: None,
-            model_server: None,
-            model_removal: None,
             naming: None,
             before_surprise: None,
             surprises: 0,
@@ -532,235 +510,6 @@ impl OlioApp {
                 true,
             ),
         }
-    }
-
-    // ----- the music model ------------------------------------------------
-
-    /// Starts installing the music model (or goes on with it).
-    fn install_music_model(&mut self, ctx: &egui::Context) {
-        if self.model_install.is_some() || self.model_removal.is_some() {
-            return;
-        }
-        let Some(dir) = self.music_model_dir.clone() else {
-            return;
-        };
-        self.model_install = Some(Install::start(ctx.clone(), dir));
-        self.set_status("Installing the music model…", false);
-    }
-
-    fn poll_install(&mut self) {
-        let Some(result) = self.model_install.as_ref().and_then(Install::poll) else {
-            return;
-        };
-        self.model_install = None;
-        match result {
-            Ok(true) => {
-                self.music_model = self
-                    .music_model_dir
-                    .as_deref()
-                    .and_then(music_model::installed);
-                self.set_status("Music model installed", false);
-            }
-            Ok(false) => self.set_status(
-                "Stopped installing the music model; Install goes on from here",
-                false,
-            ),
-            Err(err) => self.set_status(format!("Could not install the music model: {err}"), true),
-        }
-    }
-
-    /// Starts making a track from the prompt, for the front set, with the
-    /// music model: started here unless `OLIO_MUSIC_MODEL_URL` names one.
-    fn start_prompt_generation(&mut self, ctx: &egui::Context) {
-        if self.generation.is_some() {
-            return;
-        }
-        let prompt = self.prefs.prompt.trim().to_owned();
-        if prompt.is_empty() {
-            return;
-        }
-        if self.music_model_url.is_none() && self.music_model.is_none() {
-            self.set_status("The music model is not installed", true);
-            return;
-        }
-        let mut status = None;
-        let (client, server) = match self.music_model_url.clone() {
-            Some(url) => (Client::new(url, None), None),
-            None => {
-                let Some(dir) = self.music_model_dir.clone() else {
-                    return;
-                };
-                let running = self
-                    .model_server
-                    .as_ref()
-                    .is_some_and(|server| server.lock().is_ok_and(|mut server| server.alive()));
-                if !running {
-                    match Server::start(&dir) {
-                        Ok(server) => {
-                            self.model_server = Some(Arc::new(Mutex::new(server)));
-                            status = Some(
-                                "Starting the music model… the first track takes a few \
-                                 minutes while it loads"
-                                    .to_owned(),
-                            );
-                        }
-                        Err(err) => {
-                            self.set_status(
-                                format!("Could not start the music model: {err}"),
-                                true,
-                            );
-                            return;
-                        }
-                    }
-                }
-                let Some(server) = self.model_server.clone() else {
-                    return;
-                };
-                let client = match server.lock() {
-                    Ok(mut server) => {
-                        server.touch();
-                        server.client()
-                    }
-                    Err(_) => return,
-                };
-                (client, Some(server))
-            }
-        };
-        let seconds = self.prefs.track_seconds;
-        let title = generator::prompt_track_title(&prompt, seconds);
-        let request = Request {
-            prompt: if self.prefs.prompt_hints {
-                generator::hinted(&prompt)
-            } else {
-                prompt
-            },
-            seconds,
-            seed: None,
-        };
-        let bed = match self.prefs.prompt_bed {
-            Background::None => None,
-            background => Some(background),
-        };
-        let generation = Generation::start_prompted(
-            ctx.clone(),
-            self.store.clone(),
-            title,
-            request,
-            client,
-            server,
-            Destination::Tile(self.current),
-            bed,
-        );
-        let status = status.unwrap_or_else(|| format!("Generating “{}”…", generation.title));
-        self.set_status(status, false);
-        self.generation = Some(generation);
-    }
-
-    /// Stops the music model once it has idled, or notes that it died;
-    /// finishes its removal.
-    fn poll_music_model(&mut self, ctx: &egui::Context) {
-        if let Some(removal) = &self.model_removal {
-            let result = match removal.try_recv() {
-                Ok(result) => Some(result),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    Some(Err("the removal stopped unexpectedly".to_owned()))
-                }
-            };
-            match result {
-                None => {}
-                Some(Ok(())) => {
-                    self.model_removal = None;
-                    self.music_model = None;
-                    self.set_status("Music model removed", false);
-                }
-                Some(Err(err)) => {
-                    self.model_removal = None;
-                    self.music_model = self
-                        .music_model_dir
-                        .as_deref()
-                        .and_then(music_model::installed);
-                    self.set_status(format!("Could not remove the music model: {err}"), true);
-                }
-            }
-        }
-        let Some(server) = self.model_server.clone() else {
-            return;
-        };
-        let generating = self
-            .generation
-            .as_ref()
-            .is_some_and(Generation::is_prompted);
-        let Ok(mut server) = server.lock() else {
-            return;
-        };
-        if !server.alive() {
-            drop(server);
-            self.model_server = None;
-            if !generating {
-                self.set_status("The music model stopped (see server.log beside it)", true);
-            }
-            return;
-        }
-        if generating {
-            server.touch();
-            return;
-        }
-        let idle = server.idle();
-        if idle >= IDLE_STOP {
-            server.stop();
-            drop(server);
-            self.model_server = None;
-            self.set_status("The music model stopped after ten minutes unused", false);
-        } else {
-            ctx.request_repaint_after(IDLE_STOP - idle);
-        }
-    }
-
-    fn ask_remove_music_model(&mut self) {
-        if self.music_model.is_none() || self.model_removal.is_some() {
-            return;
-        }
-        self.confirm = Some(Confirm {
-            title: "Remove the music model?".to_owned(),
-            body: format!(
-                "Its files ({}) go; tracks made from it stay.",
-                music_model::about_gigabytes(music_model::DISK_BYTES)
-            ),
-            verb: "Remove",
-            pending: Pending::RemoveMusicModel,
-        });
-    }
-
-    /// Stops the music model and removes everything installed for it, on
-    /// a thread: it is about 10 GB.
-    fn remove_music_model(&mut self) {
-        if let Some(generation) = &self.generation
-            && generation.is_prompted()
-        {
-            generation.cancel();
-        }
-        if let Some(server) = self.model_server.take()
-            && let Ok(mut server) = server.lock()
-        {
-            server.stop();
-        }
-        let Some(dir) = self.music_model_dir.clone() else {
-            return;
-        };
-        let (sender, receiver) = mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("olio-music-model-remove".to_owned())
-            .spawn(move || {
-                let _ = sender.send(music_model::remove(&dir));
-            });
-        if let Err(err) = spawned {
-            self.set_status(format!("Could not remove the music model: {err}"), true);
-            return;
-        }
-        self.music_model = None;
-        self.model_removal = Some(receiver);
-        self.set_status("Removing the music model…", false);
     }
 
     fn apply_master_gain(&mut self) {
@@ -1471,24 +1220,6 @@ impl OlioApp {
                 Ok((set, tile)) => Ok(Change::Generated { set, tile }),
                 Err(tile) => Err(Change::Generated { set, tile }),
             },
-            Change::GeneratedWithBed { set, tile, bed } => {
-                let (set, tile) = match self.insert_tile(set, tile) {
-                    Ok(placed) => placed,
-                    Err(tile) => return Err(Change::GeneratedWithBed { set, tile, bed }),
-                };
-                match self.insert_tile(set, bed) {
-                    Ok((set, bed)) => {
-                        // The track stays selected, as when it was made.
-                        self.selected = Some(tile.id);
-                        Ok(Change::GeneratedWithBed { set, tile, bed })
-                    }
-                    Err(bed) => {
-                        // Neither, rather than one of the two.
-                        self.take_tile(tile.id);
-                        Err(Change::GeneratedWithBed { set, tile, bed })
-                    }
-                }
-            }
             Change::GeneratedSet { index, set } => {
                 // Back where it was, after the sets before it.
                 let id = set.id;
@@ -1625,23 +1356,6 @@ impl OlioApp {
                 Some(Change::RemovedTile { set, tile }) => Ok(Change::Generated { set, tile }),
                 _ => Err(Change::Generated { set, tile }),
             },
-            Change::GeneratedWithBed { set, tile, bed } => {
-                let Some(Change::RemovedTile { set, tile: bed }) = self.take_tile(bed.id) else {
-                    return Err(Change::GeneratedWithBed { set, tile, bed });
-                };
-                match self.take_tile(tile.id) {
-                    Some(Change::RemovedTile { set, tile }) => {
-                        Ok(Change::GeneratedWithBed { set, tile, bed })
-                    }
-                    _ => {
-                        // Both or neither: the bed goes back.
-                        let bed = match self.insert_tile(set, bed) {
-                            Ok((_, bed)) | Err(bed) => bed,
-                        };
-                        Err(Change::GeneratedWithBed { set, tile, bed })
-                    }
-                }
-            }
             Change::GeneratedSet { index, set } => match self.take_set(set.id) {
                 Some(Change::RemovedSet { index, set }) => Ok(Change::GeneratedSet { index, set }),
                 _ => Err(Change::GeneratedSet { index, set }),
@@ -1852,7 +1566,6 @@ impl OlioApp {
         match pending {
             Pending::RemoveSet(id) => self.remove_set(id),
             Pending::RemoveStyle(index) => self.remove_style(index),
-            Pending::RemoveMusicModel => self.remove_music_model(),
         }
     }
 
@@ -2053,110 +1766,12 @@ impl OlioApp {
         }
         match generation.destination {
             Destination::Tile(set) => {
-                let mut sounds = sounds.into_iter();
-                let Some(sound) = sounds.next() else {
-                    return;
-                };
-                match sounds.next() {
-                    Some(bed) => self.place_with_bed(&generation, set, sound, bed),
-                    None => {
-                        self.place_track(&generation, set, sound);
-                        // The track is there; only its bed went missing.
-                        match stopped {
-                            Some(Stop::Failed(err)) => self.set_status(
-                                format!("“{}” has no bed: {err}", generation.title),
-                                true,
-                            ),
-                            Some(Stop::Cancelled) if generation.emojis.len() > 1 => self
-                                .set_status(
-                                    format!("“{}” has no bed: stopped", generation.title),
-                                    false,
-                                ),
-                            _ => {}
-                        }
-                    }
+                if let Some(sound) = sounds.into_iter().next() {
+                    self.place_track(&generation, set, sound);
                 }
             }
             Destination::NewSet => self.place_set(&generation, sounds, stopped),
         }
-    }
-
-    /// Puts a prompted track on a tile, polished, and its bed on the next
-    /// free tile, looping and left at its own quiet level. Undo takes both
-    /// off.
-    fn place_with_bed(&mut self, generation: &Generation, set: SetId, sound: Sound, bed: Sound) {
-        let set = if self.library.set(set).is_some() {
-            set
-        } else {
-            self.current
-        };
-        let Some(target) = self.library.set_mut(set) else {
-            return;
-        };
-        let Some(id) = target.place(sound, None) else {
-            self.set_status(
-                format!(
-                    "There is no free slot in this set for “{}”",
-                    generation.title
-                ),
-                true,
-            );
-            return;
-        };
-        let slot = target.tile(id).map(|tile| tile.slot);
-        let bed_id = target.place(bed, slot.and_then(|slot| target.free_slot_after(slot)));
-        let polish = self.prefs.polish;
-        if let Some(tile) = self.library.tile_mut(id) {
-            tile.emoji = generation
-                .emojis
-                .first()
-                .copied()
-                .unwrap_or_default()
-                .to_owned();
-            tile.fade_in_seconds = polish.fade_in_seconds;
-            tile.fade_out_seconds = polish.fade_out_seconds;
-            tile.reverb = polish.reverb;
-        }
-        let Some(bed_id) = bed_id else {
-            // Room for one: the track alone, as without a bed.
-            let Some((_, tile)) = self.library.tile(id) else {
-                return;
-            };
-            let tile = Box::new(tile.clone());
-            self.execute(Command::SelectSet(set));
-            self.selected = Some(id);
-            self.reveal_selected = true;
-            self.changed();
-            self.record(Change::Generated { set, tile });
-            self.set_status(
-                "There is no free slot in this set for the bed".to_owned(),
-                true,
-            );
-            return;
-        };
-        if let Some(tile) = self.library.tile_mut(bed_id) {
-            tile.emoji = generation
-                .emojis
-                .get(1)
-                .copied()
-                .unwrap_or_default()
-                .to_owned();
-            tile.looping = true;
-            // Rendered well under the track: left there.
-            tile.normalize = false;
-            tile.fade_in_seconds = BED_FADE_SECONDS;
-            tile.fade_out_seconds = BED_FADE_SECONDS;
-        }
-        let (Some((_, tile)), Some((_, bed))) = (self.library.tile(id), self.library.tile(bed_id))
-        else {
-            return;
-        };
-        let (tile, bed) = (Box::new(tile.clone()), Box::new(bed.clone()));
-        self.execute(Command::SelectSet(set));
-        self.selected = Some(id);
-        self.reveal_selected = true;
-        self.changed();
-        self.record(Change::GeneratedWithBed { set, tile, bed });
     }
 
     fn place_track(&mut self, generation: &Generation, set: SetId, sound: Sound) {
@@ -2792,8 +2407,6 @@ impl eframe::App for OlioApp {
         self.clips.poll();
         self.poll_generation();
         self.poll_download();
-        self.poll_install();
-        self.poll_music_model(&ctx);
         self.maintain_audio(&ctx);
         self.follow_instruments(&ctx);
         self.update_meters(&ctx);
@@ -2920,28 +2533,6 @@ impl eframe::App for OlioApp {
                         loading: !self.loading.is_empty(),
                     },
                 },
-                music_model: match (
-                    &self.music_model_dir,
-                    &self.music_model,
-                    &self.model_install,
-                    &self.model_removal,
-                ) {
-                    (None, _, _, _) => generator::MusicModel::Unavailable,
-                    (_, _, Some(install), _) => {
-                        let (phase, done) = install.progress();
-                        generator::MusicModel::Installing {
-                            words: phase.words(),
-                            done,
-                        }
-                    }
-                    (_, _, _, Some(_)) => generator::MusicModel::Removing,
-                    (_, None, None, None) if self.music_model_url.is_none() => {
-                        generator::MusicModel::Missing
-                    }
-                    (_, _, None, None) => generator::MusicModel::Installed {
-                        running: self.model_server.is_some(),
-                    },
-                },
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
@@ -2953,11 +2544,6 @@ impl eframe::App for OlioApp {
                         &mut self.prefs.ambience,
                         &view,
                         &mut self.naming,
-                        generator::Prompted {
-                            prompt: &mut self.prefs.prompt,
-                            bed: &mut self.prefs.prompt_bed,
-                            hints: &mut self.prefs.prompt_hints,
-                        },
                         &mut self.prefs.generator,
                     )
                 })
@@ -3056,11 +2642,6 @@ impl eframe::App for OlioApp {
                 generator::Action::Cancel => {
                     if let Some(generation) = &self.generation {
                         generation.cancel();
-                        // A prompted track's cancel stops the music model:
-                        // forgotten here, so its end is not reported.
-                        if generation.is_prompted() {
-                            self.model_server = None;
-                        }
                     }
                 }
                 generator::Action::SaveStyle => self.start_naming(None),
@@ -3070,14 +2651,6 @@ impl eframe::App for OlioApp {
                 generator::Action::RemoveStyle(index) => self.ask_remove_style(index),
                 generator::Action::Surprise => self.surprise(),
                 generator::Action::BackFromSurprise => self.back_from_surprise(),
-                generator::Action::InstallMusicModel => self.install_music_model(&ctx),
-                generator::Action::CancelInstall => {
-                    if let Some(install) = &self.model_install {
-                        install.cancel();
-                    }
-                }
-                generator::Action::GeneratePrompt => self.start_prompt_generation(&ctx),
-                generator::Action::RemoveMusicModel => self.ask_remove_music_model(),
             }
         }
         // A surprise picked as, or saved as, a style is kept: no going back.
@@ -3185,11 +2758,5 @@ impl eframe::App for OlioApp {
 
     fn on_exit(&mut self) {
         self.save_now();
-        // Dropped here, the music model's process is stopped with the app.
-        if let Some(server) = self.model_server.take()
-            && let Ok(mut server) = server.lock()
-        {
-            server.stop();
-        }
     }
 }

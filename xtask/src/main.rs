@@ -104,7 +104,7 @@ fn check() -> Result {
 const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// Clippy for the Windows target, from any host: the Windows-only code
-/// (the music model's process flags, the installer's zip path, WASAPI)
+/// (the instrument pack's paths, WASAPI, the file dialogs)
 /// type-checked and linted without linking or running anything. CI's
 /// Windows run is the real one; this catches what it would, sooner.
 ///

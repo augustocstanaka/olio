@@ -51,25 +51,12 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    bed, reverb and all; brings it to one loudness with a limiter; writes
    a WAV; imports it with `Store::import_sound`; and wakes the UI, which
    puts it on a tile. It loads any recorded instrument a track plays that
-   is not loaded yet. For a prompted track it instead waits for the music
-   model to answer, asks it for the track over its local API
-   (`music_model/client.rs`), downloads the WAV and imports it the same
-   way; then, when a bed was picked, renders the background alone
-   through `render_track`, 12 dB down, and imports that too, so the UI
-   puts the track on one tile and its bed, looping, on the next.
+   is not loaded yet.
 5. **Instrument threads** (`instruments.rs`): one downloads and installs
    the instrument pack when asked; one per instrument decodes its
    recordings when the live ambience starts playing it, and the UI hands
    the result to the mixer (`Engine::set_instrument`). Recordings the
    mixer lets go come back through `Engine::poll` and are freed there.
-6. **Music model threads** (`music_model/`): one installs the model when
-   asked (`install.rs`: uv, ACE-Step's source, `uv sync`, the model
-   files, each resumable), one removes it. The model itself is a helper
-   process (`server.rs`): ACE-Step's API server in the Python
-   environment uv made, on 127.0.0.1 with a key made for each start,
-   started for the first prompted track, stopped after ten minutes
-   unused, on Cancel while it is loading, and when the app quits. See
-   ADR 0005.
 
 The UI and audio threads share no locks. The engine sends `Message`s to the
 mixer over a wait-free ring buffer (`rtrb`); the mixer sends `Event`s back
@@ -130,7 +117,8 @@ import) unless forced.
   tables and in the contrast test. A new group in a panel is a section
   (`skin::section`) with a key in its `Disclosure`; what refines it goes
   under its More.
-- A new source of tracks for the Generator: a `Work` arm in `generator.rs`
-  that ends in `import_track`, so the track lands on a tile, is undoable
-  and shows progress like the others; tests against a fake of the source,
-  never the real thing, so CI needs no model.
+- A new kind of generated track: a `TrackPlan` (settings and title) that
+  `Generation` renders through `render_track` and imports with
+  `Store::import_sound`, so it lands on a tile, is undoable and shows
+  progress like the others; tested by rendering offline. Everything the
+  Generator plays is made by rules, with no music model (ADR 0007).

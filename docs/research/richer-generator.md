@@ -1,0 +1,231 @@
+# Making Olio's Generator richer without a music model
+
+Research from 2026-11-02, after ADR 0007 removed the music model: seven agents read Olio's Generator and swept free instruments, engines and techniques, with every external source's licence checked against its own terms. Licences change; recheck one before pinning it.
+
+## 1. Why it sounds thin today
+
+The thinness comes mostly from how the music is written and mixed. The instruments matter less.
+
+- **The harmony moves in blocks.** With a pulse, `composer.rs` walks the fixed `CADENCE` (I IV V I VI IV V I) forever. In free time, `pick_chord()` is a memoryless weighted draw. `pad()` plays every chord as a root-position triad, so every voice jumps at each change. There are no inversions, no common tones held, no open voicings and no borrowed chords. `strings()` plays one note, plus a fifth when energy is high enough.
+- **Repeated notes sound identical.** Piano, harp, bells, strings and pad have one take per note. Velocity layers switch hard at 0.5 (`crates/packer/src/build.rs`), so at Ambient energy the piano almost never reaches its loud layer. The motifs in `melody()` repeat notes on purpose, so you hear the same sample again and again.
+- **The pad sample is stretched.** The bowed vibraphone under the pad has only 6 roots, so notes are shifted several semitones. VCSL Soft Mallets vibraphone is already pinned in `sources.json` but no recipe uses it.
+- **The loops can be heard.** `bake_loop()` always loops 40 % to 80 % of the recording with a 0.5 s blend, without matching the pitch period or the vibrato. Strings and pad notes are held 4 to 22 s, so the loop point comes round every few seconds.
+- **Everything shares one space.** `Ambience::render` (`mod.rs`) sends the whole bus through one `Chorus`, bass and drums included, which muddies the low end. It then goes into one `Hall` at a fixed `HALL_SEND` of 0.6. No layer is near or far, there are no early reflections, and the drone is mono and dead centre.
+- **Nothing breathes.** Apart from the Build swell, energy, density, levels and brightness never move (`journey.rs`). Evolve makes one discrete step every 2 to 4 minutes. A key change releases held notes and restarts on I (`Ambience::follow`, `Composer::modulate`).
+- **The lines don't relate to each other.** Harp, piano and violin are independent random walks. There is no call and response, no imitation and no phrase structure. Free time is random gaps, and pulsed music has no rhythmic patterns.
+- **The synthesised voices are basic** (`synth.rs`). Bells have 4 sine partials and no strike. The piano has 5 partials. Pad and strings use a single 6 dB/oct one-pole filter. Without the pack it sounds like a sine demo.
+- **Voice stealing clicks.** `Sampler::play` overwrites the oldest of its 40 voices with no fade, and the synth pools do the same.
+- **The bus has no glue.** There is no EQ, saturation or compression on the bus, and offline tracks only get RMS normalisation and a limiter (`track.rs`).
+
+## 2. Instruments to add to the pack
+
+Every source here passed the licence audit. They are ranked by what they add to ambient music.
+
+**1. Unused parts of VCSL and VSCO-2-CE (CC0-1.0).** This is the biggest gain for the least work.
+- **Sources:** https://github.com/sgossner/VCSL and https://github.com/sgossner/VSCO-2-CE. Both are already pinned at the same commits, so there is no new licence review and no new fetch code. You only add file entries with their sha and new recipes in `recipes.rs`.
+- **Order to add them:**
+  - Vibraphone Soft Mallets: already pinned, 42 MB of source WAV, 11 notes × 2 layers.
+  - Wine Glasses and Bowed Psaltery: bowed glass and bowed metal sustains.
+  - Kalimbas and mbiras: gentle ostinatos. Mbira tunings are not equal-tempered, so retune them or tag them as fixed-scale.
+  - Glockenspiel, Tubular Bells and Nepalese Hand Bells.
+  - Dan Tranh: a koto-like pentatonic pluck.
+  - Folk Harp: a softer harp.
+  - Pipe and Renaissance organ: drones.
+  - Flute and clarinet from VSCO-2-CE: breathy slow lines.
+  - Soft F Horn: warm swells.
+  - Gongs and Mark Trees: swells.
+  - Ocean Drum: a recorded wash.
+- **Size:** a trimmed subset adds tens of MB.
+- **Limits:** notes are sampled sparsely, about every minor third, with 1 to 3 dynamics and few round robins. Rooms differ between instruments.
+
+**2. Karoryfer free libraries (CC0).**
+- **Source:** https://shop.karoryfer.com/pages/free-samples. The publisher says all its free libraries are CC0 except Marie Ork, which you must leave out.
+- **What they add:** Bigcat Cello for solo cello lines over pads, D. Smolken double bass for low bowed drones, and String Cyborgs for textural strings. This fills the gap of strings with only one articulation.
+- **How:** pin the sfzinstruments GitHub mirrors by commit. Check the licence file inside each archive, because older downloads may carry an older licence.
+- **Uncertain:** the sizes were not listed (Sneakybass alone is 324 MB).
+
+**3. A soft or felt-style piano (choose one or two).**
+- **Upright Piano KW, FreePats (CC0).** https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html. 32 MiB SFZ+FLAC at best quality or 2.9 MiB small, 2 layers, all 88 keys. It is the cheapest warm upright. Its soft layer, with a low-pass, gives a lo-fi felt piano.
+- **Osiris Piano (CC0).** https://github.com/sfzinstruments/Osiris_Piano. The "noisy" variants keep the mechanism noise and the Sus variants have the pedal down, which suits intimate ambient. Its size and layers are unknown until you download it.
+- **Salamander Grand V3 (CC-BY 3.0, credit Alexander Holm).** https://github.com/sfzinstruments/SalamanderGrandPiano. 16 velocity layers; 707 MiB as SFZ+FLAC. Taking only its 2 to 4 softest layers gives a beautiful soft grand for roughly 40 to 80 MB. Accurate-Salamander (CC-BY 3.0, credit C. Yamauchi as well) is a more even version, but it is 1.6 GB.
+- **Headroom Piano (CC-BY 4.0, credit Bengt Nilsson).** https://github.com/sfzinstruments/BengtNilsson.HeadroomPiano. 156 MB, a mellower Yamaha C3.
+- **VCSL Keys (CC0).** https://versilian-studios.com/vcsl-keys/. 680 MB covering a Steinway B, uprights and harpsichords. Pin from the VCSL repo first, where the folders may already be.
+
+**4. University of Iowa MIS.**
+- **Source:** https://theremin.music.uiowa.edu/MIS.html. The terms say the samples "may be downloaded and used for any projects, without restrictions". This is not a named licence, so keep a copy of the statement in CREDITS and consider asking them for written confirmation.
+- **What it adds:** chromatic, dry recordings at pp, mf and ff. There are alto and bass flute (breathy low winds, standing in for shakuhachi), bowed vibraphone, bowed crotales and pp piano.
+- **Work:** pin each file by URL and sha256. Some files hold whole chromatic runs, so the packer needs an onset splitter.
+
+**5. MuseScore_General SoundFont (MIT).**
+- **Source:** https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/. 38 MB as sf3, 206 MB as sf2.
+- **What it adds:** the only clean source found for choir (Choir Aahs, Voice Oohs), and also Music Box, Koto, Shakuhachi, Celesta and Bowed Glass. The quality is General MIDI level, which is fine as a pad buried in the hall.
+- **Conditions:** skip its Grand Piano preset, which uses the AKAI samples with unverified provenance. Check `Sample_Sources.csv` for each preset you extract. Keep the MIT notices in CREDITS.
+- **Work:** an SF2 extractor in the packer, offline only. rustysynth's parser is MIT.
+
+**6. Freesound, sound by sound (CC0, or CC-BY with credit).**
+- **Source:** https://freesound.org
+- **What it adds:** singing bowls, music box, shakuhachi, and real rain, stream and fire beds to layer with `background.rs`.
+- **Work:** a "freesound" source kind in `sources.json` (sound ID, uploader, licence, sha256). The packer re-checks each licence at build time and drops anything BY-NC or Sampling+. Originals need an API token at build time only, never in the app.
+
+**7. AKWF single-cycle waveforms (CC0 / public domain).** https://github.com/KristofferKarlAxelEkstrand/AKWF-FREE. Tiny. They are source material for a wavetable pad voice.
+
+**Changes the packer and pack format need for all of this:**
+- Format v2 in `instruments.rs`, with v1 packs still loading. It adds round-robin groups, velocity crossfades, an articulation index, per-zone attack and release, a licence field per instrument, and impulse-response and texture entries.
+- A CREDITS file generated from those licence fields, also shown in the About box.
+- Archive fetching (URL plus sha256, then unzip) in `fetch.rs`, for FreePats, Karoryfer and MuseScore.
+- Better loops in `bake_loop()`: choose the loop by autocorrelation and use a longer crossfade.
+- Mono kept as mono, and per-instrument peak normalisation replaced so register and dynamic differences survive.
+- A size budget per instrument, because the pack is about 71 MB today.
+
+**Rejected, all for licence reasons:**
+
+| Source | Why it is out |
+|---|---|
+| Splendid Grand, and the MuseScore piano preset | The public-domain claim has no primary statement from AKAI |
+| GeneralUser GS | The author says sample provenance is uncertain |
+| Sonatina Symphonic Orchestra | CC Sampling Plus 1.0, plus provenance doubts |
+| Philharmonia samples | They may not be made available "as is" as samples or an instrument |
+| Pianobook | Redistribution is forbidden |
+| Spitfire LABS | Proprietary EULA |
+| Virtual Playing Orchestra | Mixed in Sampling+, BY-SA and Philharmonia material |
+| jRhodes3c and jRhodes3d | NC |
+| LivingRoom Upright | CC-BY-SA, and not needed |
+| Dave Choir | No licence stated |
+| Sonniss GDC bundle | Forbids redistribution in a sample pack |
+| EchoThief IRs | No redistribution grant |
+| Voxengo IRs | Must be shipped complete and unaltered, plus a "no indirect profit" clause |
+| OpenAIR as a whole library | Licence is set per IR and may be NC or ND. Single IRs could come back after each page is checked |
+
+**Still open:** there is no cleared source of real impulse responses. Until one is found, convolution would use CC0 IRs from Freesound, checked one by one, or IRs rendered by Olio itself.
+
+## 3. Engines and effects to build in
+
+All of these are under MIT, Apache, BSD or public domain, or are algorithms you write yourself. The rule for all of them is the same: allocate and plan in `new()` or at pack load, and never on the audio thread.
+
+| Engine | Licence | Where it goes | Audio-thread notes |
+|---|---|---|---|
+| Your own modal and extended Karplus-Strong voices (bells with 6–12 inharmonic partials, kalimba, singing bowl with beating partial pairs, pick-position pluck), after J.O. Smith's PASP | own code | `synth.rs`, plus a resonant SVF in `dsp.rs` | Fixed partial arrays. Flush denormals |
+| Your own granular cloud over the pack's sustained regions | own code | new `grains.rs` reading sampler buffers. Pool of 32–64 grains, windows from a precomputed table | Drop grains when the pool is full, never grow it |
+| Shimmer in the hall (2-head delay-line octave shifter fed back into the FDN) | own code | `hall.rs` | Preallocated delay line. Keep loop gain below 1 with a soft limiter |
+| Early reflections, per-layer send and distance filtering | own code | `hall.rs`, and the mixdown in `synth.rs` and `sampler.rs` | Fixed taps |
+| Dattorro plate as a second space | algorithm from the paper; the Faust `dattorro_rev` is STK-4.3 | `hall.rs`, chosen per style | Delay lines sized for the highest sample rate |
+| fundsp | MIT OR Apache-2.0, v0.23.0 | As a toolkit or a reference for SVF, Moog filter, FDN and PolyBLEP | Run `allocate()` before handing it to the mixer. Use static nodes, never edit a `Net` on the audio thread. 0.x API changes |
+| mi-plaits-dsp (Plaits 1.2 port) | MIT; upstream STM32 code is MIT | `synth.rs`: modal, string, FM, chord and particle voices | Git-only, so pin by commit. Allocation behaviour is not documented, so check it. Fixed internal rate, so you may need to resample |
+| Rings, Elements and Clouds, ported from pichenettes/eurorack STM32 folders | MIT | Rings and Elements as `synth.rs` voices; Clouds as the granular layer | Fixed buffers. Never take code from the AVR folders (GPL-3) |
+| Airwindows ports (tape, console, saturation) | MIT | A tape and glue stage on the ambience bus in `mod.rs`, used live and in `track.rs` | Small fixed state. Scale for the sample rate |
+| Partitioned convolution with realfft (MIT) and rustfft (already in Cargo.lock) | MIT | `hall.rs` "Space" option | Plan FFTs at IR load. Swap IRs lock-free. Waits on an IR source (see section 2) |
+| rustysynth | MIT, v1.3.8 | Optional SF2 sampler backend | Check that `render()` and a `note_on` with a full pool don't allocate. Extracting SF2 into the pack is safer |
+| Faust (`-lang rust` in an xtask) | output takes the licence of the `.lib` files used | Generated voices and reverbs checked in under `ambience/faust/` | Check every function: jpverb and greyhole are MIT; `vital_rev` and `kb_rom_rev1` are GPL. The sweeps disagree on whether zita sits under GPL or STK-4.3, so read the header before using it |
+
+Kept by the audit but not recommended: dx7 (MIT, but version 0.0.4 and it ships a patch file of unclear origin), sfizz (BSD-2, but archived since June 2026 and needs a C++ build), glicol, knyst, twang and dasp (permissive but dormant; read them for ideas). Excluded: oxisynth (LGPL), nih-plug's VST3 path (GPLv3), and Surge XT, Vital, Dexed and Odin 2 (GPL-3). You may study their ideas but not copy their code.
+
+**Hosting user-installed VST3 or CLAP plugins: legally possible now, but a later, opt-in feature.** clack-host and clap-sys are MIT/Apache. Steinberg moved the VST 3 SDK to MIT with VST 3.8, and the coupler `vst3` crate is MIT/Apache. Plugins the user installed themselves are never redistributed, so GPL plugins like Surge or Vital are fine to host.
+
+It should be offline only. It would run as an `olio plugin-host` child process fed by the composer's note events, with the result mixed into `track.rs`'s WAV. It should never run on the cpal callback, because plugins may allocate, hang or crash.
+
+The costs:
+- Weeks of host work, mostly VST3 COM boilerplate.
+- Plugin windows next to egui.
+- Copy-protected plugins may not render headless.
+- Tracks stop being reproducible from a seed on other machines.
+
+It also cuts against the procedural direction, so build it after the in-house engines.
+
+## 4. Techniques, ranked by impact per effort
+
+1. **Voice leading and wider voicings (M, `composer.rs`).**
+   - Keep the pad's current voicing.
+   - For each new chord, try its inversions and choose the one with the least total movement, holding common tones.
+   - Spread voicings wide in the low register.
+   - Add 6, 9 and 11 colours below Vibrant energy.
+   - Let `Sustained` voices glide by step. This gives the largest "composed, not generated" change.
+2. **Slow modulation on every layer (S, new `modulation.rs`, `journey.rs`, `synth.rs`, `sampler.rs`).**
+   - Level, filter cutoff, pan and send drift on unrelated prime periods (37, 53, 71, 97 s), plus 1/f random walks.
+   - Read them once per block.
+   - Keep bass and drone centred.
+3. **Per-layer space: chorus removed from bass and drums, sends, distance, early reflections, stereo drone (S–M, `mod.rs`, `hall.rs`, `synth.rs`).**
+4. **Eno loops of co-prime lengths and Bloom-style echoes (S–M, `composer.rs`).**
+   - Each melodic instrument loops a fixed phrase on its own period (about 17 to 32 s), with chord-relative degrees.
+   - Notes echo 1 to 4 times, getting softer. The existing queue already drops events when full.
+   - The variety slider sets the balance between looping and wandering.
+5. **Markov chord and step tables, plus modal interchange (S–M, `composer.rs`, `mod.rs`).**
+   - Per-mood `[[f32;7];7]` const tables replace `pick_chord()`'s flat weights and the fixed `CADENCE`.
+   - Melodies get a step table with gap-fill after leaps.
+   - Borrowed chords (iv, bVI, bVII) are held over the drone.
+6. **Voice-steal fades and sampler humanising (S, `sampler.rs`, `synth.rs`).**
+   - Fade stolen voices out quickly instead of cutting them.
+   - Add small detune and start-offset variation.
+   - Add a per-voice one-pole that follows velocity.
+7. **Shimmer and a tape stage (S–M, `hall.rs`, `mod.rs`).**
+   - Octave shimmer by default.
+   - Gentle wow and flutter, soft saturation, a high roll-off, and gain compensation.
+8. **Richer synthesised voices (M, `synth.rs`).** Modal bells, a bowl, a better pluck, a multi-voice pad with an SVF and filter envelope, and a just-tuned drone with slow beating. Just tuning is limited to fifths and octaves when the pack is loaded.
+9. **Tintinnabuli T-voice and upper pedals (S, `composer.rs`).**
+10. **Sections and pivot-chord key changes (M, `journey.rs`, `Ambience::follow`, `Composer::modulate`).**
+    - Sections set targets for density, brightness and register and blend over 20 to 60 s.
+    - A resting instrument fades out instead of being switched off.
+11. **Euclidean patterns and phasing for pulsed styles (S, `composer.rs` `on_pulse`/`grid`).**
+12. **Granular clouds and spectral freeze (M–L, new `grains.rs`).** Write the freeze from the Paulstretch algorithm's description; its code is GPL. Pre-render frozen beds when the chord changes, or offline.
+13. **L-systems and cellular automata (S–M).** They add flavour only, after everything above.
+
+## 5. Roadmap
+
+**Milestone 1: Writing and mixing (no new samples).** Items 1 to 6 from section 4: voice leading, modulation, per-layer space, loops and echoes, Markov tables and borrowed chords, and steal fades.
+- **By ear:** run `cargo xtask previews` before and after.
+  - Chord changes should sound legato.
+  - The mix should keep moving even when notes repeat.
+  - The bass should be clean, and no clicks should be heard at Vibrant energy.
+- **By test:**
+  - Offline `Engine::offline` renders stay identical for a given seed.
+  - Each pad voice moves at most N semitones per chord change.
+  - Notes stay in the scale, except borrowed or PLR chords, which are behind a gate.
+  - Loop periods recur at the expected frames.
+  - Bus level stays within bounds after re-checking `MUSIC_TRIM`.
+  - An allocation counter (assert_no_alloc style) runs around `render`.
+
+**Milestone 2: Pack v2 from the CC0 sources Olio already pins.**
+- **Packer and format work:**
+  - Format v2 with round robins, velocity crossfades and licence fields; v1 packs keep loading.
+  - CREDITS generation.
+  - Better loops, and Soft Mallets vibes in use.
+- **New instruments:** Wine Glasses, Bowed Psaltery, kalimba, glockenspiel and hand bells, Dan Tranh, Folk Harp, organ, flute, clarinet and horn.
+- **Saving:** a role plus pack-id scheme, or appended `Instrument` variants with serde defaults, so saved layers keep working.
+- **By ear:** repeated motif notes vary, held strings and pads have no loop pulse, and the piano reaches its louder layer.
+- **By test:**
+  - v1 packs still load.
+  - Velocity crossfades give the same summed level.
+  - Round-robin picks rotate.
+  - Every pack instrument has a licence field and a CREDITS line.
+  - Pack size stays within an agreed budget, for example 150 MB.
+
+**Milestone 3: New voices and spaces.**
+- Modal bells and bowl, the improved pluck and SVF pads in `synth.rs`.
+- Shimmer, Dattorro plate and a tape stage.
+- A first sample batch from outside: Karoryfer cello and bass, plus Upright Piano KW or Osiris, or Salamander's soft layers if you accept CC-BY attribution.
+- Optional: mi-plaits-dsp voices, after checking that they don't allocate.
+- **By ear:** with the pack off, the Generator should no longer sound like a sine demo. Far bells sound dark and wet, and the melody sounds close.
+- **By test:**
+  - Shimmer feedback decays to silence after the input stops.
+  - The plate and hall stay bounded.
+  - Tape saturation is level-compensated within ±1 dB.
+  - CPU per buffer is measured in an offline benchmark.
+
+**Milestone 4: Texture and form.**
+- The granular cloud over the pack, and frozen beds.
+- Choir and music box from MuseScore_General, plus CC0 or CC-BY Freesound bowls and field recordings.
+- Sections and pivot-chord key changes in `journey.rs`.
+- Convolution, only once a cleared IR set exists.
+- Plugin hosting can be assessed after this milestone, if you still want it.
+- **By ear:** a 20-minute render has an audible shape, and key changes glide instead of resetting.
+- **By test:**
+  - The grain pool never grows, and drops grains when full.
+  - Section changes blend over the set time.
+  - Key changes keep at least one common tone.
+  - Section tests are added beside the existing journey tests.
+
+**Uncertainties:**
+- Real-time behaviour of fundsp, mi-plaits-dsp and rustysynth is not verified.
+- Karoryfer, Osiris and Iowa sizes and layer counts are unknown until downloaded.
+- The Iowa terms are a statement, not a formal licence.
+- The Faust zita licence is disputed between the sweeps.
+- No cleared impulse-response library has been found yet.

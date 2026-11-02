@@ -12,21 +12,16 @@
 //! `olio generate [--style NAME|all] [--seconds N] [--seed N] [--variety
 //! N] [--concentration N] [--chaos N] [--energy N] [--journey NAME]
 //! [--synthesised] [--out DIR]` renders the Generator's styles to WAV
-//! files, without a window; `olio generate --prompt TEXT [--seconds N]
-//! [--seed N] [--bed NAME] [--no-hints] [--out DIR]` makes a track from a
-//! prompt with the music model, and a bed beside it.
+//! files, without a window.
 //!
 //! `olio instruments [--from ZIP] [--dir DIR]` downloads and installs the
-//! Generator's recorded instruments (or a pack built here). `olio
-//! music-model install|remove [--dir DIR]` installs or removes the music
-//! model.
+//! Generator's recorded instruments (or a pack built here).
 
 pub mod app;
 pub mod cli;
 mod clips;
 mod confirm;
 mod emoji;
-mod fetch;
 mod fonts;
 mod format;
 mod generator;
@@ -37,7 +32,6 @@ pub mod instruments;
 mod keys;
 mod menu;
 mod meter;
-pub mod music_model;
 mod palette;
 mod polish;
 pub mod prefs;
@@ -60,10 +54,7 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
                      [--energy N] [--journey steady|build|evolve]
                      [--synthesised]
                      [--out DIR]
-       olio generate --prompt TEXT [--seconds N] [--seed N] [--bed NAME]
-                     [--no-hints] [--out DIR]
        olio instruments [--from ZIP] [--dir DIR]
-       olio music-model install|remove [--dir DIR]
 
   --library DIR       use the library in DIR (default: $OLIO_LIBRARY, or the
                       per-user data folder)
@@ -92,26 +83,12 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
   --synthesised       synthesised instruments, even where recorded ones
                       are installed
   --out DIR           where the files go (default: previews)
-  --prompt TEXT       make one track from these words with the music model
-                      instead (the style options do not apply); --seconds
-                      10 to 600; the file is named after the prompt
-  --bed NAME          and a bed beside it: the Generator's rain, thunder,
-                      wind, winter, waves, forest, desert or fire alone,
-                      quietly, as \"Rain bed 30 s.wav\"
-  --no-hints          send the words as they are, without the ambient hints
-                      (\"ambient, sparse, slow…\") that keep a track behind
-                      the sounds
 
   instruments         download the Generator's recorded instruments and
                       install them, then exit
   --from ZIP          install a pack built here (cargo xtask instruments)
   --dir DIR           install it in DIR (default: $OLIO_INSTRUMENTS, or
                       Instruments in the per-user data folder)
-
-  music-model         install the music model (about 10 GB, resumable) or
-                      remove it, then exit
-  --dir DIR           where it is (default: $OLIO_MUSIC_MODEL, or MusicModel
-                      in the per-user data folder)
 ";
 
 /// What the command line asked for.
@@ -127,11 +104,6 @@ pub struct Options {
     /// Where the Generator's recorded instruments are installed (`None`:
     /// nowhere, they cannot be).
     pub instruments: Option<PathBuf>,
-    /// Where the music model is installed (`None`: nowhere, it cannot be).
-    pub music_model: Option<PathBuf>,
-    /// A music model already answering at this address
-    /// (`$OLIO_MUSIC_MODEL_URL`), used in place of the installed one.
-    pub music_model_url: Option<String>,
 }
 
 /// The library directory unless `--library` named one.
@@ -178,7 +150,5 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Options>,
         screenshot,
         import,
         instruments: instruments::default_dir(),
-        music_model: music_model::default_dir(),
-        music_model_url: music_model::url_override(),
     }))
 }

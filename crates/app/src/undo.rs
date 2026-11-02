@@ -1,7 +1,6 @@
 //! Undo and redo for changes to the board: removing a tile or a set,
 //! duplicating a tile, moving one to another slot, generating a track onto
-//! one (with its bed on another) or a set of them; and removing a style
-//! saved in the Generator.
+//! one or a set of them; and removing a style saved in the Generator.
 //!
 //! A removal keeps the whole tile, set or style, so undoing it brings back
 //! its slot, title, emoji and settings exactly. Settings changed in the
@@ -31,12 +30,6 @@ pub enum Change {
     Generated {
         set: SetId,
         tile: Box<Tile>,
-    },
-    /// A prompted track and the bed under it, on two new tiles.
-    GeneratedWithBed {
-        set: SetId,
-        tile: Box<Tile>,
-        bed: Box<Tile>,
     },
     /// A new set of tracks the Generator made, at its place in the list.
     GeneratedSet {
@@ -89,9 +82,6 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Remove Set “{}”", set.name),
             Self::Duplicated { source, .. } => format!("Duplicate “{source}”"),
             Self::Generated { tile, .. } => format!("Generate “{}”", tile.title),
-            Self::GeneratedWithBed { tile, .. } => {
-                format!("Generate “{}” and Its Bed", tile.title)
-            }
             Self::GeneratedSet { set, .. } => format!("Generate Set “{}”", set.name),
             Self::Moved { title, .. } => format!("Move “{title}”"),
             Self::Columns { name, to, .. } => format!("{to} Columns for “{name}”"),
@@ -115,9 +105,6 @@ impl Change {
             Self::RemovedSet { set, .. } => Some(format!("Removed the set “{}”", set.name)),
             Self::Duplicated { source, .. } => Some(format!("Duplicated “{source}”")),
             Self::Generated { tile, .. } => Some(format!("Generated “{}”", tile.title)),
-            Self::GeneratedWithBed { tile, bed, .. } => {
-                Some(format!("Generated “{}” and “{}”", tile.title, bed.title))
-            }
             Self::GeneratedSet { set, .. } => Some(format!(
                 "Generated the set “{}”: {} tracks",
                 set.name,
@@ -146,9 +133,6 @@ impl Change {
             Self::RemovedSet { set, .. } => format!("Put back the set “{}”", set.name),
             Self::Duplicated { tile, .. } => format!("Removed the copy “{}”", tile.title),
             Self::Generated { tile, .. } => format!("Removed the track “{}”", tile.title),
-            Self::GeneratedWithBed { tile, .. } => {
-                format!("Removed the track “{}” and its bed", tile.title)
-            }
             Self::GeneratedSet { set, .. } => format!("Removed the set “{}”", set.name),
             Self::Moved { title, .. } => format!("Moved “{title}” back"),
             Self::Columns { name, from, .. } => format!("“{name}” is {from} columns wide again"),

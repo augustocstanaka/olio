@@ -32,7 +32,7 @@ skin that reads well and is tested for contrast.
   reads 3:1, tested.
 - **Panels in sections.** Each panel is a short column of sections that
   open and close (Sound, How it plays, Polish; Style, Key and mood,
-  Energy and time, Background, Instruments, From a prompt), kept in the
+  Energy and time, Background, Instruments), kept in the
   preferences per panel, all open at first.
 - **A More per section, not a global Details.** What refines a group
   (the character's amounts, the form, each instrument's level and notes)

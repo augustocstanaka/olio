@@ -110,21 +110,6 @@ Milestone 0, the playable skeleton, is done. Olio can:
     that close on the root and pause.
 
   Every control in the Generator says what it does when you hover it.
-- **Make music from a few words.** The Generator's **From a prompt**
-  section offers **Install Music Model** (about 10 GB, once, by choice):
-  Olio installs [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5),
-  an open-source music model, with the Python it needs, into the per-user
-  data folder. Then type a prompt ("warm piano over soft rain, slow"),
-  pick a length and press **Generate from Prompt**: the model runs on your
-  computer (nothing you type leaves it), and the track lands on a tile
-  titled after the prompt, to play, loop and polish like any other. Keep
-  it ambient (on by default) asks for sparse, slow, spacious music that
-  stays behind the sounds, and a **Bed** puts the Generator's rain, waves
-  or fire, quietly and looping, on a second tile under it. It
-  takes about 6 GB of memory while it runs and stops after ten minutes
-  unused; **Remove Music Model** (under the section's More) takes it all away again.
-  Apple Silicon runs it through MLX; on Windows it uses CUDA where there
-  is one, else the CPU, slowly.
 
   Styles such as Rain Study, Seaside Piano, Forest Morning, Campfire,
   Desert Night and Storm Watch fill it all in, and Open Road and Spring
@@ -162,9 +147,7 @@ Milestone 0, the playable skeleton, is done. Olio can:
   styles to WAV files the same way; `--variety`, `--concentration` and
   `--chaos` (0 to 100) set their character, and they play the recorded
   instruments where installed (`olio instruments` installs them;
-  `--synthesised` leaves them out). `olio generate --prompt "soft piano
-  and rain" --seconds 60 --bed rain` makes a track with the music model
-  (`olio music-model install` installs it) and a bed beside it.
+  `--synthesised` leaves them out).
 - **Read most formats.** WAV, AIFF, CAF, FLAC, MP3, AAC and ALAC (M4A), Ogg
   Vorbis, and the audio of MP4/MOV video.
 
@@ -217,6 +200,11 @@ the `OLIO_LIBRARY` environment variable.
 - `preferences.ron` remembers the window's size and position, the panel
   widths, the theme, which sections are open, the master volume, the Polish preset,
   the Generator's settings, your saved styles and which panels are shown.
+- `Instruments/` holds the Generator's recorded instruments, once
+  downloaded.
+- A `MusicModel/` folder (about 7 GB) is left over from earlier versions
+  that could install a music model. Olio no longer uses it; delete it to
+  get the space back.
 
 ## Development
 
@@ -240,7 +228,7 @@ one.
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
 offscreen in both themes to `target/screenshots/` (`window.png`,
 `window-light.png`, and the Generator in `window-generator.png`,
-`window-generator-more.png` and `window-prompt.png`). How the window
+and `window-generator-more.png`). How the window
 looks, and why, is [docs/DESIGN.md](docs/DESIGN.md).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
@@ -264,8 +252,3 @@ and [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) by
 Sam Gossner and Versilian Studios, released into the public domain
 (CC0 1.0); Olio's instrument pack trims, loops, levels and re-encodes
 them and is CC0 as well (`crates/packer`, `cargo xtask instruments`).
-
-The music model is [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5)
-by the ACE-Step team (StepFun and ACE Studio), code and weights under the
-MIT license; Olio installs it unchanged, pinned to one release, when you
-ask for it. Music it makes is yours to use.

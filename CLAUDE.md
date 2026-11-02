@@ -35,16 +35,14 @@ and UI text.
   and `theme.rs` the palette they draw with, `generator.rs` the Generator
   panel and the thread that generates tracks, `instruments.rs` the
   recorded instruments (where the pack lives, its download, loading),
-  `music_model/` the music model (`mod.rs` where it lives and the pinned
-  files, `install.rs` installing it, `server.rs` its process, `client.rs`
-  its API), `fetch.rs` resumable downloads, `meter.rs` level meters,
+  `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
   redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless
-  `olio import`, `olio generate`, `olio instruments` and `olio
-  music-model`), `clips.rs` background decoding.
+  `olio import`, `olio generate` and `olio instruments`), `clips.rs`
+  background decoding.
 - `xtask/`: the `cargo xtask` commands below; `demo.rs` synthesises the
   demo pack.
 - `crates/packer` (`olio-packer`): builds the Generator's instrument pack
@@ -60,8 +58,9 @@ and UI text.
   step with `manifest.rs`.
 - `docs/adr/`: read the matching ADR before changing the UI stack (0001),
   the audio engine (0002), the library format (0003), control surfaces
-  and the Stream Deck plan (0004), the music model (0005), or the
-  window's look and the panels' sections (0006).
+  and the Stream Deck plan (0004), the window's look and the panels'
+  sections (0006), or how the Generator makes music (0007: procedural,
+  no music model; 0005 is superseded).
 - `docs/ROADMAP.md`: milestones and the Farrago parity checklist.
 - `CODING_STANDARDS.md`: the rules review enforces, above all the
   audio-thread rules.
@@ -78,11 +77,6 @@ and UI text.
   previews` renders 30 s of each Generator style to `target/previews/`.
   `cargo xtask instruments fetch`, then `build`, makes the instrument pack
   in `target/instruments/` (`check` reports the recordings' pitches).
-- The music model is never run in tests: `music_model::client::fake`
-  stands in for its API, and `OLIO_MUSIC_MODEL=target/music-model cargo
-  xtask run` keeps a real install out of the per-user data folder while
-  trying it (`OLIO_MUSIC_MODEL_URL` points the app at one already
-  running).
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
   in both themes to `target/screenshots/`; use it
   for visual changes, and copy the results to `docs/images/` when they

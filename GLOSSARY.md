@@ -141,8 +141,8 @@ _Avoid_: main volume, output level
 **Generator**:
 The panel, in place of the inspector, where gentle music is made up: a
 key, a character, energy, a background, instruments and form. It plays the
-ambience live and generates tracks, from its settings or, with the music
-model installed, from a prompt.
+ambience live and generates tracks. Everything it plays is made up by
+rules from these settings: no recording of music and no model (ADR 0007).
 _Avoid_: composer (that is the code that picks the notes), synth
 
 **Ambience**:
@@ -152,11 +152,10 @@ _Avoid_: background music (as a name), soundtrack, loop
 
 **Track**:
 A sound the Generator rendered into the library and put on a tile, named
-after its style and length ("Rain Study 2 min"), or after its prompt and
-length ("Warm piano over soft rain 2 min"). From then on it is a sound
-like any other. Several can be generated at once into a new set: four
-variations, the style in each mood, or every style ("Rain Study Moods",
-tiles "Rain Study Still", "Rain Study Gentle"…).
+after its style and length ("Rain Study 2 min"). From then on it is a
+sound like any other. Several can be generated at once into a new set:
+four variations, the style in each mood, or every style ("Rain Study
+Moods", tiles "Rain Study Still", "Rain Study Gentle"…).
 _Avoid_: recording, export, song
 
 **Suspended**:
@@ -180,32 +179,6 @@ _Avoid_: samples (in the UI), sound library, soundfont
 The recordings, their manifest (`pack.json`) and credits, built by
 `cargo xtask instruments` from CC0 libraries and published as a release.
 _Avoid_: sample pack, bank
-
-**Music model**:
-ACE-Step 1.5, an open-source model that makes music from a prompt.
-Installed once, by choice (Install Music Model, or `olio music-model
-install`), into `MusicModel` in the per-user data folder with the Python
-it needs, shared by every library, about 10 GB; it runs on this computer
-only while a prompted track is made and stops after ten minutes unused.
-_Avoid_: AI, LLM, ACE-Step (in the UI), backend, sidecar
-
-**Prompt**:
-The words the music model makes a track from ("warm piano over soft
-rain, slow"), typed in the Generator's From a prompt section and kept in
-the preferences. Prompted tracks are instrumental. With Keep it ambient
-on (the default), the **hints** "ambient, sparse, slow, spacious, soft,
-no drums" go with the words, so the track stays behind the sounds; the
-title keeps the words alone.
-_Avoid_: description, query
-
-**Bed**:
-The Generator's background alone (rain, waves, fire…), rendered quietly
-(12 dB under a track) to a second tile beside a prompted track, looping,
-with slow fades and its own level kept: a world for the music model's
-track to sit in. Picked in the From a prompt section; titled after its
-background and length ("Rain bed 30 s"); undone together with its track.
-The live ambience is not a bed.
-_Avoid_: layer (an instrument's part of the ambience), underlay, pad
 
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,
@@ -329,14 +302,14 @@ reads: "30 %", "0.50 s", "−12 dB".
 _Avoid_: value box, label
 
 **Legend**:
-A small uppercase label naming a group: Sets, Track, Mood, Bed.
+A small uppercase label naming a group: Sets, Track, Mood, Over time.
 _Avoid_: heading, caption
 
 **Section**:
 A group of a panel under a legend with a chevron, opened and closed by a
 click on its header and remembered: the inspector's Sound, How it plays
 and Polish; the Generator's Style, Key and mood, Energy and time,
-Background, Instruments and From a prompt.
+Background and Instruments.
 _Avoid_: collapsing header, accordion, panel (that is the whole column)
 
 **Chip**:
@@ -415,6 +388,5 @@ _Avoid_: width (alone), grid size
 **Preferences**:
 Window settings kept beside the library in `preferences.ron`: theme,
 master volume, which panels show, which sections are open, single-click
-playback, the Polish preset, and the Generator's settings, saved styles
-and prompt.
+playback, the Polish preset, and the Generator's settings and saved styles.
 _Avoid_: settings (reserved for the planned Settings window), config

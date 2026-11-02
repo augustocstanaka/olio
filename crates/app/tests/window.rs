@@ -76,27 +76,8 @@ fn window(library: PathBuf, render: bool) -> Harness<'static, OlioApp> {
     window_with(library, render, tempfile::tempdir().unwrap().keep())
 }
 
-/// A window whose recorded instruments are installed in `instruments`,
-/// and no music model.
+/// A window whose recorded instruments are installed in `instruments`.
 fn window_with(library: PathBuf, render: bool, instruments: PathBuf) -> Harness<'static, OlioApp> {
-    window_with_model(
-        library,
-        render,
-        instruments,
-        tempfile::tempdir().unwrap().keep(),
-        None,
-    )
-}
-
-/// A window whose recorded instruments are in `instruments` and whose
-/// music model is in `music_model`, or answers at `music_model_url`.
-fn window_with_model(
-    library: PathBuf,
-    render: bool,
-    instruments: PathBuf,
-    music_model: PathBuf,
-    music_model_url: Option<String>,
-) -> Harness<'static, OlioApp> {
     let options = Options {
         library: library.clone(),
         silent: true,
@@ -104,8 +85,6 @@ fn window_with_model(
         screenshot: None,
         import: Vec::new(),
         instruments: Some(instruments),
-        music_model: Some(music_model),
-        music_model_url,
     };
     let store = Store::open(library).unwrap();
     // 60 steps a second, so two clicks a step apart make a double-click.
@@ -1360,210 +1339,6 @@ fn without_recorded_instruments_the_generator_offers_their_download() {
 }
 
 #[test]
-fn without_the_music_model_the_generator_offers_its_install() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut harness = window(library(dir.path()), false);
-    open_generator(&mut harness);
-    harness
-        .get_by_label("Install Music Model (about 10 GB)")
-        .scroll_to_me();
-    harness.run_steps(2);
-    assert_eq!(
-        harness.query_all_by_label("Generate from Prompt").count(),
-        0
-    );
-}
-
-/// Marks the music model installed in `dir`: its marker, an empty Python
-/// and empty weights, all the app looks for.
-fn write_music_model(dir: &Path) {
-    use olio_app::music_model::{Installed, Layout, WEIGHTS};
-    let layout = Layout::new(dir);
-    let python = layout.venv_python();
-    std::fs::create_dir_all(python.parent().unwrap()).unwrap();
-    std::fs::write(&python, "").unwrap();
-    for weights in WEIGHTS {
-        let path = layout.checkpoints().join(weights);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "").unwrap();
-    }
-    std::fs::write(
-        layout.marker(),
-        serde_json::to_string(&Installed::current()).unwrap(),
-    )
-    .unwrap();
-}
-
-/// A music model answering like the real one's API, at the address
-/// returned: every task is done at once, with a second of a tone.
-fn fake_music_model() -> String {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let wav = {
-        let samples: Vec<f32> = (0..48_000)
-            .flat_map(|i| {
-                let s = (i as f32 / 48_000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.3;
-                [s, s]
-            })
-            .collect();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.wav");
-        Clip::new(48_000, 2, samples)
-            .write_wav(&path, WavFormat::Int16)
-            .unwrap();
-        std::fs::read(path).unwrap()
-    };
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else {
-                continue;
-            };
-            // The head, and as much body as Content-Length says.
-            let mut request = Vec::new();
-            let mut chunk = [0u8; 4096];
-            loop {
-                let read = stream.read(&mut chunk).unwrap_or(0);
-                if read == 0 {
-                    break;
-                }
-                request.extend_from_slice(&chunk[..read]);
-                let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
-                    continue;
-                };
-                let head = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
-                let length = head
-                    .lines()
-                    .find_map(|line| line.strip_prefix("content-length:"))
-                    .and_then(|value| value.trim().parse::<usize>().ok())
-                    .unwrap_or(0);
-                if request.len() >= end + 4 + length {
-                    break;
-                }
-            }
-            let head = String::from_utf8_lossy(&request).to_string();
-            let path = head.split_whitespace().nth(1).unwrap_or("");
-            let (kind, body): (&str, Vec<u8>) = if path.starts_with("/health") {
-                ("application/json", br#"{"status":"ok"}"#.to_vec())
-            } else if path.starts_with("/release_task") {
-                (
-                    "application/json",
-                    br#"{"data":{"task_id":"t1"},"code":200,"error":null}"#.to_vec(),
-                )
-            } else if path.starts_with("/query_result") {
-                (
-                    "application/json",
-                    br#"{"data":[{"task_id":"t1","status":1,"result":"[{\"file\":\"/v1/audio?path=a.wav\"}]"}],"code":200,"error":null}"#.to_vec(),
-                )
-            } else if path.starts_with("/v1/audio") {
-                ("audio/wav", wav.clone())
-            } else {
-                ("text/plain", b"not found".to_vec())
-            };
-            let status = if kind == "text/plain" {
-                "404 Not Found"
-            } else {
-                "200 OK"
-            };
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(&body);
-        }
-    });
-    base
-}
-
-/// Types a prompt into the Generator's prompt field, which takes the
-/// focus only once the panel has settled: so it tries until it does.
-fn type_prompt(harness: &mut Harness<'static, OlioApp>, text: &str) {
-    for _ in 0..10 {
-        harness
-            .get_by_role(egui::accesskit::Role::MultilineTextInput)
-            .scroll_to_me();
-        harness.run_steps(5);
-        harness
-            .get_by_role(egui::accesskit::Role::MultilineTextInput)
-            .click();
-        harness.run_steps(2);
-        harness.event(egui::Event::Text(text.to_owned()));
-        harness.run_steps(2);
-        if harness.state().preferences().prompt == text {
-            return;
-        }
-    }
-    panic!("the prompt field never took the text");
-}
-
-#[test]
-fn a_prompted_track_lands_on_a_tile_and_undo_takes_it_off() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = tempfile::tempdir().unwrap();
-    write_music_model(model.path());
-    let mut harness = window_with_model(
-        library(dir.path()),
-        false,
-        tempfile::tempdir().unwrap().keep(),
-        model.path().to_path_buf(),
-        Some(fake_music_model()),
-    );
-    open_generator(&mut harness);
-    // Installed: the prompt field, and nothing to generate until it says
-    // something.
-    assert_eq!(
-        harness
-            .query_all_by_label("Install Music Model (about 10 GB)")
-            .count(),
-        0
-    );
-    click_in_generator(&mut harness, "Generate from Prompt");
-    assert!(!harness.state().is_generating());
-
-    type_prompt(&mut harness, "warm piano over soft rain, slow");
-    assert_eq!(
-        harness.state().preferences().prompt,
-        "warm piano over soft rain, slow"
-    );
-    harness.get_by_label("30 s").click();
-    harness.run_steps(2);
-    click_in_generator(&mut harness, "Generate from Prompt");
-    assert!(harness.state().is_generating());
-    harness.get_by_label("Cancel");
-
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while harness.state().is_generating() {
-        assert!(Instant::now() < deadline, "the track never finished");
-        harness.step();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    harness.run_steps(3);
-    harness.get_by_label("Generated “Warm piano over soft rain, slow 30 s”");
-    let tile = harness
-        .state()
-        .selected_tile()
-        .expect("the new tile, selected");
-    assert_eq!(tile.title, "Warm piano over soft rain, slow 30 s");
-    assert_eq!(tile.emoji, "🎼");
-    assert_eq!(harness.state().current_set_name(), "Show");
-
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
-    harness.run_steps(2);
-    assert_eq!(
-        harness
-            .query_all_by_label("Warm piano over soft rain, slow 30 s")
-            .count(),
-        0
-    );
-    harness.get_by_label("Removed the track “Warm piano over soft rain, slow 30 s”");
-}
-
-/// The real music model, installed where `OLIO_MUSIC_MODEL` says (an
-/// absolute path): `OLIO_MUSIC_MODEL=$PWD/target/music-model cargo test
-/// -p olio-app --test window real_music_model -- --ignored`. The app
-#[test]
 fn a_collapsed_section_hides_its_controls_and_is_remembered() {
     use egui::accesskit::Role;
     let dir = tempfile::tempdir().unwrap();
@@ -1648,139 +1423,6 @@ fn every_section_header_reads_as_a_toggle() {
             .any(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True));
         assert!(open, "a header named {title}, open");
     }
-}
-
-/// Picks a bed in the From a prompt section: its chip is known as
-/// "Rain bed", the Background section's as "Rain".
-fn pick_bed(harness: &mut Harness<'static, OlioApp>, name: &str) {
-    let label = format!("{name} bed");
-    harness.get_by_label(&label).scroll_to_me();
-    harness.run_steps(3);
-    harness.get_by_label(&label).click();
-    harness.run_steps(2);
-}
-
-#[test]
-fn a_prompted_track_comes_with_its_bed_on_a_second_tile_and_undo_takes_both_off() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = tempfile::tempdir().unwrap();
-    write_music_model(model.path());
-    let mut harness = window_with_model(
-        library(dir.path()),
-        false,
-        tempfile::tempdir().unwrap().keep(),
-        model.path().to_path_buf(),
-        Some(fake_music_model()),
-    );
-    open_generator(&mut harness);
-    type_prompt(&mut harness, "warm piano, slow");
-    harness.get_by_label("30 s").click();
-    harness.run_steps(2);
-    pick_bed(&mut harness, "Waves");
-    assert_eq!(
-        harness.state().preferences().prompt_bed,
-        olio_audio::ambience::Background::Waves
-    );
-    harness.get_by_label_contains("onto two tiles in “Show”");
-    // Keep it ambient is on unless switched off.
-    assert!(harness.state().preferences().prompt_hints);
-    click_in_generator(&mut harness, "Generate from Prompt");
-    assert!(harness.state().is_generating());
-
-    let deadline = Instant::now() + Duration::from_secs(90);
-    while harness.state().is_generating() {
-        assert!(Instant::now() < deadline, "the track never finished");
-        harness.step();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    harness.run_steps(3);
-    harness.get_by_label("Generated “Warm piano, slow 30 s” and “Waves bed 30 s”");
-    let tile = harness
-        .state()
-        .selected_tile()
-        .expect("the track's tile, selected");
-    assert_eq!(tile.title, "Warm piano, slow 30 s");
-    assert_eq!(tile.emoji, "🎼");
-    // Polished, as the preset says.
-    assert_eq!(tile.fade_in_seconds, 1.0);
-    assert!(tile.reverb > 0.0);
-    harness.get_by_label("Waves bed 30 s");
-
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
-    harness.run_steps(2);
-    assert_eq!(
-        harness.query_all_by_label("Warm piano, slow 30 s").count(),
-        0
-    );
-    assert_eq!(harness.query_all_by_label("Waves bed 30 s").count(), 0);
-    harness.get_by_label("Removed the track “Warm piano, slow 30 s” and its bed");
-    // And redo brings both back.
-    harness.key_press_modifiers(
-        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-        egui::Key::Z,
-    );
-    harness.run_steps(2);
-    harness.get_by_label("Warm piano, slow 30 s");
-    harness.get_by_label("Waves bed 30 s");
-}
-
-/// starts it, waits for it to load, makes a short track and stops it.
-#[test]
-#[ignore = "needs the music model installed; see the comment"]
-fn the_real_music_model_makes_a_track_from_the_app() {
-    let model = PathBuf::from(std::env::var("OLIO_MUSIC_MODEL").expect("OLIO_MUSIC_MODEL"));
-    let dir = tempfile::tempdir().unwrap();
-    let mut harness = window_with_model(
-        library(dir.path()),
-        false,
-        tempfile::tempdir().unwrap().keep(),
-        model,
-        None,
-    );
-    open_generator(&mut harness);
-    type_prompt(&mut harness, "soft piano and rain");
-    harness.get_by_label("30 s").click();
-    harness.run_steps(2);
-    pick_bed(&mut harness, "Rain");
-    click_in_generator(&mut harness, "Generate from Prompt");
-    assert!(harness.state().is_generating());
-    // Said in the status bar and over the Track panel's bar.
-    assert!(
-        harness
-            .query_all_by_label_contains("Starting the music model")
-            .count()
-            >= 1
-    );
-    let deadline = Instant::now() + Duration::from_secs(15 * 60);
-    while harness.state().is_generating() {
-        assert!(Instant::now() < deadline, "the track never finished");
-        harness.step();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    harness.run_steps(3);
-    harness.get_by_label("Generated “Soft piano and rain 30 s” and “Rain bed 30 s”");
-    harness.get_by_label("Rain bed 30 s");
-    assert_eq!(
-        harness.state().selected_title(),
-        Some("Soft piano and rain 30 s")
-    );
-    // A second track, cancelled at once, stops the model.
-    click_in_generator(&mut harness, "Generate from Prompt");
-    assert!(harness.state().is_generating());
-    // Hovered first: the harness's click only counts on a button the
-    // pointer was already over.
-    harness.get_by_label("Cancel").hover();
-    harness.run_steps(2);
-    harness.get_by_label("Cancel").click();
-    harness.run_steps(2);
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while harness.state().is_generating() {
-        assert!(Instant::now() < deadline, "never stopped");
-        harness.step();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    harness.run_steps(3);
-    harness.get_by_label("Stopped generating “Soft piano and rain 30 s”");
 }
 
 #[test]
@@ -2278,24 +1920,11 @@ fn render_the_window_to_a_png() {
     harness.get_by_label_contains("building up");
     let image = harness.render().expect("a GPU adapter to render with");
     image.save(out.join("window-generator.png")).unwrap();
-    // The Generator with the music model installed and a prompt typed.
+    // The Generator in the light theme, for its More below.
     let dir = tempfile::tempdir().unwrap();
-    let model = tempfile::tempdir().unwrap();
-    write_music_model(model.path());
-    let mut harness = window_with_model(
-        library(dir.path()),
-        true,
-        tempfile::tempdir().unwrap().keep(),
-        model.path().to_path_buf(),
-        None,
-    );
+    let mut harness = window(library(dir.path()), true);
     harness.ctx.set_theme(egui::Theme::Light);
     open_generator(&mut harness);
-    type_prompt(&mut harness, "warm piano over soft rain, slow");
-    pick_bed(&mut harness, "Rain");
-    harness.run_steps(20);
-    let image = harness.render().expect("a GPU adapter to render with");
-    image.save(out.join("window-prompt.png")).unwrap();
     // And with every setting: the background's level, each instrument's
     // level and notes.
     open_more(&mut harness, "Instruments");

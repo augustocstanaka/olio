@@ -7,7 +7,7 @@
 
 use egui::ThemePreference;
 use olio_audio::AmbienceSettings;
-use olio_audio::ambience::{Background, Style};
+use olio_audio::ambience::Style;
 use olio_control::TileSetting;
 use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
@@ -246,12 +246,6 @@ pub struct Preferences {
     /// A single click plays a tile. Otherwise a click selects it and a
     /// double-click plays it, as in Farrago.
     pub click_plays: bool,
-    /// What the music model last made a track from.
-    pub prompt: String,
-    /// The bed rendered under a prompted track; `None` for the track alone.
-    pub prompt_bed: Background,
-    /// Keep it ambient: the hints go with the prompt.
-    pub prompt_hints: bool,
 }
 
 impl Default for Preferences {
@@ -274,9 +268,6 @@ impl Default for Preferences {
             styles: Vec::new(),
             recorded_instruments: true,
             click_plays: false,
-            prompt: String::new(),
-            prompt_bed: Background::None,
-            prompt_hints: true,
         }
     }
 }
@@ -323,15 +314,7 @@ impl Disclosure {
 }
 
 /// The Generator's sections that have a More, by key.
-pub const GENERATOR_MORE: [&str; 4] = [
-    "key_and_mood",
-    "energy_and_time",
-    "instruments",
-    "from_a_prompt",
-];
-
-/// How long a prompt may be.
-pub const MAX_PROMPT_CHARS: usize = 2000;
+pub const GENERATOR_MORE: [&str; 3] = ["key_and_mood", "energy_and_time", "instruments"];
 
 const KEY: &str = "preferences";
 
@@ -358,7 +341,6 @@ impl Preferences {
         {
             prefs.track_seconds = crate::generator::DEFAULT_TRACK_SECONDS;
         }
-        prefs.prompt = prefs.prompt.trim().chars().take(MAX_PROMPT_CHARS).collect();
         prefs.open_details_from_before();
         prefs
     }
@@ -612,9 +594,6 @@ mod tests {
         assert!(prefs.show_spectrograms);
         assert_eq!(prefs.tile_size, TileSize::Regular);
         assert!(!prefs.ambience.enabled);
-        assert_eq!(prefs.prompt, "");
-        assert_eq!(prefs.prompt_bed, Background::None);
-        assert!(prefs.prompt_hints);
     }
 
     #[test]

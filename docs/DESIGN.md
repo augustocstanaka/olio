@@ -136,7 +136,7 @@ technology and the window tests find it by name.
 - **Readout** (`skin::readout_label`): monospace text in the accent on a
   small inset: a percentage, a fade's seconds, a level.
 - **Legend** (`skin::legend_label`): uppercase 11 pt in `legend`, flat:
-  Sets, Track, Mood, Over time, Bed.
+  Sets, Track, Mood, Over time, Form.
 - **Section** (`skin::section`): a legend with a chevron, the whole row a
   toggle, the group's controls under it while open. Open or closed is
   kept in the preferences, per panel. Its name is a title for assistive
@@ -160,11 +160,11 @@ person sees groups before controls and opens only what they need.
   emoji, title, colour and file; the Generator's live switch and level.
 - A section holds one job: **Sound** (hear it), **How it plays**,
   **Polish** (the fades and reverb); **Style**, **Key and mood**,
-  **Energy and time**, **Background**, **Instruments**, **From a
-  prompt**. Every section starts open.
+  **Energy and time**, **Background**, **Instruments**. Every section
+  starts open.
 - What refines a section, and most people leave alone, sits under its
   **More**: the character's three amounts, the form, each instrument's
-  level, notes and register, the music model's state and removal.
+  level, notes and register.
 - What the Generator makes stays pinned under the sections, always in
   reach: the Track panel.
 - Gaps, not lines, between groups; legends name groups inside a section.
@@ -200,7 +200,7 @@ person sees groups before controls and opens only what they need.
 
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window in
 both themes, the inspector with and without a tile, and the Generator
-with a More open and with the prompt, to `target/screenshots/`; look at
+with a More open, to `target/screenshots/`; look at
 them before calling a change done, and copy them to `docs/images/` when
 they change. Check the narrowest panels too: the inspector at 240 pt, the
 Generator at 320 pt, the window at its 720 × 460 minimum.

@@ -670,19 +670,7 @@ const CHIP_PICTURE: f32 = 16.0;
 /// A chip: one of a few choices side by side (a mood, a length, an
 /// instrument), a small raised button, pressed in and lit when chosen.
 pub fn chip(ui: &mut Ui, text: &str, picture: Option<TextureId>, selected: bool) -> Response {
-    chip_labelled(ui, text, text, picture, selected)
-}
-
-/// A chip that assistive technology and the tests know by `label`, when
-/// its `text` alone would be ambiguous (the Bed's "Rain" is "Rain bed").
-pub fn chip_labelled(
-    ui: &mut Ui,
-    text: &str,
-    label: &str,
-    picture: Option<TextureId>,
-    selected: bool,
-) -> Response {
-    small_button(ui, text, label, picture, Some(selected))
+    small_button(ui, text, text, picture, Some(selected))
 }
 
 /// A button with a picture before its text (Surprise Me's dice), as small
