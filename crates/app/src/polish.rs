@@ -18,17 +18,23 @@ pub fn window(ctx: &egui::Context, open: &mut bool, polish: &mut Polish) {
             ui.label("One click of Polish gives a tile these settings.");
             ui.add_space(10.0);
             ui.spacing_mut().slider_width = 220.0;
-            fade_row(ui, "Fade in", &mut polish.fade_in_seconds);
-            fade_row(ui, "Fade out", &mut polish.fade_out_seconds);
+            let _ = fade_row(ui, "Fade in", &mut polish.fade_in_seconds).on_hover_text(
+                "How long a polished tile takes to rise from silence when it starts",
+            );
+            let _ = fade_row(ui, "Fade out", &mut polish.fade_out_seconds).on_hover_text(
+                "How long a polished tile takes to sink to silence before the end, and when \
+                 you stop it",
+            );
             let readout = format!("{:.0} %", polish.reverb * 100.0);
-            crate::skin::slider_row(
+            let _ = crate::skin::slider_row(
                 ui,
                 "Reverb",
                 "Reverb",
                 &mut polish.reverb,
                 0.0..=1.0,
                 &readout,
-            );
+            )
+            .on_hover_text("How much of a polished tile goes to the room reverb every tile shares");
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 let default = Polish::default();
@@ -38,6 +44,7 @@ pub fn window(ctx: &egui::Context, open: &mut bool, polish: &mut Polish) {
                         crate::skin::button(ui, &reset, false)
                     })
                     .inner
+                    .on_hover_text("Back to the preset Olio starts with")
                     .clicked()
                 {
                     *polish = default;
