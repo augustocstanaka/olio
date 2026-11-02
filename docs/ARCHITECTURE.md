@@ -124,6 +124,12 @@ import) unless forced.
   `ambience/background.rs`, or an `Instrument` added at the end of
   `Instrument::ALL` (saved layers are read by position) with its voice in
   `synth.rs` and its part in `composer.rs`; offline tests beside each.
+- A new part of the window (a kind of button, a meter): a function in
+  `skin.rs` drawn from `raised`, `inset` and the palette, with a line in
+  `docs/DESIGN.md`; a new colour is a `Palette` token in both lightness
+  tables and in the contrast test. A new group in a panel is a section
+  (`skin::section`) with a key in its `Disclosure`; what refines it goes
+  under its More.
 - A new source of tracks for the Generator: a `Work` arm in `generator.rs`
   that ends in `import_track`, so the track lands on a tile, is undoable
   and shows progress like the others; tests against a fake of the source,

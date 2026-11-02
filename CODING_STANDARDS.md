@@ -49,6 +49,23 @@ thread. A glitch there is audible on stage, so:
   naming the set and file. A change to the board format changes
   `docs/BOARD-JSON.md` and the manifest tests in the same diff.
 
+## The window
+
+- No colour literal, gradient or shadow in window code (`app.rs`,
+  `grid.rs`, `inspector.rs`, `generator.rs`, `sidebar.rs`, `menu.rs`,
+  `confirm.rs`, `emoji.rs`, `polish.rs`, `meter.rs`); a one-off tint is a
+  palette token blended towards another. Tile colours come from
+  `palette.rs`.
+- A new part goes in `skin.rs` and `docs/DESIGN.md` in the same change. A
+  new colour is a `Palette` token with a lightness in both tables and a
+  line in `theme::tests::text_reads_on_every_surface`.
+- Every interactive part reports itself to AccessKit through
+  `widget_info`, so the window tests find it by name.
+- A panel control that appears or disappears (a section's body, a More,
+  a row shown only sometimes) sits in a `ui.scope` of its own, so the ids
+  of what follows do not move.
+- Check both themes; `OLIO_RENDER=1` renders them.
+
 ## Decisions
 
 - A change that contradicts an ADR in `docs/adr/` supersedes it with a new

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, Color32, FontId, Id, Painter, Pos2, Rect, RichText, Sense, Shadow, Stroke, StrokeKind,
-    Ui, Vec2, WidgetInfo, WidgetType,
+    Align2, Color32, FontId, Id, Painter, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    Vec2, WidgetInfo, WidgetType,
 };
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{MAX_COLUMNS, Set, SetId, Slot, Tile, TileId};
@@ -13,14 +13,20 @@ use olio_library::{MAX_COLUMNS, Set, SetId, Slot, Tile, TileId};
 use crate::clips::{ClipState, Clips, Ready};
 use crate::emoji::EmojiImages;
 use crate::meter::{self, Meter};
-use crate::prefs::{Polish, TileSize, TileStyle};
+use crate::prefs::{Polish, TileSize};
+use crate::skin::{self, Elevation};
 use crate::{format, palette};
 
-const ROUNDING: u8 = 10;
+/// A tile's corners, and an empty slot's: a well's radius.
+const ROUNDING: u8 = skin::WELL_RADIUS;
 /// Room on a tile's right for its level meter.
 const METER_STRIP: f32 = 9.0;
-/// Room around a Soft grid, so the shadows of the outer tiles show.
-const SOFT_INSET: f32 = 10.0;
+/// The grid sits this far inside its panel, so the tiles' shadows show.
+const GRID_INSET: f32 = 10.0;
+/// How much of its colour a tile's body takes: a hint at rest, more while
+/// it plays.
+const RESTING_TINT: f32 = 0.06;
+const PLAYING_TINT: f32 = 0.18;
 /// How long a tile dips when it starts playing, in seconds.
 const BOUNCE: f64 = 0.16;
 /// How far it dips: the share of its size it loses at the bottom.
@@ -103,7 +109,6 @@ pub struct GridView<'a> {
     pub click_plays: bool,
     /// The Polish preset, to label the context menu item.
     pub polish: Polish,
-    pub style: TileStyle,
     pub size: TileSize,
     /// Draw a spectrogram under each waveform.
     pub spectrograms: bool,
@@ -251,10 +256,7 @@ pub fn show(ui: &mut Ui, view: &GridView) -> GridOutput {
     let mut output = GridOutput::default();
     let columns = view.set.columns.max(1);
     let rows = view.set.visible_rows();
-    let inset = match view.style {
-        TileStyle::Flat => 0.0,
-        TileStyle::Soft => SOFT_INSET,
-    };
+    let inset = GRID_INSET;
     let metrics = Metrics::of(view.size);
     let mut layout = GridLayout::new(
         ui.available_size() - Vec2::splat(2.0 * inset),
@@ -382,18 +384,14 @@ fn drag_feedback(
     let dark = ui.visuals().dark_mode;
     if let Some(slot) = target.filter(|&slot| !(home && slot == tile.slot)) {
         let rect = layout.rect(slot);
-        let visuals = ui.visuals();
+        let p = skin::palette(ui.ctx());
         if view.set.is_free(slot) {
-            ui.painter().rect_filled(
-                rect,
-                ROUNDING,
-                visuals.selection.bg_fill.gamma_multiply(0.3),
-            );
+            ui.painter().rect_filled(rect, ROUNDING, p.accent_dim);
         }
         ui.painter().rect_stroke(
             rect.expand(2.0),
             ROUNDING + 2,
-            Stroke::new(2.5, visuals.selection.stroke.color),
+            Stroke::new(2.5, p.accent),
             StrokeKind::Outside,
         );
     }
@@ -413,19 +411,14 @@ fn drag_feedback(
     let ghost = Rect::from_min_size(pointer - offset, layout.cell);
     let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("olio-drag-ghost"));
     let mut painter = ui.ctx().layer_painter(layer);
-    let shadow = Shadow {
-        offset: [0, 8],
-        blur: 22,
-        spread: 0,
-        color: Color32::from_black_alpha(if dark { 140 } else { 70 }),
-    };
-    painter.add(shadow.as_shape(ghost, ROUNDING));
     painter.multiply_opacity(0.92);
+    // Lifted off the surface: the ghost stands at a window's height.
     let look = Look {
         selected: false,
         hovered: true,
         dark,
-        style: view.style,
+        elevation: Elevation::Panel,
+        playing: view.playing.contains_key(&tile.id),
         scale: 1.0,
         meter: None,
         spectrogram: view.spectrograms,
@@ -467,20 +460,13 @@ fn drag_label(ui: &Ui, view: &GridView, tile: &Tile, pointer: Pos2) {
     let emoji_room = if tile.emoji.is_empty() { 0.0 } else { 24.0 };
     let size = Vec2::new(title.size().x + emoji_room + 24.0, 30.0);
     let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 12.0), size);
-    let shadow = Shadow {
-        offset: [0, 4],
-        blur: 14,
-        spread: 0,
-        color: Color32::from_black_alpha(if dark { 140 } else { 60 }),
-    };
-    painter.add(shadow.as_shape(rect, 15));
-    painter.rect_filled(rect, 15, palette::tile_background(dark));
-    painter.rect(
+    let p = skin::palette(ui.ctx());
+    skin::raised_with(
+        &painter,
         rect,
-        15,
-        palette::tint(tile.color, dark, 40),
-        Stroke::new(1.5, strong),
-        StrokeKind::Inside,
+        skin::PANEL_RADIUS,
+        Elevation::Low,
+        p.surface.lerp_to_gamma(strong, 0.1),
     );
     let mut left = rect.left() + 12.0;
     if !tile.emoji.is_empty() {
@@ -611,7 +597,8 @@ fn tile_ui(
         selected: view.selected == Some(tile.id),
         hovered: response.hovered(),
         dark,
-        style: view.style,
+        elevation: Elevation::Low,
+        playing: progress.is_some(),
         scale: bounce(ui, tile.id, progress.is_some()),
         spectrogram: view.spectrograms,
         metrics: Metrics::of(view.size),
@@ -640,6 +627,7 @@ fn tile_ui(
                 selected: false,
                 hovered: false,
                 meter: None,
+                playing: progress.is_some(),
                 ..look
             };
             paint_tile(&painter, rect, other, state, progress, look, view.images);
@@ -658,7 +646,11 @@ struct Look {
     selected: bool,
     hovered: bool,
     dark: bool,
-    style: TileStyle,
+    /// How far the tile stands off the surface: low on the grid, a
+    /// window's height when its ghost is dragged.
+    elevation: Elevation,
+    /// Playing: pressed in, so the key's well sits in a deeper tint.
+    playing: bool,
     /// 1 at rest; a little less while the tile dips as it starts.
     scale: f32,
     /// The tile's level, while there is one to show.
@@ -703,26 +695,17 @@ fn paint_tile(
     let dark = look.dark;
     let rect = Rect::from_center_size(rect.center(), rect.size() * look.scale);
     let strong = palette::strong(tile.color, dark);
-    let resting = match look.style {
-        TileStyle::Flat => 90,
-        TileStyle::Soft => 55,
-    };
-    let border = if look.selected {
-        Stroke::new(3.0, strong)
-    } else if look.hovered || progress.is_some() {
-        Stroke::new(1.5, palette::tint(tile.color, dark, 190))
-    } else {
-        Stroke::new(1.0, palette::tint(tile.color, dark, resting))
-    };
-    match look.style {
-        TileStyle::Flat => {
-            painter.rect_filled(rect, ROUNDING, palette::tile_background(dark));
-        }
-        TileStyle::Soft => soft_background(painter, rect, progress.is_some(), dark),
-    }
+    let p = skin::palette(painter.ctx());
     let metrics = look.metrics;
     if let Some(progress) = progress {
-        painter.rect_filled(rect, ROUNDING, palette::tint(tile.color, dark, 28));
+        // Playing: pressed into the surface and tinted with its colour, so
+        // it reads as on by shape and by colour.
+        skin::inset(
+            painter,
+            rect,
+            ROUNDING,
+            p.surface.lerp_to_gamma(strong, PLAYING_TINT),
+        );
         if !metrics.detail {
             // No waveform to show progress: the tile fills as it plays.
             let played = Rect::from_min_size(
@@ -734,8 +717,26 @@ fn paint_tile(
             );
             painter.rect_filled(played, ROUNDING, palette::tint(tile.color, dark, 45));
         }
+    } else {
+        // At rest: raised out of the surface, a hint of its colour in it;
+        // lit a little more under the pointer.
+        let body = if look.hovered {
+            p.surface.lerp_to_gamma(p.light, 0.25)
+        } else {
+            p.surface
+        };
+        skin::raised_with(
+            painter,
+            rect,
+            ROUNDING,
+            look.elevation,
+            body.lerp_to_gamma(strong, RESTING_TINT),
+        );
     }
-    painter.rect_stroke(rect, ROUNDING, border, StrokeKind::Inside);
+    if look.selected {
+        // The one rim the design allows: the selected tile, in its colour.
+        painter.rect_stroke(rect, ROUNDING, Stroke::new(2.5, strong), StrokeKind::Inside);
+    }
     let inner = rect.shrink2(metrics.padding);
 
     // The emoji, the title beside it, and the loop mark on the right.
@@ -842,7 +843,7 @@ fn paint_tile(
             wave.y_range(),
         );
         let color = palette::tint(tile.color, dark, 210);
-        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color), dark);
+        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color));
     }
     let note = |text: &str, color: Color32| {
         painter.text(
@@ -959,28 +960,6 @@ fn waveform(
     }
 }
 
-/// A raised tile on the Soft canvas, or a pressed one: dark at the rim
-/// where the inner shadow falls, lit towards the bottom right.
-fn soft_background(painter: &Painter, rect: Rect, pressed: bool, dark: bool) {
-    let soft = palette::soft(dark);
-    if pressed {
-        painter.rect_filled(rect, ROUNDING, soft.pressed_rim);
-        let lit = Shadow {
-            offset: [2, 2],
-            blur: 10,
-            spread: 0,
-            color: soft.pressed_fill,
-        };
-        painter
-            .with_clip_rect(rect)
-            .add(lit.as_shape(rect.shrink(6.0), ROUNDING - 4));
-    } else {
-        painter.add(soft.light_shadow.as_shape(rect, ROUNDING));
-        painter.add(soft.dark_shadow.as_shape(rect, ROUNDING));
-        painter.rect_filled(rect, ROUNDING, soft.raised);
-    }
-}
-
 /// The bottom of a compact tile: the key on the left, the time on the
 /// right (the duration, or while playing the time left), and the level as
 /// a thin bar along the bottom edge.
@@ -1013,7 +992,7 @@ fn compact_footer(
             (format::clock(seconds), palette::tint(tile.color, dark, 200))
         }
         (None, Some(ClipState::Failed(_))) => {
-            ("can't play".to_owned(), Color32::from_rgb(220, 60, 60))
+            ("can't play".to_owned(), skin::palette(painter.ctx()).alarm)
         }
         (None, _) => ("…".to_owned(), palette::tint(tile.color, dark, 150)),
     };
@@ -1030,7 +1009,7 @@ fn compact_footer(
             Pos2::new(rect.right() - 8.0, rect.bottom() - 2.0),
         );
         let color = palette::tint(tile.color, dark, 210);
-        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color), dark);
+        meter::paint_bar(painter, bar, meter, meter::Colors::Tinted(color));
     }
 }
 
@@ -1056,49 +1035,61 @@ fn key_badge(painter: &Painter, bottom_center: Pos2, label: &str, tile: &Tile, l
     let size = key_badge_size(painter, label, metrics);
     let rect = Rect::from_center_size(bottom_center - Vec2::new(0.0, size.y / 2.0 - 1.0), size);
     let round = (size.y / 2.0) as u8;
-    if look.style == TileStyle::Soft {
-        // A small well the key sits in.
-        let soft = palette::soft(dark);
-        painter.rect_filled(rect, round, soft.pressed_rim);
-        let lit = Shadow {
-            offset: [1, 1],
-            blur: 4,
-            spread: 0,
-            color: soft.pressed_fill,
-        };
-        painter.add(lit.as_shape(rect.shrink(2.0), round.saturating_sub(2)));
-    }
-    painter.rect_filled(rect, round, palette::tint(tile.color, dark, 45));
+    // A small well the key sits in, tinted with the tile's colour, in a
+    // body that is itself tinted.
+    let p = skin::palette(painter.ctx());
+    let _ = dark;
+    let body = p.surface.lerp_to_gamma(
+        strong,
+        if look.playing {
+            PLAYING_TINT
+        } else {
+            RESTING_TINT
+        },
+    );
+    skin::inset_on(
+        painter,
+        rect,
+        round,
+        p.surface.lerp_to_gamma(strong, 0.12),
+        body,
+    );
     painter.galley(rect.center() - galley.size() / 2.0, galley, strong);
 }
 
 fn empty_slot(ui: &Ui, rect: Rect, slot: Slot, view: &GridView, targeted: bool) {
     let files_hovering = view.files_hovering;
-    let visuals = ui.visuals();
-    let weak = visuals.weak_text_color();
-    if view.style == TileStyle::Soft && !files_hovering {
-        ui.painter()
-            .rect_filled(rect, ROUNDING, palette::soft(visuals.dark_mode).well);
-    }
-    let (fill, stroke) = match (files_hovering, targeted) {
-        (true, true) => (
-            visuals.selection.bg_fill.gamma_multiply(0.35),
-            Stroke::new(2.0, visuals.selection.stroke.color),
-        ),
-        (true, false) => (Color32::TRANSPARENT, Stroke::new(1.0, weak)),
-        (false, _) => (
-            Color32::TRANSPARENT,
-            Stroke::new(1.0, weak.gamma_multiply(0.3)),
-        ),
-    };
+    let p = skin::palette(ui.ctx());
     let painter = ui.painter();
-    painter.rect(rect, ROUNDING, fill, stroke, StrokeKind::Inside);
+    // An empty slot is a well in the surface; files over the window light
+    // the one they would land in.
+    match (files_hovering, targeted) {
+        (true, true) => {
+            skin::inset(painter, rect, ROUNDING, p.accent_dim);
+            painter.rect_stroke(
+                rect,
+                ROUNDING,
+                Stroke::new(2.0, p.accent),
+                StrokeKind::Inside,
+            );
+        }
+        (true, false) => {
+            skin::well(painter, rect, ROUNDING);
+            painter.rect_stroke(
+                rect,
+                ROUNDING,
+                Stroke::new(1.0, p.legend),
+                StrokeKind::Inside,
+            );
+        }
+        (false, _) => skin::well(painter, rect, ROUNDING),
+    }
     if let Some(key) = TileKey::for_slot(slot) {
         let title = Metrics::of(view.size).title;
         let (size, color) = if files_hovering {
-            (title + 3.0, weak)
+            (title + 3.0, p.text)
         } else {
-            (title - 1.0, weak.gamma_multiply(0.5))
+            (title - 1.0, p.legend)
         };
         painter.text(
             rect.center(),

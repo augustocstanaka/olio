@@ -1,10 +1,17 @@
 //! Colours for tiles, in light and dark mode.
 
-use egui::{Color32, Shadow};
+use egui::Color32;
 use olio_library::TileColor;
 
+/// How far each mode moves a tile colour so it reads on the surface (3:1,
+/// `tests::tile_colours_read_on_the_surface`): lighter on a dark surface,
+/// darker on a light one.
+const DARK_LIFT: f32 = 0.18;
+const LIGHT_DEEPEN: f32 = 0.25;
+
 /// The tile colour at full strength, for titles and the played part of the
-/// waveform. Dark mode lifts it a little so it reads on a dark tile.
+/// waveform, moved towards the far end of the mode so it reads on the
+/// surface.
 pub fn strong(color: TileColor, dark: bool) -> Color32 {
     let (r, g, b) = match color {
         TileColor::Purple => (139, 61, 255),
@@ -19,9 +26,9 @@ pub fn strong(color: TileColor, dark: bool) -> Color32 {
     };
     let base = Color32::from_rgb(r, g, b);
     if dark {
-        base.lerp_to_gamma(Color32::WHITE, 0.18)
+        base.lerp_to_gamma(Color32::WHITE, DARK_LIFT)
     } else {
-        base
+        base.lerp_to_gamma(Color32::BLACK, LIGHT_DEEPEN)
     }
 }
 
@@ -31,77 +38,21 @@ pub fn tint(color: TileColor, dark: bool, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(strong.r(), strong.g(), strong.b(), alpha)
 }
 
-pub fn tile_background(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_gray(36)
-    } else {
-        Color32::WHITE
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{Mode, Palette, contrast};
 
-/// For buttons that remove things.
-pub fn danger() -> Color32 {
-    Color32::from_rgb(205, 52, 60)
-}
-
-/// The colours and light of the Soft tile style. The canvas is a little
-/// darker than a raised tile, so the light from the top left shows on
-/// tiles and the shadow falls to the bottom right.
-pub struct Soft {
-    /// Behind the grid.
-    pub canvas: Color32,
-    /// A tile at rest.
-    pub raised: Color32,
-    /// The rim of a pressed tile, where its inner shadow falls.
-    pub pressed_rim: Color32,
-    /// The middle of a pressed tile.
-    pub pressed_fill: Color32,
-    /// An empty slot, a shallow well.
-    pub well: Color32,
-    pub dark_shadow: Shadow,
-    pub light_shadow: Shadow,
-}
-
-pub fn soft(dark: bool) -> Soft {
-    if dark {
-        Soft {
-            canvas: Color32::from_gray(30),
-            raised: Color32::from_gray(40),
-            pressed_rim: Color32::from_gray(20),
-            pressed_fill: Color32::from_gray(31),
-            well: Color32::from_gray(27),
-            dark_shadow: Shadow {
-                offset: [4, 4],
-                blur: 12,
-                spread: 0,
-                color: Color32::from_black_alpha(150),
-            },
-            light_shadow: Shadow {
-                offset: [-3, -3],
-                blur: 10,
-                spread: 0,
-                color: Color32::from_white_alpha(14),
-            },
-        }
-    } else {
-        Soft {
-            canvas: Color32::from_rgb(228, 232, 238),
-            raised: Color32::from_rgb(239, 242, 247),
-            pressed_rim: Color32::from_rgb(207, 213, 222),
-            pressed_fill: Color32::from_rgb(228, 232, 238),
-            well: Color32::from_rgb(222, 226, 233),
-            dark_shadow: Shadow {
-                offset: [4, 4],
-                blur: 12,
-                spread: 0,
-                color: Color32::from_rgba_unmultiplied(140, 152, 175, 150),
-            },
-            light_shadow: Shadow {
-                offset: [-3, -3],
-                blur: 10,
-                spread: 0,
-                color: Color32::from_white_alpha(230),
-            },
+    /// Every colour, as a title and a played waveform on a tile, against the
+    /// surface the tile is raised from: WCAG 1.4.11's 3:1 for a mark.
+    #[test]
+    fn tile_colours_read_on_the_surface() {
+        for mode in [Mode::Light, Mode::Dark] {
+            let surface = Palette::of(mode).surface;
+            for color in TileColor::ALL {
+                let seen = contrast(strong(color, mode == Mode::Dark), surface);
+                assert!(seen >= 3.0, "{mode:?} {color:?}: {seen:.2}");
+            }
         }
     }
 }

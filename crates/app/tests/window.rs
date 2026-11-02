@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use olio_app::import::Importer;
-use olio_app::prefs::{TileSize, TileStyle};
+use olio_app::prefs::TileSize;
 use olio_app::{OlioApp, Options};
 use olio_audio::{Clip, WavFormat};
 use olio_library::Store;
@@ -529,22 +529,6 @@ fn the_toolbar_and_inspector_show_levels() {
     assert!(harness.state().tile_level_db("Tense").unwrap() > floor);
 }
 
-#[test]
-fn the_view_menu_switches_to_soft_tiles() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut harness = window(library(dir.path()), false);
-    assert_eq!(harness.state().preferences().tile_style, TileStyle::Flat);
-    harness.get_by_label("View").click();
-    harness.run_steps(2);
-    harness.get_by_label_contains("Soft Tiles").click();
-    harness.run_steps(2);
-    assert_eq!(harness.state().preferences().tile_style, TileStyle::Soft);
-    // Tiles still play in the new style.
-    harness.key_press(egui::Key::Num1);
-    harness.run_steps(2);
-    assert_eq!(harness.state().playing_titles(), ["Applause"]);
-}
-
 /// Presses the primary button at `at`, starting a drag.
 fn press(harness: &mut Harness<'static, OlioApp>, at: egui::Pos2) {
     harness.hover_at(at);
@@ -966,11 +950,17 @@ fn pick_style(harness: &mut Harness<'static, OlioApp>, name: &str) {
     harness.run_steps(2);
 }
 
-/// Shows every setting in the Generator.
-fn show_details(harness: &mut Harness<'static, OlioApp>) {
-    harness.get_by_label("Details").click();
+/// Opens a Generator section's More: what refines the section.
+fn open_more(harness: &mut Harness<'static, OlioApp>, section: &str) {
+    let label = format!("More in {section}");
+    harness.get_by_label(&label).scroll_to_me();
     harness.run_steps(3);
-    assert!(harness.state().preferences().generator_details);
+    harness.get_by_label(&label).hover();
+    harness.run_steps(2);
+    harness.get_by_label(&label).click();
+    harness.run_steps(3);
+    let key = section.to_lowercase().replace(' ', "_");
+    assert!(harness.state().preferences().generator.shows_more(&key));
 }
 
 #[test]
@@ -1009,13 +999,16 @@ fn the_generator_picks_styles_and_a_touch_makes_them_custom() {
             .layer(Instrument::Piano)
             .enabled
     );
-    show_details(&mut harness);
-    // Each instrument's level, notes and register come with details.
+    open_more(&mut harness, "Instruments");
+    // Each instrument's level, notes and register come with its More.
     harness.get_by_role_and_label(egui::accesskit::Role::Slider, "Harp notes");
     assert!(
         harness.query_all_by_label("Middle").count() >= 2,
         "a register each"
     );
+    // The form comes with Energy and time's.
+    assert_eq!(harness.query_all_by_label("Pieces").count(), 0);
+    open_more(&mut harness, "Energy and time");
     click_in_generator(&mut harness, "Pieces");
     assert!(matches!(
         harness.state().preferences().ambience.form,
@@ -1086,7 +1079,7 @@ fn each_instrument_plays_as_many_notes_as_its_slider_says() {
         0,
         "with details"
     );
-    show_details(&mut harness);
+    open_more(&mut harness, "Instruments");
     // Rain Study's harp plays now and then: its slider sits in the middle.
     let harp = harness
         .state()
@@ -1193,7 +1186,7 @@ fn the_generator_character_sliders_move_and_make_the_settings_custom() {
     assert_eq!(settings.chaos, 0.8);
     assert_eq!(harness.query_all_by_label("Chaos").count(), 0);
     click_in_generator(&mut harness, "Gentle");
-    show_details(&mut harness);
+    open_more(&mut harness, "Key and mood");
     let before = harness.state().preferences().ambience;
     assert_eq!(before.chaos, 0.0);
 
@@ -1340,7 +1333,7 @@ fn the_modes_and_suspended_harmony_are_among_the_essentials() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
-    assert!(!harness.state().preferences().generator_details);
+    assert!(harness.state().preferences().generator.no_more());
     // The key's root and scale (the Greek modes among them) show without
     // details.
     harness.get_by_role_and_label(Role::ComboBox, "Root");
@@ -1570,20 +1563,100 @@ fn a_prompted_track_lands_on_a_tile_and_undo_takes_it_off() {
 /// The real music model, installed where `OLIO_MUSIC_MODEL` says (an
 /// absolute path): `OLIO_MUSIC_MODEL=$PWD/target/music-model cargo test
 /// -p olio-app --test window real_music_model -- --ignored`. The app
-/// Picks a bed in the From a prompt section: the last chip of that name,
-/// the Background section having the first.
-fn pick_bed(harness: &mut Harness<'static, OlioApp>, name: &str) {
-    harness
-        .query_all_by_label(name)
-        .last()
-        .expect("the bed's chip")
-        .scroll_to_me();
+#[test]
+fn a_collapsed_section_hides_its_controls_and_is_remembered() {
+    use egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Tense").click();
     harness.run_steps(3);
-    harness
-        .query_all_by_label(name)
-        .last()
-        .expect("the bed's chip")
-        .click();
+    harness.get_by_label("Loop");
+    harness.get_by_label("How it plays").click();
+    harness.run_steps(3);
+    assert_eq!(harness.query_all_by_label("Loop").count(), 0);
+    assert!(
+        !harness
+            .state()
+            .preferences()
+            .inspector
+            .is_open("how_it_plays")
+    );
+    // The section after it is still there, and works.
+    harness.get_by_label_contains("✨ Polish");
+    harness.get_by_label("How it plays").click();
+    harness.run_steps(3);
+    harness.get_by_label("Loop");
+    assert!(
+        harness
+            .state()
+            .preferences()
+            .inspector
+            .is_open("how_it_plays")
+    );
+
+    open_generator(&mut harness);
+    harness.get_by_role_and_label(Role::ComboBox, "Root");
+    click_in_generator(&mut harness, "Key and mood");
+    assert_eq!(
+        harness
+            .query_all_by_role_and_label(Role::ComboBox, "Root")
+            .count(),
+        0
+    );
+    assert!(
+        !harness
+            .state()
+            .preferences()
+            .generator
+            .is_open("key_and_mood")
+    );
+    // What follows it still answers.
+    click_in_generator(&mut harness, "Waves");
+    assert_eq!(
+        harness.state().preferences().ambience.background,
+        olio_audio::ambience::Background::Waves
+    );
+}
+
+#[test]
+fn every_section_header_reads_as_a_toggle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = window(library(dir.path()), false);
+    harness.get_by_label("Tense").click();
+    harness.run_steps(3);
+    for title in ["Sound", "How it plays", "Polish"] {
+        assert_eq!(
+            harness.get_by_label(title).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True),
+            "{title}"
+        );
+    }
+    open_generator(&mut harness);
+    for title in [
+        "Style",
+        "Key and mood",
+        "Energy and time",
+        "Background",
+        "Instruments",
+    ] {
+        // By role and name: a header that names a control (Style names its
+        // drop-down) is not found by its name alone, and Energy has a
+        // chip called Background.
+        let open = harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter(|node| node.accesskit_node().label().as_deref() == Some(title))
+            .any(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True));
+        assert!(open, "a header named {title}, open");
+    }
+}
+
+/// Picks a bed in the From a prompt section: its chip is known as
+/// "Rain bed", the Background section's as "Rain".
+fn pick_bed(harness: &mut Harness<'static, OlioApp>, name: &str) {
+    let label = format!("{name} bed");
+    harness.get_by_label(&label).scroll_to_me();
+    harness.run_steps(3);
+    harness.get_by_label(&label).click();
     harness.run_steps(2);
 }
 
@@ -1841,7 +1914,7 @@ fn a_focused_slider_takes_the_arrow_keys_from_the_tiles() {
     harness.run_steps(2);
     open_generator(&mut harness);
     pick_style(&mut harness, "Campfire");
-    show_details(&mut harness);
+    open_more(&mut harness, "Key and mood");
     assert_eq!(harness.state().preferences().ambience.chaos, 0.0);
 
     // As Tab would leave it.
@@ -2104,21 +2177,13 @@ fn render_the_window_to_a_png() {
     }
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    for (theme, soft, name) in [
-        (egui::Theme::Dark, false, "window.png"),
-        (egui::Theme::Light, false, "window-light.png"),
-        (egui::Theme::Dark, true, "window-soft.png"),
-        (egui::Theme::Light, true, "window-soft-light.png"),
+    for (theme, name) in [
+        (egui::Theme::Dark, "window.png"),
+        (egui::Theme::Light, "window-light.png"),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = window(library(dir.path()), true);
         harness.ctx.set_theme(theme);
-        if soft {
-            harness.get_by_label("View").click();
-            harness.run_steps(2);
-            harness.get_by_label_contains("Soft Tiles").click();
-            harness.run_steps(2);
-        }
         harness.get_by_label("Pensive").click();
         harness.key_press(egui::Key::Num2);
         harness.key_press(egui::Key::Q);
@@ -2233,13 +2298,11 @@ fn render_the_window_to_a_png() {
     image.save(out.join("window-prompt.png")).unwrap();
     // And with every setting: the background's level, each instrument's
     // level and notes.
-    show_details(&mut harness);
+    open_more(&mut harness, "Instruments");
     harness
         .get_by_role_and_label(egui::accesskit::Role::Slider, "Bass notes")
         .scroll_to_me();
     harness.run_steps(20);
     let image = harness.render().expect("a GPU adapter to render with");
-    image
-        .save(out.join("window-generator-details.png"))
-        .unwrap();
+    image.save(out.join("window-generator-more.png")).unwrap();
 }

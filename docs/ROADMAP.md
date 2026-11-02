@@ -73,9 +73,12 @@ are intentions, reordered as real use dictates.
   every playing tile, and the selected tile in the inspector.
 - **Emoji on tiles**: colour Twemoji, a picker with search and groups,
   boards accept emoji or shortcodes.
-- **Soft tiles** (View menu): raised tiles that press in while playing,
-  a restrained take on neumorphism that keeps contrast in both themes;
-  every tile dips briefly when it starts (the trigger bounce).
+- **Soft UI** for the whole window, after Sala and Toca: one surface,
+  tiles raised at rest and pressed in while playing, chips, switches and
+  sliders with readouts, a palette tested for contrast in both themes;
+  the inspector and Generator in sections that open and close, each with
+  a More for what refines it; every tile dips briefly when it starts (the
+  trigger bounce). See `docs/DESIGN.md` and ADR 0006.
 
 ## M1 - Core playback
 

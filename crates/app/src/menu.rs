@@ -9,7 +9,7 @@
 use egui::{Button, Key, KeyboardShortcut, Modifiers, Ui};
 use olio_library::MAX_COLUMNS;
 
-use crate::prefs::{Preferences, Theme, TileSize, TileStyle};
+use crate::prefs::{Preferences, Theme, TileSize};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuAction {
@@ -50,7 +50,6 @@ pub enum MenuAction {
     ToggleSets,
     ToggleInspector,
     Theme(Theme),
-    TileStyle(TileStyle),
     TileSize(TileSize),
     /// Compact, Regular, Large, and round again.
     NextTileSize,
@@ -575,15 +574,6 @@ pub fn bar(ui: &mut Ui, state: &MenuState) -> Vec<MenuAction> {
                 MenuAction::ToggleSpectrograms,
                 &mut actions,
             );
-            for style in TileStyle::ALL {
-                toggle(
-                    ui,
-                    style.name(),
-                    state.prefs.tile_style == style,
-                    MenuAction::TileStyle(style),
-                    &mut actions,
-                );
-            }
             ui.separator();
             egui::gui_zoom::zoom_menu_buttons(ui);
         });

@@ -270,11 +270,15 @@ pub fn picker(ctx: &egui::Context, picker: &mut Picker, images: &EmojiImages) ->
 
         ui.add_space(10.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button("Cancel").clicked() {
+            if crate::skin::button(ui, "Cancel", false).clicked() {
                 reply = Reply::Cancelled;
             }
             let has = !picker.current.is_empty();
-            if ui.add_enabled(has, egui::Button::new("No Emoji")).clicked() {
+            if ui
+                .add_enabled_ui(has, |ui| crate::skin::button(ui, "No Emoji", false))
+                .inner
+                .clicked()
+            {
                 reply = Reply::Chose(None);
             }
         });
@@ -289,34 +293,42 @@ pub fn picker(ctx: &egui::Context, picker: &mut Picker, images: &EmojiImages) ->
 /// A group tab; true when clicked.
 fn tab(ui: &mut Ui, images: &EmojiImages, icon: &str, name: &str, chosen: bool) -> bool {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
-    let visuals = ui.visuals();
-    if chosen {
-        ui.painter()
-            .rect_filled(rect, 6, visuals.selection.bg_fill.gamma_multiply(0.5));
-    } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 6, visuals.widgets.hovered.weak_bg_fill);
-    }
+    pick_background(ui, rect, &response, chosen);
     let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(20.0));
-    images.paint(ui.painter(), icon_rect, icon, visuals.text_color());
+    let text = crate::skin::palette(ui.ctx()).text;
+    images.paint(ui.painter(), icon_rect, icon, text);
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, chosen, name));
     response.on_hover_text(name).clicked()
 }
 
 fn cell(ui: &mut Ui, images: &EmojiImages, emoji: &Emoji, chosen: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::click());
-    let visuals = ui.visuals();
-    if chosen {
-        ui.painter()
-            .rect_filled(rect, 8, visuals.selection.bg_fill.gamma_multiply(0.5));
-    } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 8, visuals.widgets.hovered.weak_bg_fill);
-    }
+    pick_background(ui, rect, &response, chosen);
     let picture = Rect::from_center_size(rect.center(), Vec2::splat(28.0));
-    images.paint(ui.painter(), picture, emoji.as_str(), visuals.text_color());
+    let text = crate::skin::palette(ui.ctx()).text;
+    images.paint(ui.painter(), picture, emoji.as_str(), text);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, emoji.name()));
     response.on_hover_text(emoji.name())
+}
+
+/// Under a tab or a cell: pressed in and tinted when chosen, the surface
+/// lit a little when hovered.
+fn pick_background(ui: &Ui, rect: Rect, response: &egui::Response, chosen: bool) {
+    let p = crate::skin::palette(ui.ctx());
+    if chosen {
+        crate::skin::inset(
+            ui.painter(),
+            rect,
+            crate::skin::BUTTON_RADIUS,
+            p.surface.lerp_to_gamma(p.accent, 0.12),
+        );
+    } else if response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            crate::skin::BUTTON_RADIUS,
+            p.surface.lerp_to_gamma(p.light, 0.25),
+        );
+    }
 }
 
 #[cfg(test)]

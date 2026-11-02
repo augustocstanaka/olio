@@ -277,10 +277,12 @@ one note, has none.
 _Avoid_: rate, frequency, concentration (that is how closely notes keep
 to home)
 
-**Details**:
-The Generator's switch between the essentials (style, key, mood,
-journey, background, which instruments play) and every setting.
-_Avoid_: advanced, expert mode
+**More**:
+The toggle at the end of a section that shows what refines it: the
+character's amounts under Key and mood, the form under Energy and time,
+each instrument's level, notes and register under Instruments. Reads
+"More" while closed and "Less" while open; kept in the preferences.
+_Avoid_: details, advanced, expert mode
 
 **Bubble**:
 A playing tile's button in the toolbar, which stops it.
@@ -296,6 +298,81 @@ A bar showing how loud something is playing, in dBFS (0 is full scale):
 the output's in the toolbar, with a clip lamp, and each tile's own,
 before the master volume.
 _Avoid_: VU meter (it is a peak meter), volume (that is a setting)
+
+### The window's look
+
+**Surface**:
+The one material the window is made of, in the palette's colours; every
+part is the surface raised out of it or pressed into it
+(`docs/DESIGN.md`).
+_Avoid_: background (that is the Generator's), canvas
+
+**Raised** / **Inset**:
+A part pushed out of the surface (a tile at rest, a button, a chip),
+casting a light shadow up-left and a dark one down-right; or pressed into
+it (a well, a field, a playing tile, a chosen chip), the shadows inside
+its edges. Pressed is inset.
+_Avoid_: embossed, sunken (that is a colour), shadowed
+
+**Elevation**:
+How far a raised part stands off the surface: Panel (windows, menus, a
+dragged tile), Low (tiles, buttons, chips) or Thumb (a slider's thumb).
+_Avoid_: z-index, depth
+
+**Well**:
+An inset left the surface's colour: an empty slot.
+_Avoid_: hole, socket
+
+**Readout**:
+A value in monospace on a small inset, beside the slider or meter it
+reads: "30 %", "0.50 s", "−12 dB".
+_Avoid_: value box, label
+
+**Legend**:
+A small uppercase label naming a group: Sets, Track, Mood, Bed.
+_Avoid_: heading, caption
+
+**Section**:
+A group of a panel under a legend with a chevron, opened and closed by a
+click on its header and remembered: the inspector's Sound, How it plays
+and Polish; the Generator's Style, Key and mood, Energy and time,
+Background, Instruments and From a prompt.
+_Avoid_: collapsing header, accordion, panel (that is the whole column)
+
+**Chip**:
+One of a few choices side by side, pressed in and lit when chosen: a
+mood, a length, an instrument, a background.
+_Avoid_: pill, tag, toggle button
+
+**Switch**:
+An on/off setting: a thumb that slides along a track that lights when
+on (Loop, Play live, Suspended).
+_Avoid_: checkbox, toggle
+
+**Tab**:
+One of the status bar's Sets, Generator and Inspector: pressed in, lit
+and with a lamp when shown.
+_Avoid_: button (alone)
+
+**Lamp**:
+A small light: lit in the accent on the chosen tab, in the alarm colour
+on the output meter when it clipped.
+_Avoid_: LED, indicator
+
+**Accent**:
+The one colour for what is lit: chosen chips and tabs, a switch that is
+on, a slider's travel, readouts. Amber, the surface's complement.
+_Avoid_: highlight, primary colour
+
+**Alarm**:
+The colour of errors and of what takes something away (Remove Tile, the
+confirming verb), and of a meter near full scale.
+_Avoid_: danger, warning colour
+
+**Palette**:
+Every colour the window draws with, computed from one hue for light or
+dark (`theme.rs`); the tile colours are the user's, apart from it.
+_Avoid_: theme (that is light or dark), skin (that is the code)
 
 ### Control
 
@@ -335,13 +412,9 @@ right-most tile. Fit to Window sets it once to as many as fit the window
 at the tile size; it does not follow later resizes, so keys stay put.
 _Avoid_: width (alone), grid size
 
-**Tile style**:
-How tiles are drawn: Flat (outlined cards) or Soft (raised buttons that
-press in while they play).
-_Avoid_: theme (that is light or dark), skin
-
 **Preferences**:
 Window settings kept beside the library in `preferences.ron`: theme,
-master volume, which panels show, single-click playback, tile style, the
-Polish preset, and the Generator's settings, saved styles and prompt.
+master volume, which panels show, which sections are open, single-click
+playback, the Polish preset, and the Generator's settings, saved styles
+and prompt.
 _Avoid_: settings (reserved for the planned Settings window), config

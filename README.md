@@ -8,11 +8,13 @@ app.
 
 ![Olio's main window: sets on the left, a grid of tiles, the inspector on the right](docs/images/window.png)
 
-The window follows the system theme; there is a [light version](docs/images/window-light.png)
-too, or pick one in the View menu. View ▸ Soft Tiles draws tiles as
-raised buttons that press in while they play:
+The whole window is soft UI: one matte surface, each tile raised out of
+it at rest and pressed in, tinted with its colour, while it plays; the
+panels are short columns of sections that open and close. It follows the
+system theme, and has a [light version](docs/images/window-light.png) too,
+or pick one in the View menu:
 
-![Soft tiles: raised at rest, pressed in while playing](docs/images/window-soft-light.png)
+![The light theme: raised tiles, two playing pressed in](docs/images/window-light.png)
 
 The Generator makes gentle music and backgrounds, live or as tracks on
 tiles:
@@ -68,9 +70,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
 - **Generate gentle music.** The Generator (⇧⌘G, or the Generator
   button in the status bar) makes up sparse, quiet music as it goes, in
   place of the inspector. It shows the essentials (a style, the key, a
-  mood, how it changes over time, a background, which instruments play);
-  **Details** adds every setting
-  for fine adjustment:
+  mood, how it changes over time, a background, which instruments play),
+  each in a section that opens and closes; a section's **More** adds what
+  refines it, for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
     crackling fire, with one **Balance** slider between it and the
@@ -104,7 +106,7 @@ Milestone 0, the playable skeleton, is done. Olio can:
     with cadences) to *Vibrant*: played harder and busier on a brisk
     pulse, the harp running up the chords, the bass answering itself,
     piano chords, a doubled shaker, strings in fifths, and the pad adding
-    sevenths and ninths; and **form** (with Details): endless, or pieces
+    sevenths and ninths; and **form** (Energy and time's More): endless, or pieces
     that close on the root and pause.
 
   Every control in the Generator says what it does when you hover it.
@@ -120,7 +122,7 @@ Milestone 0, the playable skeleton, is done. Olio can:
   stays behind the sounds, and a **Bed** puts the Generator's rain, waves
   or fire, quietly and looping, on a second tile under it. It
   takes about 6 GB of memory while it runs and stops after ten minutes
-  unused; **Remove Music Model** (under Details) takes it all away again.
+  unused; **Remove Music Model** (under the section's More) takes it all away again.
   Apple Silicon runs it through MLX; on Windows it uses CUDA where there
   is one, else the CPU, slowly.
 
@@ -213,7 +215,7 @@ the `OLIO_LIBRARY` environment variable.
   contents, so moving or deleting the originals breaks nothing and a sound
   used twice is stored once.
 - `preferences.ron` remembers the window's size and position, the panel
-  widths, the theme and tile style, the master volume, the Polish preset,
+  widths, the theme, which sections are open, the master volume, the Polish preset,
   the Generator's settings, your saved styles and which panels are shown.
 
 ## Development
@@ -236,10 +238,10 @@ machine; nothing is linked or run, so CI's Windows run is still the real
 one.
 
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-offscreen in both themes and both tile styles to `target/screenshots/`
-(`window.png`, `window-light.png`, `window-soft.png`,
-`window-soft-light.png`, and the Generator in `window-generator.png`,
-`window-generator-details.png` and `window-prompt.png`).
+offscreen in both themes to `target/screenshots/` (`window.png`,
+`window-light.png`, and the Generator in `window-generator.png`,
+`window-generator-more.png` and `window-prompt.png`). How the window
+looks, and why, is [docs/DESIGN.md](docs/DESIGN.md).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

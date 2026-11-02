@@ -42,6 +42,8 @@ mod palette;
 mod polish;
 pub mod prefs;
 mod sidebar;
+pub mod skin;
+pub mod theme;
 mod undo;
 
 use std::path::PathBuf;

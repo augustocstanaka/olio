@@ -2,10 +2,10 @@
 //! Escape or a click outside cancels. In the window rather than a native
 //! dialog so it looks the same on both platforms and can be driven by tests.
 
-use egui::{Align, Button, Color32, Id, Key, Layout, Modifiers, RichText};
+use egui::{Align, Id, Key, Layout, Modifiers, RichText};
 use olio_library::SetId;
 
-use crate::palette;
+use crate::skin;
 
 // Everything confirmed so far is a removal; the verb says so.
 #[allow(clippy::enum_variant_names)]
@@ -42,12 +42,10 @@ pub fn show(ctx: &egui::Context, confirm: &Confirm) -> Reply {
         ui.add_space(18.0);
         let mut reply = Reply::Waiting;
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let danger = Button::new(RichText::new(confirm.verb).color(Color32::WHITE).strong())
-                .fill(palette::danger());
-            if ui.add(danger).clicked() {
+            if skin::alarm_button(ui, confirm.verb).clicked() {
                 reply = Reply::Confirmed;
             }
-            if ui.button("Cancel").clicked() {
+            if skin::button(ui, "Cancel", false).clicked() {
                 reply = Reply::Cancelled;
             }
         });

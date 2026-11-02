@@ -30,7 +30,9 @@ and UI text.
   `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
-  `polish.rs` the Polish Preset window, `generator.rs` the Generator
+  `polish.rs` the Polish Preset window, `skin.rs` the soft-UI parts
+  (surfaces, buttons, chips, switches, sliders, sections and their More)
+  and `theme.rs` the palette they draw with, `generator.rs` the Generator
   panel and the thread that generates tracks, `instruments.rs` the
   recorded instruments (where the pack lives, its download, loading),
   `music_model/` the music model (`mod.rs` where it lives and the pinned
@@ -51,11 +53,15 @@ and UI text.
   instruments`.
 - `docs/ARCHITECTURE.md`: threads, data flow, where a feature goes.
 - `docs/EGUI-NOTES.md`: read before changing UI code; egui 0.36 API traps.
+- `docs/DESIGN.md`: how the window looks and why (soft UI, the palette,
+  the parts, how panels group). Read it before changing anything the
+  user sees.
 - `docs/BOARD-JSON.md`: the board format users script against. Keep it in
   step with `manifest.rs`.
 - `docs/adr/`: read the matching ADR before changing the UI stack (0001),
   the audio engine (0002), the library format (0003), control surfaces
-  and the Stream Deck plan (0004), or the music model (0005).
+  and the Stream Deck plan (0004), the music model (0005), or the
+  window's look and the panels' sections (0006).
 - `docs/ROADMAP.md`: milestones and the Farrago parity checklist.
 - `CODING_STANDARDS.md`: the rules review enforces, above all the
   audio-thread rules.
@@ -78,15 +84,17 @@ and UI text.
   trying it (`OLIO_MUSIC_MODEL_URL` points the app at one already
   running).
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-  in both themes and both tile styles to `target/screenshots/`; use it
+  in both themes to `target/screenshots/`; use it
   for visual changes, and copy the results to `docs/images/` when they
   change. The window's own `--screenshot` only works while the window is
   visible on screen.
 - UI rules: every command reachable from a menu, with its shortcut
   declared once in `menu.rs`; shortcuts formatted by egui so they read
   ⌘ on macOS and Ctrl on Windows; anything destructive confirms in the
-  window (`confirm.rs`), never with a native dialog; check both themes
-  and both tile styles.
+  window (`confirm.rs`), never with a native dialog; every part drawn
+  from `skin.rs` in `skin::palette`'s colours, no colour literal,
+  gradient or shadow in window code (`docs/DESIGN.md`); a control that is
+  not obvious says what it does on hover; check both themes.
 
 ## Platform notes
 
