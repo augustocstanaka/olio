@@ -76,7 +76,7 @@ pub fn character_words(settings: &AmbienceSettings) -> String {
         v if v < 0.2 => "Repeats a short motif",
         v if v < 0.45 => "Comes back to a motif often",
         v if v < 0.7 => "Comes back to a motif now and then",
-        _ => "Always finding new melodies",
+        _ => "Always finding new melodies, now and then a borrowed chord",
     };
     let concentration = match settings.concentration {
         c if c < 0.3 => "wandering wide",
@@ -1029,8 +1029,9 @@ fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
         "Variety",
         "Variety",
         &mut settings.variety,
-        "Low: a short motif comes back again and again, on few chords, in an even rhythm. \
-         High: new melodies, more chords, freer rhythm",
+        "Low: a short motif loops again and again, its notes echoing, on few chords, in an \
+         even rhythm. High: new melodies, more chords (now and then one borrowed from the \
+         parallel key), freer rhythm",
     );
     percent_row(
         ui,

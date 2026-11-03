@@ -89,7 +89,10 @@ Milestone 0, the playable skeleton, is done. Olio can:
     Each has its place in the room, the melody near and the bells and pad
     far, and each slowly drifts in level, brightness and place, so the
     music keeps moving while its notes repeat; the pad leads its chords
-    voice by voice, holding the notes they share;
+    voice by voice, holding the notes they share; at low variety the
+    harp, piano and violin loop their motifs on lengths that never line
+    up, each looped note echoing softer; and a wandering mood now and
+    then borrows a chord from the parallel key;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone, among the essentials, and **Suspended**: chords
     with a second or a fourth in place of their third and no third in the

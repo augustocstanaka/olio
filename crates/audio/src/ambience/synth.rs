@@ -779,7 +779,7 @@ impl Synth {
         Self {
             rate,
             rng: Rng::new(seed),
-            sampler: Sampler::new(rate),
+            sampler: Sampler::new(rate, seed.rotate_left(41)),
             bass: (0..BASS_STRINGS)
                 .map(|_| Plucked::new(max_frames))
                 .collect(),
@@ -918,10 +918,17 @@ impl Synth {
                 {
                     return;
                 }
-                let index = pool
-                    .iter()
-                    .position(|s| !s.active)
-                    .unwrap_or_else(|| least(pool.iter().map(|s| s.hold)));
+                // A full pool takes the quietest voice already let go, else
+                // the held one nearest its end: never one just bowed.
+                let index = pool.iter().position(|s| !s.active).unwrap_or_else(|| {
+                    least(pool.iter().map(|s| {
+                        if s.releasing {
+                            (s.env * s.level * 1e9) as u64
+                        } else {
+                            u64::MAX / 2 + s.hold
+                        }
+                    }))
+                });
                 pool[index].bow(
                     &mut self.rng,
                     self.rate,
@@ -1376,6 +1383,47 @@ mod tests {
                 at += 512;
             }
             assert!(checked > 5, "{}: {checked} chords checked", style.name());
+        }
+    }
+
+    #[test]
+    fn a_chord_into_a_full_pool_keeps_every_note() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let settings = AmbienceSettings {
+            enabled: true,
+            ..Style::Affirmation.settings()
+        };
+        let strings = |midi| Event {
+            at: 0,
+            note: Note {
+                instrument: Instrument::Strings,
+                midi,
+                velocity: 0.7,
+                pan: 0.0,
+                duration: rate as u64 * 30,
+                from: None,
+                voicing: 0,
+            },
+        };
+        for midi in 50..50 + STRINGS as u8 {
+            synth.play(strings(midi), &settings);
+        }
+        for _ in 0..rate * 3 {
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+        }
+        for midi in [70, 74, 77] {
+            synth.play(strings(midi), &settings);
+        }
+        let held: Vec<u8> = synth
+            .strings
+            .iter()
+            .filter(|v| v.active)
+            .map(|v| v.midi)
+            .collect();
+        for midi in [70, 74, 77] {
+            assert!(held.contains(&midi), "{midi} lost: {held:?}");
         }
     }
 

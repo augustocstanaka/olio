@@ -11,13 +11,23 @@
 use std::sync::Arc;
 
 use super::Instrument;
+use super::Rng;
 use super::composer::Event;
-use super::dsp::pan_gains;
+use super::dsp::{coefficient, pan_gains};
 use super::synth::Stems;
 use crate::instruments::{Multisample, Zone};
 
-/// Voices for every recorded instrument together.
+/// Voices for every recorded instrument together, and more where a voice
+/// taken for a new note fades out quickly rather than stopping dead.
 const VOICES: usize = 40;
+const FADING: usize = 8;
+/// A recorded note is tuned a few cents either way, so the same note
+/// played twice is never quite the same; a held one starts a moment into
+/// its recording; and a softer note sounds darker, as a softer stroke
+/// does: its tone opens from this, at the softest, to fully open.
+const DETUNE_CENTS: f32 = 4.0;
+const START_JITTER_SECONDS: f32 = 0.004;
+const SOFTEST_TONE_HZ: f32 = 2500.0;
 /// Old sample sets waiting for their voices to fade.
 const RETIRING: usize = 4;
 /// How fast a voice fades when its samples are replaced or it is stolen.
@@ -61,6 +71,9 @@ struct Voice {
     voicing: u32,
     gain_target: [f32; 2],
     glide: f32,
+    /// Its tone, darker as it is played softer: a low-pass per side.
+    tone: f32,
+    lowpass: [f32; 2],
 }
 
 impl Voice {
@@ -82,6 +95,8 @@ impl Voice {
         voicing: 0,
         gain_target: [0.0; 2],
         glide: 0.0,
+        tone: 1.0,
+        lowpass: [0.0; 2],
     };
 }
 
@@ -91,7 +106,10 @@ pub(super) struct Sampler {
     retiring: [Option<Arc<Multisample>>; RETIRING],
     /// Sets whose voices have faded, for the app to take and free.
     released: [Option<Arc<Multisample>>; RETIRING],
-    voices: [Voice; VOICES],
+    /// The voices notes are played on, then those fading after being
+    /// taken for a new note.
+    voices: [Voice; VOICES + FADING],
+    rng: Rng,
     round_robin: [u32; Instrument::COUNT],
     started: u64,
 }
@@ -110,13 +128,14 @@ fn cubic(data: &[i16], frames: usize, at: usize, frac: f32, channel: usize) -> f
 }
 
 impl Sampler {
-    pub(super) fn new(rate: u32) -> Self {
+    pub(super) fn new(rate: u32, seed: u64) -> Self {
         Self {
             rate,
             sets: Default::default(),
             retiring: Default::default(),
             released: Default::default(),
-            voices: [Voice::IDLE; VOICES],
+            voices: [Voice::IDLE; VOICES + FADING],
+            rng: Rng::new(seed),
             round_robin: [0; Instrument::COUNT],
             started: 0,
         }
@@ -271,19 +290,31 @@ impl Sampler {
         } else {
             0.0
         };
+        let cents = if zone.pitched {
+            self.rng.range(-DETUNE_CENTS, DETUNE_CENTS)
+        } else {
+            0.0
+        };
+        let semitones = semitones + cents / 100.0;
         let step =
             f64::from(zone.rate) / f64::from(self.rate) * 2f64.powf(f64::from(semitones) / 12.0);
+        let hold = (note.duration > 0).then_some(note.duration);
+        let start = if hold.is_some() {
+            f64::from(self.rng.range(0.0, START_JITTER_SECONDS) * zone.rate as f32)
+        } else {
+            0.0
+        };
+        let tone_hz = SOFTEST_TONE_HZ * 2f32.powf(3.0 * raw);
         let (left, right) = pan_gains(note.pan);
         let level = velocity * zone.gain * set.gain;
         let attack_frames = set.attack.max(0.0005) * self.rate as f32;
         let attack = 1.0 - (-1.0 / attack_frames).exp();
         let release = (-6.9 / (set.release.max(0.01) * self.rate as f32)).exp();
-        let hold = (note.duration > 0).then_some(note.duration);
         let voice = Voice {
             active: true,
             slot: Slot::Current(index),
             zone: zone_index,
-            position: 0.0,
+            position: start,
             step,
             gain: [level * left, level * right],
             env: 0.0,
@@ -297,16 +328,36 @@ impl Sampler {
             voicing: note.voicing,
             gain_target: [level * left, level * right],
             glide: 1.0 - (-4.0 / (LEVEL_GLIDE_SECONDS * self.rate as f32)).exp(),
+            tone: coefficient(tone_hz, self.rate),
+            lowpass: [0.0; 2],
         };
         self.started += 1;
-        let free = self.voices.iter().position(|voice| !voice.active);
+        let free = self.voices[..VOICES].iter().position(|voice| !voice.active);
         let at = free.unwrap_or_else(|| {
-            // The oldest, which is the quietest more often than not.
-            self.voices
+            // The oldest, which is the quietest more often than not; it
+            // fades out on a spare voice, the most nearly silent of them
+            // if none is free.
+            let oldest = self.voices[..VOICES]
                 .iter()
                 .enumerate()
                 .min_by_key(|(_, voice)| voice.started)
-                .map_or(0, |(at, _)| at)
+                .map_or(0, |(at, _)| at);
+            let spare = VOICES
+                + self.voices[VOICES..]
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        let loudness = |v: &Voice| if v.active { v.env } else { -1.0 };
+                        loudness(a).total_cmp(&loudness(b))
+                    })
+                    .map_or(0, |(at, _)| at);
+            let quick = self.quick_fade();
+            let mut fading = self.voices[oldest];
+            fading.releasing = true;
+            fading.hold = None;
+            fading.release = fading.release.min(quick);
+            self.voices[spare] = fading;
+            oldest
         });
         self.voices[at] = voice;
     }
@@ -404,8 +455,12 @@ fn voice_next(voice: &mut Voice, zone: &Zone) -> Option<(f32, f32)> {
         return None;
     }
     let frac = (voice.position - at as f64) as f32;
-    let left = cubic(&zone.data, zone.frames, at, frac, 0);
-    let right = cubic(&zone.data, zone.frames, at, frac, 1);
+    let mut left = cubic(&zone.data, zone.frames, at, frac, 0);
+    let mut right = cubic(&zone.data, zone.frames, at, frac, 1);
+    for (side, sample) in [&mut left, &mut right].into_iter().enumerate() {
+        voice.lowpass[side] += (*sample - voice.lowpass[side]) * voice.tone;
+        *sample = voice.lowpass[side];
+    }
     voice.position += voice.step;
     for (gain, target) in voice.gain.iter_mut().zip(voice.gain_target) {
         *gain += (target - *gain) * voice.glide;
@@ -432,7 +487,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_test_pack(dir.path());
         let pack = Pack::open(dir.path()).unwrap();
-        let mut sampler = Sampler::new(48_000);
+        let mut sampler = Sampler::new(48_000, 1);
         let set = pack.load(instrument).unwrap().unwrap();
         sampler.set(instrument, Some(Arc::new(set)));
         (sampler, dir)
@@ -542,6 +597,78 @@ mod tests {
             .filter(|v| v.active && v.hold == Some(48_000 * 4))
             .count();
         assert_eq!(fresh, 1);
+    }
+
+    #[test]
+    fn a_voice_taken_for_a_new_note_fades_out_rather_than_stopping() {
+        let (mut sampler, _dir) = sampler_with(Instrument::Strings);
+        for i in 0..VOICES {
+            sampler.play(
+                event(Instrument::Strings, 45 + (i % 24) as u8, 0.6, 48_000 * 10),
+                0.6,
+            );
+        }
+        for _ in 0..4_800 {
+            left(&mut sampler);
+        }
+        let oldest = sampler.voices[..VOICES]
+            .iter()
+            .map(|v| v.started)
+            .min()
+            .unwrap();
+        let taken = sampler.voices[..VOICES]
+            .iter()
+            .find(|v| v.started == oldest)
+            .unwrap()
+            .midi;
+        sampler.play(event(Instrument::Strings, 80, 0.6, 48_000 * 10), 0.6);
+        let fading: Vec<&Voice> = sampler.voices[VOICES..]
+            .iter()
+            .filter(|v| v.active)
+            .collect();
+        assert_eq!(fading.len(), 1);
+        assert!(fading[0].releasing && fading[0].midi == taken);
+        // Fading, not stopped: still heard 10 ms on, gone by 200 ms.
+        for _ in 0..480 {
+            left(&mut sampler);
+        }
+        assert!(
+            sampler.voices[VOICES..]
+                .iter()
+                .any(|v| v.active && v.env > 0.01)
+        );
+        for _ in 0..9_600 {
+            left(&mut sampler);
+        }
+        assert!(sampler.voices[VOICES..].iter().all(|v| !v.active));
+        assert_eq!(
+            sampler.voices[..VOICES].iter().filter(|v| v.active).count(),
+            VOICES
+        );
+    }
+
+    #[test]
+    fn the_same_note_twice_is_never_quite_the_same_and_softer_is_darker() {
+        let (mut sampler, _dir) = sampler_with(Instrument::Strings);
+        sampler.play(event(Instrument::Strings, 57, 0.2, 48_000), 0.2);
+        sampler.play(event(Instrument::Strings, 57, 0.9, 48_000), 0.9);
+        let (soft, loud) = (sampler.voices[0], sampler.voices[1]);
+        let exact = 44_100.0 / 48_000.0;
+        let cents = |step: f64| 1200.0 * (step / exact).log2();
+        assert!(soft.step != loud.step, "detuned apart");
+        for voice in [soft, loud] {
+            assert!(cents(voice.step).abs() <= f64::from(DETUNE_CENTS) + 0.01);
+            assert!(
+                voice.position > 0.0
+                    && voice.position <= f64::from(START_JITTER_SECONDS * 44_100.0),
+                "held: a moment in"
+            );
+        }
+        assert!(soft.tone < loud.tone, "softer, darker");
+        // A struck note starts at its start.
+        let (mut sampler, _dir) = sampler_with(Instrument::Harp);
+        sampler.play(event(Instrument::Harp, 57, 0.5, 0), 0.5);
+        assert_eq!(sampler.voices[0].position, 0.0);
     }
 
     #[test]

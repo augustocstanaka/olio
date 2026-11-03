@@ -212,8 +212,9 @@ _Avoid_: presence (its old name), intensity, volume (that is level)
 
 **Character**:
 How the Generator's lines move, as three amounts from 0 to 100 %:
-**Variety** (how often a motif comes back, against new melodies and
-chords), **Concentration** (how closely the notes gather around the chord
+**Variety** (how often a motif comes back as a loop, its notes echoing,
+against new melodies and chords, now and then one borrowed from the
+parallel key), **Concentration** (how closely the notes gather around the chord
 and the home note) and **Chaos** (dissonance: notes outside the key,
 clashes and clusters). A **Mood** names a place for all three.
 _Avoid_: complexity, randomness (for chaos)
