@@ -24,9 +24,16 @@ files: everything it needs (delay lines, voice pools, noise filters) is
 allocated when the mixer is built, its composer plans with fixed-size
 queues, and settings arrive as one `Message::Ambience` value. The mixing
 rules apply to it unchanged. Its instruments go through a space of their
-own (`ambience/hall.rs`: an ensemble chorus and a long feedback-delay-
-network hall, also allocated up front) rather than the tiles' room, and
-the ambience stays audible until the hall's tail has died away.
+own (`ambience/hall.rs`, also allocated up front) rather than the tiles'
+room: the synth hands back each layer on its own, and each is put in its
+place (mostly dry and clear when near, darker, quieter dry and wetter
+when far), drifting slowly in level, brightness, pan and send
+(`ambience/modulation.rs`, worked out every 64 frames of the music's
+clock so a render does not depend on the buffer size); the layers that
+sustain or ring go through an ensemble chorus, the bass, drone and drums
+around it; and all of them into a long feedback-delay-network hall with
+early reflections. The ambience stays audible until the hall's tail has
+died away.
 
 Its instruments can also play from recordings: an instrument pack's
 notes are decoded off the audio thread into a `Multisample` (16-bit

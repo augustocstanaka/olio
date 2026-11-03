@@ -2,7 +2,9 @@
 //!
 //! A slow harmony (a chord degree of the scale) underlies everything: the
 //! bass and strings lean on it, the harp, piano, violin and bells mostly
-//! touch its tones, the pad voices it, the frame drum keeps to the root.
+//! touch its tones, the pad voices it (each of its voices led to the
+//! nearest note of the next chord, the notes they share held over), the
+//! frame drum keeps to the root.
 //! From the middle of energy up the notes keep a pulse and walk a cadence;
 //! below it they drift. Pieces have an intro, a close that thins out and
 //! lands on the root, and a pause.
@@ -42,6 +44,14 @@ pub struct Note {
     /// Frames to hold a sustained note; 0 lets a plucked or struck one
     /// ring out on its own.
     pub duration: u64,
+    /// A held note this one carries on from: the same note held on, or a
+    /// step away glided to, rather than struck again; with a duration of
+    /// 0, the held note let go and nothing struck. `None` starts it.
+    pub from: Option<u8>,
+    /// Which of the pad's voicings it belongs to, numbered from 1; 0 for
+    /// any other note. One note of a voicing carries a held voice at most,
+    /// so a voice moving onto another's note is never taken for it.
+    pub voicing: u32,
 }
 
 /// A note at a time, in output frames since the start.
@@ -51,7 +61,7 @@ pub struct Event {
     pub note: Note,
 }
 
-/// Most events waiting to play. Pads voice three notes at once, phrases
+/// Most events waiting to play. Pads voice five or six notes at once, phrases
 /// queue a few; more than this and the extra are dropped.
 const QUEUE: usize = 32;
 
@@ -70,6 +80,75 @@ const FULLER: f32 = 0.6;
 
 /// From this energy the pad adds a ninth as well.
 const FULLEST: f32 = 0.85;
+
+/// The pad's voices: one low on the root, three above it on the chord's
+/// tones, and a colour over them.
+const PAD_TONES: usize = 5;
+const LOW: usize = 0;
+const COLOUR: usize = 4;
+/// Each voice's level and place, low to high.
+const PAD_LEVELS: [f32; PAD_TONES] = [0.6, 0.9, 0.9, 0.9, 0.55];
+const PAD_PANS: [f32; PAD_TONES] = [0.0, -0.4, 0.0, 0.4, 0.25];
+/// Where the pad's voices keep, in semitones from its root at home: the
+/// low voice an octave below the three, the colour over them.
+const LOW_RANGE: (i32, i32) = (-10, 2);
+const UPPER_RANGE: (i32, i32) = (3, 21);
+const COLOUR_RANGE: (i32, i32) = (12, 28);
+
+/// The note of `target`'s pitch class nearest `near` within `low..=high`
+/// (MIDI notes), if there is one.
+fn within(target: u8, near: i32, low: i32, high: i32) -> Option<i32> {
+    let class = i32::from(target).rem_euclid(12);
+    let mut best: Option<i32> = None;
+    for octave in 0..11 {
+        let candidate = class + 12 * octave;
+        if (low..=high).contains(&candidate)
+            && best.is_none_or(|b| (candidate - near).abs() < (b - near).abs())
+        {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+/// As [`within`], for a range an octave wide or more, which always has
+/// one; `target` itself otherwise.
+fn nearest(target: u8, near: i32, low: i32, high: i32) -> i32 {
+    within(target, near, low, high).unwrap_or(i32::from(target))
+}
+
+/// Every way to share three tones among three voices.
+const SHARES: [[usize; 3]; 6] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+];
+
+/// The three tones `targets` voiced from `previous`: each voice takes one,
+/// in the octave nearest where it was within `low..=high`; of every way to
+/// share them out, the one that moves least in all (and of those, the
+/// one that holds the most notes), so common tones are held and the rest
+/// move by step.
+fn lead(previous: [i32; 3], targets: [u8; 3], low: i32, high: i32) -> [i32; 3] {
+    let mut best = ([0; 3], (i32::MAX, 0));
+    for share in SHARES {
+        let mut voicing = [0; 3];
+        let (mut moved, mut held) = (0, 0);
+        for (voice, &tone) in share.iter().enumerate() {
+            voicing[voice] = nearest(targets[tone], previous[voice], low, high);
+            let step = (voicing[voice] - previous[voice]).abs();
+            moved += step;
+            held -= i32::from(step == 0);
+        }
+        if (moved, held) < best.1 {
+            best = (voicing, (moved, held));
+        }
+    }
+    best.0
+}
 
 /// The most notes a motif holds.
 const MOTIF: usize = 8;
@@ -173,6 +252,20 @@ pub struct Composer {
     cadence_step: usize,
     /// The drone's last note, so it is only retuned on a change.
     drone_midi: Option<u8>,
+    /// The pad's last voicing (MIDI notes, 0 for a voice that was silent)
+    /// and the notes it sounded (chaos may bend one), whether it has one
+    /// yet, and until when those notes hold.
+    voicing: [i32; PAD_TONES],
+    sounding: [u8; PAD_TONES],
+    voiced: bool,
+    pad_until: u64,
+    /// The pad's last voicing's number ([`Note::voicing`]).
+    voicings: u32,
+    /// Each pad voice's next note while it waits in the queue (its
+    /// voicing's number and note; 0 for none): `sounding` takes it only
+    /// once it is handed out, so a note dropped from the queue is never
+    /// counted as sounding.
+    waiting: [(u32, u8); PAD_TONES],
     /// A closing piece has reached its last chord, and whether the bass
     /// has sounded the root to end on.
     home: bool,
@@ -182,6 +275,8 @@ pub struct Composer {
     phase: Phase,
     /// What the instruments play at: 1, falling to 0 as a piece closes.
     music_gain: f32,
+    /// A piece has just ended, for the synth to let its held notes go.
+    ended: bool,
 }
 
 /// Suspended, the chords that stay open: the tonic, subdominant and
@@ -220,11 +315,18 @@ impl Composer {
             next_harmony: 0,
             cadence_step: 0,
             drone_midi: None,
+            voicing: [0; PAD_TONES],
+            sounding: [0; PAD_TONES],
+            voiced: false,
+            pad_until: 0,
+            voicings: 0,
+            waiting: [(0, 0); PAD_TONES],
             home: false,
             ended_on_root: false,
             origin: 0,
             phase: Phase::Playing,
             music_gain: 1.0,
+            ended: false,
         }
     }
 
@@ -239,6 +341,7 @@ impl Composer {
     fn clear_queue(&mut self) {
         self.queued = 0;
         self.queue = [None; QUEUE];
+        self.waiting = [(0, 0); PAD_TONES];
     }
 
     fn start(&mut self, settings: &AmbienceSettings, now: u64) {
@@ -257,6 +360,9 @@ impl Composer {
         self.violin = Line::new(2);
         self.home = false;
         self.ended_on_root = false;
+        self.voiced = false;
+        self.sounding = [0; PAD_TONES];
+        self.pad_until = 0;
         for instrument in Instrument::ALL {
             // The pad and drone open; the rest come in a little later.
             let wait = match instrument {
@@ -302,6 +408,12 @@ impl Composer {
         self.music_gain
     }
 
+    /// True once after a piece has ended, so held notes can be let go
+    /// rather than wait out the pause.
+    pub fn take_ended(&mut self) -> bool {
+        std::mem::take(&mut self.ended)
+    }
+
     /// True once the music has begun: from the first poll after a reset.
     pub fn is_started(&self) -> bool {
         self.started
@@ -322,6 +434,9 @@ impl Composer {
         self.chord = 0;
         self.cadence_step = 0;
         self.next_harmony = now + self.harmony_span(settings);
+        // The held notes have been let go; the voices lead on from where
+        // they were, into the new key.
+        self.pad_until = 0;
         for (instrument, seconds) in [(Instrument::Pad, 0.6), (Instrument::Strings, 1.5)] {
             let next = &mut self.next[instrument.index()];
             *next = (*next).min(now + frames(self.rate, seconds));
@@ -337,7 +452,40 @@ impl Composer {
         self.queue.copy_within(1..self.queued, 0);
         self.queued -= 1;
         self.queue[self.queued] = None;
+        let note = first.note;
+        if note.instrument == Instrument::Pad && note.voicing > 0 {
+            // A pad voice now sounds this note, or, let go, nothing.
+            if let Some(voice) = self
+                .waiting
+                .iter()
+                .position(|waiting| *waiting == (note.voicing, note.midi))
+            {
+                self.sounding[voice] = if note.duration == 0 { 0 } else { note.midi };
+                self.waiting[voice] = (0, 0);
+            }
+        }
         Some(first)
+    }
+
+    /// Drops an instrument's events still waiting, keeping the rest in
+    /// order.
+    fn drop_queued(&mut self, instrument: Instrument) {
+        let mut kept = 0;
+        for index in 0..self.queued {
+            if let Some(event) = self.queue[index]
+                && event.note.instrument != instrument
+            {
+                self.queue[kept] = Some(event);
+                kept += 1;
+            }
+        }
+        for slot in &mut self.queue[kept..self.queued] {
+            *slot = None;
+        }
+        self.queued = kept;
+        if instrument == Instrument::Pad {
+            self.waiting = [(0, 0); PAD_TONES];
+        }
     }
 
     fn push(&mut self, event: Event) {
@@ -380,6 +528,7 @@ impl Composer {
             if to >= end {
                 self.phase = Phase::Pausing(end + frames(self.rate, pause_seconds));
                 self.music_gain = 0.0;
+                self.ended = true;
                 self.clear_queue();
                 return;
             }
@@ -395,6 +544,14 @@ impl Composer {
                 if instrument == Instrument::Drone {
                     // Sounded again when it comes back.
                     self.drone_midi = None;
+                }
+                if instrument == Instrument::Pad && self.voiced {
+                    // Nothing it planned plays; it starts afresh when it
+                    // comes back.
+                    self.drop_queued(Instrument::Pad);
+                    self.voiced = false;
+                    self.sounding = [0; PAD_TONES];
+                    self.pad_until = 0;
                 }
                 continue;
             }
@@ -430,6 +587,7 @@ impl Composer {
             let wanted = if home { 0 } else { 4 };
             if self.chord != wanted {
                 self.chord = wanted;
+                self.drop_queued(Instrument::Pad);
                 self.next[Instrument::Pad.index()] = now;
             }
             return;
@@ -461,7 +619,9 @@ impl Composer {
             self.sus = if self.rng.chance(0.5) { 1 } else { 3 };
         }
         self.next_harmony = now + self.harmony_span(settings);
-        // The pad voices the new chord soon.
+        // The pad voices the new chord soon, and none of the old chord's
+        // notes still waiting.
+        self.drop_queued(Instrument::Pad);
         let pad = Instrument::Pad.index();
         self.next[pad] = self.next[pad].min(now + frames(self.rate, self.rng.range(0.3, 1.5)));
     }
@@ -512,6 +672,8 @@ impl Composer {
                     velocity: 1.0,
                     pan: 0.0,
                     duration: 0,
+                    from: None,
+                    voicing: 0,
                 },
             });
         }
@@ -722,6 +884,8 @@ impl Composer {
                 velocity,
                 pan,
                 duration,
+                from: None,
+                voicing: 0,
             },
         });
     }
@@ -965,12 +1129,104 @@ impl Composer {
         frames(self.rate, spacing * self.gap_factor(settings, 0.7, 1.8))
     }
 
-    /// The chord as three slow notes, a little staggered; fuller, the
-    /// seventh too, and fullest the ninth (suspended, the octave and the
-    /// fifth above it, so no third creeps in); with chaos, a note bent off now
-    /// and then and a fourth that rubs against them: the second, or at high
-    /// chaos a semitone above the root. Driven, held more briefly, never
-    /// past the next chord.
+    /// The colour over the chord below fuller energy, as a degree above
+    /// its root: the ninth over a major chord, the eleventh over a minor
+    /// one. None over any other chord, in a pentatonic scale, or
+    /// suspended (whose second or fourth is colour enough).
+    fn colour(&self, settings: &AmbienceSettings) -> Option<i32> {
+        let len = settings.scale.degrees();
+        if settings.suspended || len != 7 || settings.energy >= FULLER {
+            return None;
+        }
+        let root = settings.scale.note(0, self.chord);
+        let third = settings.scale.note(0, self.chord + 2) - root;
+        let fifth = settings.scale.note(0, self.chord + 4) - root;
+        match (third, fifth) {
+            (4, 7) => Some(len + 1),
+            (3, 7) => Some(len + 3),
+            _ => None,
+        }
+    }
+
+    /// The pad's next voicing, low to high: the root low; the third, the
+    /// fifth and the octave above it (fuller, the seventh in the octave's
+    /// place), led from the last voicing so common tones hold and the
+    /// rest move by step; and a colour, or fullest the ninth, over them.
+    fn voice(&self, settings: &AmbienceSettings) -> [i32; PAD_TONES] {
+        let len = settings.scale.degrees();
+        let home = i32::from(settings.note(Instrument::Pad, 0));
+        let tone = |degree: i32| settings.note(Instrument::Pad, self.chord + degree);
+        let seventh = len - 1;
+        // In a pentatonic scale the seventh would be the chord's fifth.
+        let top = if !settings.suspended && settings.energy >= FULLER && seventh != 4 {
+            seventh
+        } else {
+            len
+        };
+        let mut upper = [tone(self.third(settings)), tone(4), tone(top)];
+        // In a pentatonic scale or suspended two tones can fall on one
+        // note; the second takes the first other note of the scale above
+        // the chord's root that is not in it yet.
+        let class = |midi: u8| midi % 12;
+        for i in 1..upper.len() {
+            if upper[..i].iter().any(|m| class(*m) == class(upper[i])) {
+                let spare = (0..len).map(tone).find(|m| {
+                    upper[..i]
+                        .iter()
+                        .chain(&upper[i + 1..])
+                        .all(|u| class(*u) != class(*m))
+                });
+                if let Some(spare) = spare {
+                    upper[i] = spare;
+                }
+            }
+        }
+        let range = |(low, high): (i32, i32)| (home + low, home + high);
+        let (low_low, low_high) = range(LOW_RANGE);
+        let (upper_low, upper_high) = range(UPPER_RANGE);
+        let (colour_low, colour_high) = range(COLOUR_RANGE);
+        let previous = if self.voiced {
+            self.voicing
+        } else {
+            // The first chord: the three around the octave above home.
+            [home, home + 12, home + 12, home + 12, home + 19]
+        };
+        let mut voicing = [0; PAD_TONES];
+        voicing[LOW] = nearest(tone(0), previous[LOW], low_low, low_high);
+        let led = lead(
+            [previous[1], previous[2], previous[3]],
+            upper,
+            upper_low,
+            upper_high,
+        );
+        voicing[1..COLOUR].copy_from_slice(&led);
+        let extra = if settings.energy >= FULLEST {
+            Some(if settings.suspended { len + 4 } else { len + 1 })
+        } else {
+            self.colour(settings)
+        };
+        if let Some(degree) = extra {
+            // Over the three, clear of the highest.
+            let highest = led.iter().copied().max().unwrap_or(upper_high);
+            let near = if previous[COLOUR] > 0 {
+                previous[COLOUR]
+            } else {
+                home + 19
+            };
+            // None when the three have climbed so high there is no room:
+            // the chord goes without it rather than crowd them.
+            voicing[COLOUR] =
+                within(tone(degree), near, colour_low.max(highest + 1), colour_high).unwrap_or(0);
+        }
+        voicing
+    }
+
+    /// The chord as five slow voices, a little staggered, led from the last
+    /// so the pad moves as one: held over a change where a note stays, and
+    /// a step away glided to (`Note::from`) while the last are still held.
+    /// With chaos, a note bent off now and then and one that rubs against
+    /// the low root: the second, or more often with chaos a semitone. Driven, held more
+    /// briefly, never past the next chord.
     fn pad(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let drive = drive(settings);
         let mut seconds = self.rng.range(12.0, 22.0) * (1.0 - 0.5 * drive);
@@ -980,47 +1236,77 @@ impl Composer {
         }
         let duration = frames(self.rate, seconds);
         let velocity = self.velocity(settings, 0.5, 0.7);
-        for (i, tone) in [0, self.third(settings), 4].into_iter().enumerate() {
-            let midi = settings.note(Instrument::Pad, self.chord + tone);
-            let midi = self.unsettle(settings, midi, 0.2);
-            let stagger = frames(self.rate, 0.35 * i as f32);
-            let pan = (i as f32 - 1.0) * 0.4;
-            self.note(at + stagger, Instrument::Pad, midi, velocity, pan, duration);
-        }
-        let len = settings.scale.degrees();
-        let (fuller, fullest) = if settings.suspended {
-            (len, len + 4)
-        } else {
-            (len - 1, len + 1)
-        };
-        let colours = [(FULLER, fuller, 0.7, 0.85), (FULLEST, fullest, 1.4, 0.7)];
-        for (energy, tone, after, softer) in colours {
-            // In a pentatonic scale the seventh would be the chord's top.
-            if settings.energy >= energy && tone != 4 {
-                let midi = settings.note(Instrument::Pad, self.chord + tone);
-                let stagger = frames(self.rate, after);
-                let velocity = velocity * softer;
-                self.note(at + stagger, Instrument::Pad, midi, velocity, 0.0, duration);
+        let held = self.voiced && at < self.pad_until;
+        let voicing = self.voice(settings);
+        self.voicings = self.voicings.wrapping_add(1).max(1);
+        let mut order = 0;
+        for (i, &midi) in voicing.iter().enumerate() {
+            if midi <= 0 {
+                // A voice this voicing leaves out is let go.
+                if held && self.sounding[i] > 0 {
+                    self.push(Event {
+                        at,
+                        note: Note {
+                            instrument: Instrument::Pad,
+                            midi: self.sounding[i],
+                            velocity: 0.0,
+                            pan: PAD_PANS[i],
+                            duration: 0,
+                            from: Some(self.sounding[i]),
+                            voicing: self.voicings,
+                        },
+                    });
+                    self.waiting[i] = (self.voicings, self.sounding[i]);
+                } else {
+                    self.sounding[i] = 0;
+                }
+                continue;
             }
+            let sounding = self.unsettle(settings, midi.clamp(0, 127) as u8, 0.2);
+            let from = (held && self.sounding[i] > 0).then_some(self.sounding[i]);
+            let stagger = frames(self.rate, 0.35 * order as f32);
+            order += 1;
+            self.push(Event {
+                at: at + stagger,
+                note: Note {
+                    instrument: Instrument::Pad,
+                    midi: sounding,
+                    velocity: velocity * PAD_LEVELS[i],
+                    pan: PAD_PANS[i],
+                    duration,
+                    from,
+                    voicing: self.voicings,
+                },
+            });
+            self.waiting[i] = (self.voicings, sounding);
         }
+        self.voicing = voicing;
+        self.voiced = true;
+        self.pad_until = at + duration;
         if self.maybe(settings.chaos * 0.8) {
-            let midi = if self.maybe(settings.chaos - 0.5) {
-                settings.note(Instrument::Pad, self.chord) + 1
+            let low = voicing[LOW].clamp(0, 126) as u8;
+            let midi = if self.maybe(settings.chaos - 0.3) {
+                low + 1
             } else {
-                settings.note(Instrument::Pad, self.chord + 1)
+                let second =
+                    settings.scale.note(0, self.chord + 1) - settings.scale.note(0, self.chord);
+                low.saturating_add(second.rem_euclid(12)).min(127)
             };
             let stagger = frames(self.rate, 1.05);
             self.note(
                 at + stagger,
                 Instrument::Pad,
                 midi,
-                velocity * 0.8,
+                velocity * 0.7,
                 0.0,
                 duration,
             );
         }
-        // Until the chord changes, or the notes die away.
-        let gap = frames(self.rate, seconds * 0.9).min(self.next_harmony.saturating_sub(at).max(1));
+        // Until the notes die away, or past the chord's end: the change
+        // of chord brings the next voicing on (`move_harmony`), so the old
+        // chord is not voiced again just before it.
+        let until_change = self.next_harmony.saturating_sub(at) + frames(self.rate, 2.0);
+        let gap = frames(self.rate, seconds * 0.9).min(until_change);
         gap.max(frames(self.rate, spacing * 0.3))
     }
 }
@@ -1269,14 +1555,40 @@ mod tests {
         assert!(mean(&lively) > mean(&quiet) + 0.1, "played harder");
         assert!(lively.len() > quiet.len() * 2, "more notes");
 
-        // The pad's chords: three notes at Ambient, five at Vibrant.
+        // The pad's chords: the root low and three above it, at Ambient
+        // with a colour over a major or minor chord (the first, on the
+        // tonic, is major); at Vibrant with the seventh and the ninth.
         let voicing = |events: &[Event]| {
             let pads = of(events, Instrument::Pad);
             let first = pads[0].at;
             pads.iter().filter(|e| e.at < first + 48_000 * 2).count()
         };
-        assert_eq!(voicing(&quiet), 3);
+        assert_eq!(voicing(&quiet), 5);
         assert_eq!(voicing(&lively), 5);
+        // Over the first chord, the tonic: the ninth at both, the seventh
+        // only at Vibrant (in the octave's place).
+        let classes = |events: &[Event], settings: &AmbienceSettings| {
+            let pads = of(events, Instrument::Pad);
+            let first = pads[0].at;
+            let root = i32::from(settings.scale.root);
+            let mut classes: Vec<i32> = pads
+                .iter()
+                .filter(|e| e.at < first + 48_000 * 2)
+                .map(|e| (i32::from(e.note.midi) - root).rem_euclid(12))
+                .collect();
+            classes.sort_unstable();
+            classes.dedup();
+            classes
+        };
+        let (calm, full) = (classes(&quiet, &ambient), classes(&lively, &vibrant));
+        assert!(
+            calm.contains(&2) && !calm.contains(&10) && !calm.contains(&11),
+            "{calm:?}"
+        );
+        assert!(
+            full.contains(&2) && (full.contains(&10) || full.contains(&11)),
+            "{full:?}"
+        );
 
         // The harp runs up the chord: three or more rising notes in a row,
         // half a beat apart.
@@ -1418,7 +1730,8 @@ mod tests {
                 .filter(|e| !settings.scale.contains(e.note.midi))
                 .count();
             // The pad's chords: a chord's notes are all held as long. A
-            // cluster has two a semitone or a tone apart.
+            // cluster has two a semitone apart, in any octave (a ninth or
+            // an eleventh over the chord is colour, not a cluster).
             let mut chords: Vec<(u64, Vec<u8>)> = Vec::new();
             for pad in of(&events, Instrument::Pad) {
                 let (duration, midi) = (pad.note.duration, pad.note.midi);
@@ -1431,7 +1744,7 @@ mod tests {
                 chord.iter().any(|a| {
                     chord.iter().any(|b| {
                         let class = a.abs_diff(*b) % 12;
-                        matches!(class, 1 | 2 | 10 | 11)
+                        matches!(class, 1 | 11)
                     })
                 })
             };
@@ -1521,6 +1834,140 @@ mod tests {
     }
 
     #[test]
+    fn the_pad_leads_its_voices_by_step_and_holds_common_tones() {
+        for kind in [
+            ScaleKind::Mode(Mode::Ionian),
+            ScaleKind::Mode(Mode::Dorian),
+            ScaleKind::Mode(Mode::Aeolian),
+            ScaleKind::Mode(Mode::Lydian),
+            ScaleKind::MinorPentatonic,
+        ] {
+            let mut settings = Style::RainStudy.settings();
+            settings.scale = Scale { root: 2, kind };
+            let len = settings.scale.degrees();
+            let home = i32::from(settings.note(Instrument::Pad, 0));
+            let mut composer = Composer::new(48_000, 1);
+            // Every chord after every other, twice round.
+            let mut chords: Vec<i32> = Vec::new();
+            for _ in 0..2 {
+                for from in 0..len {
+                    for to in 0..len {
+                        chords.extend([from, to]);
+                    }
+                }
+            }
+            let mut previous: Option<[i32; PAD_TONES]> = None;
+            for chord in chords {
+                composer.chord = chord;
+                let voicing = composer.voice(&settings);
+                for midi in &voicing[1..COLOUR] {
+                    assert!(
+                        (home + UPPER_RANGE.0..=home + UPPER_RANGE.1).contains(midi),
+                        "{kind:?}: {midi} out of range"
+                    );
+                }
+                if let Some(before) = previous {
+                    let moved: Vec<i32> = (1..COLOUR)
+                        .map(|voice| (voicing[voice] - before[voice]).abs())
+                        .collect();
+                    assert!(
+                        moved.iter().all(|m| *m <= 5) && moved.iter().sum::<i32>() <= 8,
+                        "{kind:?}: {before:?} to {voicing:?} moves {moved:?}"
+                    );
+                    // A note the two chords share is held.
+                    for midi in &before[1..COLOUR] {
+                        let class = midi.rem_euclid(12);
+                        if voicing[1..COLOUR].iter().any(|m| m.rem_euclid(12) == class) {
+                            assert!(
+                                voicing[1..COLOUR].contains(midi),
+                                "{kind:?}: {midi} is in both and moved: {before:?} to {voicing:?}"
+                            );
+                        }
+                    }
+                }
+                composer.voicing = voicing;
+                composer.voiced = true;
+                previous = Some(voicing);
+            }
+        }
+    }
+
+    #[test]
+    fn the_pads_colour_sits_over_the_chord_and_no_note_doubles() {
+        let mut checked = 0;
+        for style in Style::ALL {
+            for (energy, suspended) in [
+                (0.4, false),
+                (0.7, false),
+                (0.9, false),
+                (0.9, true),
+                (0.4, true),
+            ] {
+                let mut settings = style.settings();
+                settings.energy = energy;
+                settings.suspended = suspended;
+                let mut composer = Composer::new(48_000, 1);
+                let len = settings.scale.degrees();
+                for step in 0..200 {
+                    composer.chord = open_chord(&settings, (step * 3 + step / 7) % len);
+                    let voicing = composer.voice(&settings);
+                    let top = voicing[1..COLOUR].iter().copied().max().unwrap();
+                    if voicing[COLOUR] > 0 {
+                        assert!(voicing[COLOUR] > top, "{}: {voicing:?}", style.name());
+                        checked += 1;
+                    }
+                    let mut notes: Vec<i32> = voicing.iter().copied().filter(|m| *m > 0).collect();
+                    let count = notes.len();
+                    notes.sort_unstable();
+                    notes.dedup();
+                    assert_eq!(
+                        notes.len(),
+                        count,
+                        "{}: {voicing:?} doubles a note",
+                        style.name()
+                    );
+                    composer.voicing = voicing;
+                    composer.voiced = true;
+                }
+            }
+        }
+        assert!(checked > 1000, "{checked} colours");
+    }
+
+    #[test]
+    fn the_pad_carries_its_notes_over_while_they_hold() {
+        let mut settings = Style::Cathedral.settings();
+        settings.enabled = true;
+        *settings.layer_mut(Instrument::Pad) = Layer::on(0.7, Density::LIVELY);
+        let events = play(&settings, 3, 6);
+        let pads = of(&events, Instrument::Pad);
+        let carried: Vec<_> = pads
+            .iter()
+            .filter_map(|e| e.note.from.map(|from| (from, e.note.midi)))
+            .collect();
+        assert!(
+            carried.len() * 4 > pads.len(),
+            "{} of {} carried",
+            carried.len(),
+            pads.len()
+        );
+        assert!(
+            carried.iter().any(|(from, midi)| from == midi),
+            "a note held on"
+        );
+        assert!(
+            carried.iter().any(|(from, midi)| from != midi),
+            "a note led on"
+        );
+        // Nothing else carries a note.
+        assert!(
+            events
+                .iter()
+                .all(|e| e.note.instrument == Instrument::Pad || e.note.from.is_none())
+        );
+    }
+
+    #[test]
     fn the_queue_drops_extras_rather_than_growing() {
         let mut composer = Composer::new(48_000, 1);
         for i in 0..(QUEUE as u64 + 10) {
@@ -1532,6 +1979,8 @@ mod tests {
                     velocity: 0.5,
                     pan: 0.0,
                     duration: 0,
+                    from: None,
+                    voicing: 0,
                 },
             });
         }

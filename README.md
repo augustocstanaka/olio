@@ -85,7 +85,11 @@ Milestone 0, the playable skeleton, is done. Olio can:
     a real grand piano, concert harp, hand chimes, violin and bass
     pizzicato, cello, viola and violin sections, bowed vibraphone under
     the pad, and a frame drum and shaker play instead, each loaded as
-    the music uses it; the Recorded instruments switch turns them off;
+    the music uses it; the Recorded instruments switch turns them off.
+    Each has its place in the room, the melody near and the bells and pad
+    far, and each slowly drifts in level, brightness and place, so the
+    music keeps moving while its notes repeat; the pad leads its chords
+    voice by voice, holding the notes they share;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone, among the essentials, and **Suspended**: chords
     with a second or a fourth in place of their third and no third in the

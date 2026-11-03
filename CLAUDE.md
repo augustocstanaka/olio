@@ -13,7 +13,8 @@ and UI text.
   (the Generator's music: `mod.rs` settings, scales and styles,
   `composer.rs` what plays when, `synth.rs` the instruments,
   `background.rs` rain, waves, fire and the rest, `journey.rs` building
-  up and evolving over time, `hall.rs` the instruments' chorus and hall,
+  up and evolving over time, `hall.rs` each layer's place (near or far), the
+  instruments' chorus and hall, `modulation.rs` every layer's slow drift,
   `sampler.rs` recorded instruments played, `dsp.rs` shared
   filters, `track.rs` rendering a track offline), `instruments.rs`
   (instrument packs: the manifest, loading recorded instruments), and

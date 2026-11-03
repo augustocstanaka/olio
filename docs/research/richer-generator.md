@@ -171,6 +171,13 @@ It also cuts against the procedural direction, so build it after the in-house en
 ## 5. Roadmap
 
 **Milestone 1: Writing and mixing (no new samples).** Items 1 to 6 from section 4: voice leading, modulation, per-layer space, loops and echoes, Markov tables and borrowed chords, and steal fades.
+- **Done on 2026-11-02 (items 1 to 3):**
+  - Voice leading in `composer.rs`: the pad plays a low root, three upper voices led from the last chord (common tones held, each voice moving a fourth at most and eight semitones in all), and a ninth or eleventh over major and minor chords below fuller energy. A note still held is carried on (`Note::from`): the same note is held longer, a step away glides there, a leap lets go.
+  - Slow modulation in the new `modulation.rs`: level, brightness, pan and hall send drift for every layer on 36 prime periods (31 to 199 s) plus a smoothed walk, worked out every 64 frames of the music's clock. The bass, drone and drums keep to the middle.
+  - Per-layer space in `hall.rs`: the synth and sampler hand back one stem per layer; each has a place (dry, send, chorus or not, distance); the bass, drone and drums skip the chorus; the hall gained early reflections; the drone is stereo. `MUSIC_TRIM` went from 0.72 to 0.8 to keep the level (within about 1.5 dB per style).
+  - Each voicing has a number (`Note::voicing`); a carried note is matched to a voice that voicing has not struck or carried yet, takes the new note's level over about a second, and is only held on in a recording that loops. A voice the new voicing leaves out is let go (a carried note with no duration). The pad no longer voices the old chord just before a change, and a change drops the old chord's notes still queued; the composer counts a pad note as sounding only once it is handed out, so a dropped note is never led from. Switching the pad off forgets its voicing, and the end of a piece lets held notes go rather than hold them through the pause. The colour is left out when the voicing has climbed too high to fit it above.
+  - Tests: voice movement bounds, carried notes (each voice once per voicing, the new level, looped or not, and eight minutes of composer and synth together holding nothing from an older chord), the colour above the chord with no doubled note, the places, a seed rendering the same twice, and a counting allocator around `render` with synthesised and recorded instruments (`crates/audio/tests/no_alloc.rs`).
+- **Still to do in this milestone:** items 4 to 6 (loops and echoes, Markov tables and borrowed chords, steal fades).
 - **By ear:** run `cargo xtask previews` before and after.
   - Chord changes should sound legato.
   - The mix should keep moving even when notes repeat.

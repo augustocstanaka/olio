@@ -13,6 +13,7 @@ use std::sync::Arc;
 use super::Instrument;
 use super::composer::Event;
 use super::dsp::pan_gains;
+use super::synth::Stems;
 use crate::instruments::{Multisample, Zone};
 
 /// Voices for every recorded instrument together.
@@ -23,6 +24,8 @@ const RETIRING: usize = 4;
 const QUICK_FADE_SECONDS: f32 = 0.05;
 /// A voice this quiet has ended.
 const SILENT: f32 = 1e-4;
+/// How long a carried note takes to reach its new level.
+const LEVEL_GLIDE_SECONDS: f32 = 1.2;
 
 /// Where a voice's samples are: an instrument's current set, or a
 /// retiring one.
@@ -49,6 +52,15 @@ struct Voice {
     releasing: bool,
     /// When it started, to steal the oldest first.
     started: u64,
+    /// The layer it plays in, and its note.
+    instrument: usize,
+    midi: u8,
+    /// The pad voicing that struck or last carried it
+    /// ([`super::composer::Note::voicing`]); the gain it moves to when
+    /// carried on at another velocity, and how fast.
+    voicing: u32,
+    gain_target: [f32; 2],
+    glide: f32,
 }
 
 impl Voice {
@@ -65,6 +77,11 @@ impl Voice {
         hold: None,
         releasing: false,
         started: 0,
+        instrument: 0,
+        midi: 0,
+        voicing: 0,
+        gain_target: [0.0; 2],
+        glide: 0.0,
     };
 }
 
@@ -181,6 +198,60 @@ impl Sampler {
         (-6.9 / (QUICK_FADE_SECONDS * self.rate as f32)).exp()
     }
 
+    /// Plays a note, or carries on a held one ([`super::composer::Note::from`]):
+    /// the same note on a looped recording is held longer, its level
+    /// moving to the new one, and counts as struck now (so it is not the
+    /// first stolen); otherwise it is played afresh and the held one let
+    /// go, since a recording cannot glide and an unlooped one runs out.
+    /// A voice struck or carried by this chord already is not carried
+    /// again.
+    pub(super) fn play_or_carry(&mut self, event: Event, velocity: f32) {
+        let note = event.note;
+        if let Some(from) = note.from {
+            let index = note.instrument.index();
+            let held = self.voices.iter().position(|voice| {
+                voice.active
+                    && !voice.releasing
+                    && voice.instrument == index
+                    && voice.midi == from
+                    && voice.hold.is_some()
+                    && voice.voicing != note.voicing
+            });
+            if let Some(at) = held {
+                let looped = match self.voices[at].slot {
+                    Slot::Current(index) => self.sets[index].as_deref().and_then(|set| {
+                        let zone = set.zones.get(self.voices[at].zone)?;
+                        Some((zone.looped.is_some(), zone.gain * set.gain))
+                    }),
+                    Slot::Retiring(_) => None,
+                };
+                let voice = &mut self.voices[at];
+                if note.duration == 0 {
+                    // Let go, nothing struck.
+                    voice.hold = Some(0);
+                    return;
+                }
+                match looped {
+                    Some((true, gain)) if from == note.midi => {
+                        let (left, right) = pan_gains(note.pan);
+                        let level = velocity * gain;
+                        voice.gain_target = [level * left, level * right];
+                        voice.hold = voice.hold.map(|left| left.max(note.duration));
+                        voice.voicing = note.voicing;
+                        voice.started = self.started;
+                        self.started += 1;
+                        return;
+                    }
+                    _ => voice.hold = Some(0),
+                }
+            }
+        }
+        if note.from.is_some() && note.duration == 0 {
+            return;
+        }
+        self.play(event, velocity);
+    }
+
     /// Plays a note on a recorded instrument at `velocity` (already scaled
     /// by its layer's level).
     pub(super) fn play(&mut self, event: Event, velocity: f32) {
@@ -221,6 +292,11 @@ impl Sampler {
             hold,
             releasing: false,
             started: self.started,
+            instrument: index,
+            midi: note.midi,
+            voicing: note.voicing,
+            gain_target: [level * left, level * right],
+            glide: 1.0 - (-4.0 / (LEVEL_GLIDE_SECONDS * self.rate as f32)).exp(),
         };
         self.started += 1;
         let free = self.voices.iter().position(|voice| !voice.active);
@@ -235,10 +311,9 @@ impl Sampler {
         self.voices[at] = voice;
     }
 
-    /// The next frame of every recorded voice, at `gain`.
+    /// Adds the next frame of every recorded voice into its layer's stem.
     #[inline]
-    pub(super) fn next(&mut self, gain: f32) -> (f32, f32) {
-        let (mut l, mut r) = (0.0, 0.0);
+    pub(super) fn next(&mut self, stems: &mut Stems) {
         for voice in &mut self.voices {
             if !voice.active {
                 continue;
@@ -255,8 +330,9 @@ impl Sampler {
                 voice.active = false;
                 continue;
             };
-            l += left;
-            r += right;
+            let stem = &mut stems[voice.instrument];
+            stem[0] += left;
+            stem[1] += right;
         }
         // Retiring sets whose voices have all gone are released.
         for slot in 0..RETIRING {
@@ -270,7 +346,6 @@ impl Sampler {
                 self.release(set);
             }
         }
-        (l * gain, r * gain)
     }
 }
 
@@ -332,6 +407,9 @@ fn voice_next(voice: &mut Voice, zone: &Zone) -> Option<(f32, f32)> {
     let left = cubic(&zone.data, zone.frames, at, frac, 0);
     let right = cubic(&zone.data, zone.frames, at, frac, 1);
     voice.position += voice.step;
+    for (gain, target) in voice.gain.iter_mut().zip(voice.gain_target) {
+        *gain += (target - *gain) * voice.glide;
+    }
     let env = voice.env;
     Some((left * voice.gain[0] * env, right * voice.gain[1] * env))
 }
@@ -341,6 +419,13 @@ mod tests {
     use super::super::Note;
     use super::*;
     use crate::instruments::Pack;
+
+    /// The next frame's left side, every layer together.
+    fn left(sampler: &mut Sampler) -> f32 {
+        let mut stems = [[0.0; 2]; Instrument::COUNT];
+        sampler.next(&mut stems);
+        stems.iter().map(|stem| stem[0]).sum()
+    }
     use crate::instruments::tests::write_test_pack;
 
     fn sampler_with(instrument: Instrument) -> (Sampler, tempfile::TempDir) {
@@ -362,6 +447,8 @@ mod tests {
                 velocity,
                 pan: 0.0,
                 duration,
+                from: None,
+                voicing: 0,
             },
         }
     }
@@ -378,13 +465,13 @@ mod tests {
         let (mut sampler, _dir) = sampler_with(Instrument::Harp);
         // A4, an octave above the A3 recording: twice its frequency.
         sampler.play(event(Instrument::Harp, 69, 0.3, 0), 0.3);
-        let out: Vec<f32> = (0..48_000).map(|_| sampler.next(1.0).0).collect();
+        let out: Vec<f32> = (0..48_000).map(|_| left(&mut sampler)).collect();
         let cycles = crossings(&out[4_800..14_400]) as f32 / 2.0 / 0.2;
         assert!((cycles - 440.0).abs() < 6.0, "{cycles} Hz");
         assert!(sampler.is_sounding());
         // The recording plays out, then the voice ends.
         for _ in 0..48_000 * 2 {
-            sampler.next(1.0);
+            left(&mut sampler);
         }
         assert!(!sampler.is_sounding());
     }
@@ -404,7 +491,7 @@ mod tests {
         let (mut sampler, _dir) = sampler_with(Instrument::Strings);
         // Held three seconds: three times the one-second recording.
         sampler.play(event(Instrument::Strings, 57, 0.8, 48_000 * 3), 0.8);
-        let out: Vec<f32> = (0..48_000 * 4).map(|_| sampler.next(1.0).0).collect();
+        let out: Vec<f32> = (0..48_000 * 4).map(|_| left(&mut sampler)).collect();
         let level = |from: usize, to: usize| {
             (out[from..to].iter().map(|s| s * s).sum::<f32>() / (to - from) as f32).sqrt()
         };
@@ -417,17 +504,58 @@ mod tests {
     }
 
     #[test]
+    fn a_carried_note_holds_on_where_it_loops_and_is_struck_again_where_not() {
+        let carried = |instrument: Instrument, midi: u8| {
+            let (mut sampler, dir) = sampler_with(instrument);
+            sampler.play_or_carry(event(instrument, midi, 0.6, 48_000 * 3), 0.6);
+            // The next chord, 1.6 s on (the harp's two-second recording
+            // still sounding).
+            for _ in 0..76_800 {
+                left(&mut sampler);
+            }
+            let started = sampler.voices.iter().find(|v| v.active).unwrap().started;
+            let mut again = event(instrument, midi, 0.3, 48_000 * 4);
+            again.at = 76_800;
+            again.note.from = Some(midi);
+            again.note.voicing = 1;
+            sampler.play_or_carry(again, 0.3);
+            (sampler, started, dir)
+        };
+        // Looped strings: one voice, held longer, its level falling to the
+        // new one and counted as struck now.
+        let (mut sampler, started, _dir) = carried(Instrument::Strings, 57);
+        let playing: Vec<&Voice> = sampler.voices.iter().filter(|v| v.active).collect();
+        assert_eq!(playing.len(), 1);
+        assert!(playing[0].hold.unwrap() > 48_000 * 3);
+        assert!(playing[0].started > started, "not the first stolen");
+        let before = playing[0].gain[0];
+        for _ in 0..48_000 * 2 {
+            left(&mut sampler);
+        }
+        let after = sampler.voices.iter().find(|v| v.active).unwrap().gain[0];
+        assert!((after / before - 0.5).abs() < 0.01, "{before} {after}");
+        // An unlooped harp note would run out: struck again, the old let go.
+        let (sampler, _, _dir) = carried(Instrument::Harp, 57);
+        let fresh = sampler
+            .voices
+            .iter()
+            .filter(|v| v.active && v.hold == Some(48_000 * 4))
+            .count();
+        assert_eq!(fresh, 1);
+    }
+
+    #[test]
     fn replaced_samples_fade_out_then_go_back_to_be_freed() {
         let (mut sampler, _dir) = sampler_with(Instrument::Harp);
         sampler.play(event(Instrument::Harp, 57, 0.6, 0), 0.6);
         for _ in 0..4_800 {
-            sampler.next(1.0);
+            left(&mut sampler);
         }
         sampler.set(Instrument::Harp, None);
         assert!(!sampler.has(Instrument::Harp));
         assert!(sampler.take_released().is_none(), "still fading");
         for _ in 0..48_000 / 2 {
-            sampler.next(1.0);
+            left(&mut sampler);
         }
         assert!(!sampler.is_sounding());
         let released = sampler.take_released().expect("handed back");
@@ -439,7 +567,7 @@ mod tests {
     fn an_unpitched_sound_plays_as_recorded_whatever_the_note() {
         let (mut sampler, _dir) = sampler_with(Instrument::Drums);
         sampler.play(event(Instrument::Drums, 120, 0.5, 0), 0.5);
-        let out: Vec<f32> = (0..2_400).map(|_| sampler.next(1.0).0).collect();
+        let out: Vec<f32> = (0..2_400).map(|_| left(&mut sampler)).collect();
         let hz = crossings(&out) as f32 / 2.0 / 0.05;
         assert!((hz - 3000.0).abs() < 120.0, "{hz} Hz, as recorded");
     }

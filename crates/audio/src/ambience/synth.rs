@@ -226,6 +226,10 @@ enum Timbre {
 
 /// Oscillators in a bowed or blown note: half lean left, half right.
 const UNISON: usize = 6;
+/// A held note carried on to another at most this far away glides there,
+/// over about this long; further, it is let go and the new one bowed.
+const GLIDE_SEMITONES: i32 = 2;
+const GLIDE_SECONDS: f32 = 1.2;
 
 /// A bowed or blown note: six detuned oscillators, spread across the
 /// stereo field, through a low-pass on each side, with a slow rise and a
@@ -243,6 +247,17 @@ struct Sustained {
     /// Frames of holding left before the release.
     hold: u64,
     releasing: bool,
+    /// The note it plays, and how far its pitch still is from it while it
+    /// glides there (a ratio, settling to 1).
+    midi: u8,
+    glide: f32,
+    glide_rate: f32,
+    /// The pad voicing that last struck or carried it
+    /// ([`super::Note::voicing`]): a voice that voicing has touched
+    /// already is not carried again.
+    voicing: u32,
+    /// The level it moves to when carried on at another velocity.
+    level_target: f32,
     lowpass: [f32; 2],
     cutoff: f32,
     lfo: f32,
@@ -265,6 +280,11 @@ impl Sustained {
             release: 0.0,
             hold: 0,
             releasing: false,
+            midi: 0,
+            glide: 1.0,
+            glide_rate: 0.0,
+            voicing: 0,
+            level_target: 0.0,
             lowpass: [0.0; 2],
             cutoff: 0.0,
             lfo: 0.0,
@@ -275,10 +295,10 @@ impl Sustained {
         }
     }
 
-    fn bow(&mut self, rng: &mut Rng, rate: u32, midi: u8, velocity: f32, pan: f32, hold: u64) {
+    /// Tunes the oscillators to `midi`: the widest of them sharp and
+    /// flat, the rest evenly between.
+    fn tune(&mut self, rate: u32, midi: u8) {
         let base = hz(midi) / rate as f32;
-        // The widest of the oscillators, sharp and flat; the rest evenly
-        // between.
         let detune = match self.timbre {
             Timbre::Strings => 0.005,
             Timbre::Pad => 0.011,
@@ -287,12 +307,36 @@ impl Sustained {
             let offset = i as f32 / (UNISON - 1) as f32 * 2.0 - 1.0;
             *step = base * (1.0 + detune * offset);
         }
+        self.midi = midi;
+    }
+
+    /// Its level at `velocity`.
+    fn level_at(&self, velocity: f32) -> f32 {
+        let level = match self.timbre {
+            Timbre::Strings => 0.22,
+            Timbre::Pad => 0.2,
+        };
+        level * velocity
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bow(
+        &mut self,
+        rng: &mut Rng,
+        rate: u32,
+        midi: u8,
+        velocity: f32,
+        pan: f32,
+        hold: u64,
+        voicing: u32,
+    ) {
+        self.tune(rate, midi);
         for phase in &mut self.phases {
             *phase = rng.unit();
         }
-        let (attack, release, cutoff, level) = match self.timbre {
-            Timbre::Strings => (1.3, 2.5, 1400.0, 0.22),
-            Timbre::Pad => (3.5, 6.0, 520.0, 0.2),
+        let (attack, release, cutoff) = match self.timbre {
+            Timbre::Strings => (1.3, 2.5, 1400.0),
+            Timbre::Pad => (3.5, 6.0, 520.0),
         };
         self.attack = 1.0 - (-1.0 / (attack * rate as f32)).exp();
         // 60 dB down over `release` seconds.
@@ -303,9 +347,44 @@ impl Sustained {
         self.cutoff = coefficient(cutoff, rate);
         self.vibrato_step = 5.2 / rate as f32;
         self.lfo_step = 0.09 / rate as f32;
-        self.level = level * velocity;
+        self.level = self.level_at(velocity);
+        self.level_target = self.level;
         self.pan = pan;
+        self.voicing = voicing;
+        self.glide = 1.0;
+        // Nearly there (98 %) after GLIDE_SECONDS.
+        self.glide_rate = 1.0 - (-4.0 / (GLIDE_SECONDS * rate as f32)).exp();
         self.active = true;
+    }
+
+    /// True if a note of `voicing` carrying on from `from` may carry this
+    /// voice on: it sounds that note, held, and no note of the same
+    /// voicing has struck or carried it already.
+    fn carries(&self, from: u8, voicing: u32) -> bool {
+        self.active && !self.releasing && self.midi == from && self.voicing != voicing
+    }
+
+    /// Carries a held note on to `midi` at `velocity` for `hold` more
+    /// frames: the same note held longer, or one up to a tone away glided
+    /// to, its level moving to the new one. False, and the note let go,
+    /// when it is further.
+    fn carry(&mut self, rate: u32, midi: u8, velocity: f32, hold: u64, voicing: u32) -> bool {
+        let semitones = i32::from(midi) - i32::from(self.midi);
+        if semitones.abs() > GLIDE_SEMITONES {
+            self.hold = 0;
+            self.releasing = true;
+            return false;
+        }
+        if semitones != 0 {
+            // Tuned there afresh, so glides never add up to an error;
+            // heard where it was, then gliding.
+            self.glide /= 2f32.powf(semitones as f32 / 12.0);
+            self.tune(rate, midi);
+        }
+        self.level_target = self.level_at(velocity);
+        self.hold = self.hold.max(hold);
+        self.voicing = voicing;
+        true
     }
 
     #[inline]
@@ -326,7 +405,9 @@ impl Sustained {
         }
         self.vibrato = (self.vibrato + self.vibrato_step).fract();
         self.lfo = (self.lfo + self.lfo_step).fract();
-        let bend = 1.0 + 0.0025 * (self.vibrato * TAU).sin();
+        self.glide += (1.0 - self.glide) * self.glide_rate;
+        self.level += (self.level_target - self.level) * self.glide_rate;
+        let bend = (1.0 + 0.0025 * (self.vibrato * TAU).sin()) * self.glide;
         // Alternate oscillators to each side, so the note is wide.
         let mut sides = [0.0f32; 2];
         for i in 0..UNISON {
@@ -358,6 +439,11 @@ impl Sustained {
 /// below, soft.
 const DRONE_PARTIALS: usize = 6;
 const DRONE_AMPS: [f32; DRONE_PARTIALS] = [1.0, 0.45, 0.18, 0.3, 0.5, 0.25];
+/// Where each partial leans, -1 left to 1 right: the root and the octave
+/// below in the middle, the rest to either side, so the drone is wide and
+/// its slow beating moves across it. The two sides together are the drone
+/// heard in the middle.
+const DRONE_SPREAD: [f32; DRONE_PARTIALS] = [0.0, -0.4, 0.4, 0.3, -0.5, 0.0];
 
 /// The root, held: a few partials and the fifth above, swelling in and out
 /// slowly. Two of them, so a change of key crosses over.
@@ -423,27 +509,32 @@ impl DroneVoice {
     }
 
     #[inline]
-    fn next(&mut self) -> f32 {
+    fn next(&mut self) -> (f32, f32) {
         if self.target > 0.0 {
             self.env += (1.0 - self.env) * self.rate_in;
         } else {
             self.env *= self.rate_out;
             if self.env < 1e-4 {
                 self.active = false;
-                return 0.0;
+                return (0.0, 0.0);
             }
         }
         self.breath = (self.breath + self.breath_step).fract();
         self.level += (self.level_target - self.level) * self.level_step;
         let swell = 0.75 + 0.25 * (self.breath * TAU).sin();
-        let mut out = 0.0;
-        for ((phase, step), amp) in self.phases.iter_mut().zip(self.steps).zip(DRONE_AMPS) {
-            out += (*phase * TAU).sin() * amp;
+        let (mut left, mut right) = (0.0, 0.0);
+        let partials = self.phases.iter_mut().zip(self.steps);
+        for ((phase, step), (amp, spread)) in partials.zip(DRONE_AMPS.into_iter().zip(DRONE_SPREAD))
+        {
+            let partial = (*phase * TAU).sin() * amp;
+            left += partial * (1.0 - spread);
+            right += partial * (1.0 + spread);
             *phase = (*phase + step).fract();
         }
         // At the styles' usual level, about 0.6, as loud as before the
         // drone followed its level.
-        out * self.env * swell * 0.24 * self.level
+        let gain = self.env * swell * 0.24 * self.level;
+        (left * gain, right * gain)
     }
 }
 
@@ -655,9 +746,13 @@ const HARP_STRINGS: usize = 8;
 const VIOLIN_STRINGS: usize = 4;
 const BELLS: usize = 6;
 const STRINGS: usize = 6;
-const PAD_VOICES: usize = 10;
+const PAD_VOICES: usize = 16;
 const PIANO_VOICES: usize = 10;
 const DRUMS: usize = 4;
+
+/// One stereo frame per layer, by [`Instrument::index`], so each can be
+/// placed in the room on its own.
+pub(super) type Stems = [[f32; 2]; Instrument::COUNT];
 /// The lowest plucked note, for the delay lines' length.
 const LOWEST_HZ: f32 = 24.0;
 
@@ -765,7 +860,7 @@ impl Synth {
         }
         let velocity = (note.velocity * layer.level).clamp(0.0, 1.0);
         if self.sampler.has(note.instrument) {
-            self.sampler.play(event, velocity);
+            self.sampler.play_or_carry(event, velocity);
             // The pad keeps its synthesised voice beneath the recording.
             if note.instrument != Instrument::Pad {
                 return;
@@ -805,6 +900,24 @@ impl Synth {
                 } else {
                     &mut self.pad
                 };
+                // A held note carried on, where it still sounds.
+                let rate = self.rate;
+                if let Some(from) = note.from
+                    && note.duration == 0
+                {
+                    // Let go, nothing struck.
+                    if let Some(voice) = pool.iter_mut().find(|v| v.carries(from, note.voicing)) {
+                        voice.hold = 0;
+                        voice.releasing = true;
+                    }
+                    return;
+                }
+                if let Some(from) = note.from
+                    && let Some(voice) = pool.iter_mut().find(|v| v.carries(from, note.voicing))
+                    && voice.carry(rate, note.midi, velocity, note.duration, note.voicing)
+                {
+                    return;
+                }
                 let index = pool
                     .iter()
                     .position(|s| !s.active)
@@ -816,6 +929,7 @@ impl Synth {
                     velocity,
                     note.pan,
                     note.duration,
+                    note.voicing,
                 );
             }
             Instrument::Drone => {
@@ -844,58 +958,63 @@ impl Synth {
         }
     }
 
-    /// The next frame of every instrument, at `gain`.
+    /// Adds the next frame of every instrument into its layer's stem,
+    /// at `gain`.
     #[inline]
-    pub(super) fn next(&mut self, gain: f32) -> (f32, f32) {
-        let (mut l, mut r) = self.sampler.next(1.0);
-        for string in self
-            .bass
-            .iter_mut()
-            .chain(self.harp.iter_mut())
-            .chain(self.violin.iter_mut())
-        {
-            if string.active {
-                let (sl, sr) = string.next();
-                l += sl;
-                r += sr;
+    pub(super) fn next(&mut self, gain: f32, stems: &mut Stems) {
+        self.sampler.next(stems);
+        let pools = [
+            (Instrument::Bass, &mut self.bass),
+            (Instrument::Harp, &mut self.harp),
+            (Instrument::Violin, &mut self.violin),
+        ];
+        for (instrument, pool) in pools {
+            let stem = &mut stems[instrument.index()];
+            for string in pool.iter_mut().filter(|s| s.active) {
+                let (l, r) = string.next();
+                stem[0] += l;
+                stem[1] += r;
             }
         }
-        for bell in &mut self.bells {
-            if bell.active {
-                let (bl, br) = bell.next();
-                l += bl;
-                r += br;
+        let stem = &mut stems[Instrument::Bells.index()];
+        for bell in self.bells.iter_mut().filter(|b| b.active) {
+            let (l, r) = bell.next();
+            stem[0] += l;
+            stem[1] += r;
+        }
+        for (instrument, pool) in [
+            (Instrument::Strings, &mut self.strings[..]),
+            (Instrument::Pad, &mut self.pad[..]),
+        ] {
+            let stem = &mut stems[instrument.index()];
+            for voice in pool.iter_mut().filter(|v| v.active) {
+                let (l, r) = voice.next();
+                stem[0] += l;
+                stem[1] += r;
             }
         }
-        for voice in self.strings.iter_mut().chain(self.pad.iter_mut()) {
-            if voice.active {
-                let (vl, vr) = voice.next();
-                l += vl;
-                r += vr;
-            }
+        let stem = &mut stems[Instrument::Drone.index()];
+        for drone in self.drone.iter_mut().filter(|d| d.active) {
+            let (l, r) = drone.next();
+            stem[0] += l;
+            stem[1] += r;
         }
-        for drone in &mut self.drone {
-            if drone.active {
-                let d = drone.next();
-                l += d;
-                r += d;
-            }
+        let stem = &mut stems[Instrument::Piano.index()];
+        for piano in self.piano.iter_mut().filter(|p| p.active) {
+            let (l, r) = piano.next(&mut self.rng);
+            stem[0] += l;
+            stem[1] += r;
         }
-        for piano in &mut self.piano {
-            if piano.active {
-                let (pl, pr) = piano.next(&mut self.rng);
-                l += pl;
-                r += pr;
-            }
+        let stem = &mut stems[Instrument::Drums.index()];
+        for drum in self.drums.iter_mut().filter(|d| d.active) {
+            let (l, r) = drum.next(&mut self.rng);
+            stem[0] += l;
+            stem[1] += r;
         }
-        for drum in &mut self.drums {
-            if drum.active {
-                let (dl, dr) = drum.next(&mut self.rng);
-                l += dl;
-                r += dr;
-            }
+        for stem in stems.iter_mut() {
+            stem[0] *= gain;
+            stem[1] *= gain;
         }
-        (l * gain, r * gain)
     }
 }
 
@@ -955,7 +1074,7 @@ mod tests {
 
         let mut rng = Rng::new(2);
         let mut string = Sustained::new(Timbre::Strings);
-        string.bow(&mut rng, rate, 60, 1.0, 0.0, rate as u64 * 2);
+        string.bow(&mut rng, rate, 60, 1.0, 0.0, rate as u64 * 2, 0);
         let out: Vec<f32> = (0..rate as usize * 6).map(|_| string.next().0).collect();
         let level = |second: usize| {
             let slice = &out[second * rate as usize..(second + 1) * rate as usize];
@@ -986,10 +1105,12 @@ mod tests {
             velocity: 0.8,
             pan: 0.0,
             duration: rate as u64 * 20,
+            from: None,
+            voicing: 0,
         };
         synth.play(Event { at: 0, note }, &settings);
         for _ in 0..rate {
-            synth.next(1.0);
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
         }
         assert!(
             synth
@@ -1000,7 +1121,7 @@ mod tests {
         synth.release_held();
         // Well before its twenty seconds, gone within its release.
         for _ in 0..rate * 8 {
-            synth.next(1.0);
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
         }
         assert!(!synth.pad.iter().any(|voice| voice.active));
     }
@@ -1053,6 +1174,296 @@ mod tests {
     }
 
     #[test]
+    fn a_carried_pad_note_holds_on_glides_a_step_and_lets_go_further() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let settings = AmbienceSettings {
+            enabled: true,
+            ..Style::Affirmation.settings()
+        };
+        let pad = |midi, from, seconds: u64| Event {
+            at: rate as u64 * seconds,
+            note: Note {
+                instrument: Instrument::Pad,
+                midi,
+                velocity: 0.8,
+                pan: 0.0,
+                duration: rate as u64 * 4,
+                from,
+                voicing: seconds as u32 + 1,
+            },
+        };
+        let run = |synth: &mut Synth, seconds: f32| {
+            for _ in 0..(seconds * rate as f32) as usize {
+                synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+            }
+        };
+        let sounding = |synth: &Synth| {
+            synth
+                .pad
+                .iter()
+                .filter(|v| v.active && !v.releasing)
+                .count()
+        };
+        synth.play(pad(60, None, 0), &settings);
+        run(&mut synth, 2.0);
+        // Held on: still one voice, held longer.
+        synth.play(pad(60, Some(60), 2), &settings);
+        assert_eq!(sounding(&synth), 1);
+        run(&mut synth, 3.0);
+        assert_eq!(sounding(&synth), 1, "held past its first four seconds");
+        // A tone up: the same voice glides there.
+        synth.play(pad(62, Some(60), 5), &settings);
+        assert_eq!(sounding(&synth), 1);
+        let voice = synth.pad.iter().find(|v| v.active).unwrap();
+        assert!(voice.glide < 0.95, "heard where it was at first");
+        run(&mut synth, 3.0);
+        let voice = synth.pad.iter().find(|v| v.active && !v.releasing).unwrap();
+        assert_eq!(voice.midi, 62);
+        assert!((voice.glide - 1.0).abs() < 1e-3, "and there now");
+        let fresh = hz(62) / rate as f32;
+        let middle = voice.steps.iter().sum::<f32>() / UNISON as f32;
+        assert!(
+            (middle / fresh - 1.0).abs() < 1e-4,
+            "in tune: {middle} {fresh}"
+        );
+        // A fifth away: let go, and the new note bowed.
+        synth.play(pad(69, Some(62), 8), &settings);
+        assert_eq!(sounding(&synth), 1);
+        assert!(
+            synth
+                .pad
+                .iter()
+                .any(|v| v.active && v.releasing && v.midi == 62)
+        );
+        assert!(
+            synth
+                .pad
+                .iter()
+                .any(|v| v.active && !v.releasing && v.midi == 69)
+        );
+    }
+
+    #[test]
+    fn a_chord_carries_each_voice_once_even_when_one_glides_onto_anothers_note() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let settings = AmbienceSettings {
+            enabled: true,
+            ..Style::Affirmation.settings()
+        };
+        let pad = |midi, from, at: f32| Event {
+            at: (at * rate as f32) as u64,
+            note: Note {
+                instrument: Instrument::Pad,
+                midi,
+                velocity: 0.8,
+                pan: 0.0,
+                duration: rate as u64 * 6,
+                from,
+                // A voicing per chord: the notes within a second are one.
+                voicing: at as u32 + 1,
+            },
+        };
+        synth.play(pad(65, None, 0.0), &settings);
+        synth.play(pad(67, None, 0.35), &settings);
+        for _ in 0..rate * 3 {
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+        }
+        // The next chord: 65 glides to 67, then the voice that was on 67
+        // glides to 69. The first must not be taken for the second.
+        synth.play(pad(67, Some(65), 3.0), &settings);
+        synth.play(pad(69, Some(67), 3.35), &settings);
+        let mut held: Vec<u8> = synth
+            .pad
+            .iter()
+            .filter(|v| v.active && !v.releasing)
+            .map(|v| v.midi)
+            .collect();
+        held.sort_unstable();
+        assert_eq!(held, [67, 69], "both carried, neither let go");
+        assert!(
+            synth.pad.iter().filter(|v| v.active).count() == 2,
+            "nothing struck afresh"
+        );
+    }
+
+    #[test]
+    fn once_a_held_over_chord_has_sounded_only_its_notes_are_held() {
+        // Composer and synth together, the pad alone, for eight minutes.
+        use super::super::composer::Composer;
+        use super::super::{Density, Layer, Style};
+        let rate = 48_000;
+        for (style, energy) in [
+            (Style::RainStudy, None),
+            (Style::Cathedral, None),
+            (Style::NightDrift, None),
+            (Style::Affirmation, Some(0.6)),
+        ] {
+            let mut settings = style.settings();
+            settings.enabled = true;
+            if let Some(energy) = energy {
+                settings.energy = energy;
+            }
+            for layer in &mut settings.layers {
+                layer.enabled = false;
+            }
+            *settings.layer_mut(Instrument::Pad) = Layer::on(0.7, Density::LIVELY);
+            let mut composer = Composer::new(rate, 7);
+            let mut synth = Synth::new(rate, 1);
+            // The voicing sounding now: its number, when it began, its
+            // notes, and whether it was held over from the last.
+            let mut current: Option<(u32, u64, Vec<u8>, bool)> = None;
+            // What was held (each voice's note and frames of hold left)
+            // once a voicing had sounded, with its notes and whether it was
+            // held over; judged when the next voicing shows it was not cut
+            // short (a change of chord can drop the end of a voicing, its
+            // notes then held until the next leads them on, within 1.5 s).
+            type Snapshot = (u64, Vec<u8>, bool, Vec<(u8, u64)>);
+            let mut snapshot: Option<Snapshot> = None;
+            let (mut at, end) = (0u64, rate as u64 * 60 * 8);
+            // A voicing's notes all begin within 1.4 s.
+            let settled = rate as u64 * 3 / 2;
+            let mut checked = 0;
+            while at < end {
+                composer.poll(&settings, at, at + 512);
+                if composer.take_ended() {
+                    synth.release_held();
+                }
+                for now in at..at + 512 {
+                    while let Some(event) = composer.due(now) {
+                        let note = event.note;
+                        if current.as_ref().is_none_or(|(v, ..)| *v != note.voicing) {
+                            if let Some((began, notes, held_over, held)) = snapshot.take()
+                                && now > began + 2 * settled
+                            {
+                                for (midi, left) in held {
+                                    // Under a held-over voicing nothing else
+                                    // is held; under any, nothing older for
+                                    // long.
+                                    let long = left >= 2 * rate as u64;
+                                    assert!(
+                                        notes.contains(&midi) || !(held_over || long),
+                                        "{}: {midi} held {} s more under {notes:?}",
+                                        style.name(),
+                                        left / rate as u64
+                                    );
+                                }
+                                checked += 1;
+                            }
+                            current = Some((note.voicing, now, Vec::new(), note.from.is_some()));
+                        }
+                        if let Some((.., notes, _)) = &mut current {
+                            notes.push(note.midi);
+                        }
+                        synth.play(event, &settings);
+                    }
+                    synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+                    if let Some((_, began, notes, held_over)) = &current
+                        && now == began + settled
+                    {
+                        let held = synth
+                            .pad
+                            .iter()
+                            .filter(|v| v.active && !v.releasing)
+                            .map(|v| (v.midi, v.hold))
+                            .collect();
+                        snapshot = Some((*began, notes.clone(), *held_over, held));
+                    }
+                }
+                at += 512;
+            }
+            assert!(checked > 5, "{}: {checked} chords checked", style.name());
+        }
+    }
+
+    #[test]
+    fn a_carried_note_moves_to_its_new_level() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let settings = AmbienceSettings {
+            enabled: true,
+            ..Style::Affirmation.settings()
+        };
+        let pad = |velocity, from, at: u64| Event {
+            at: rate as u64 * at,
+            note: Note {
+                instrument: Instrument::Pad,
+                midi: 60,
+                velocity,
+                pan: 0.0,
+                duration: rate as u64 * 6,
+                from,
+                voicing: at as u32 + 1,
+            },
+        };
+        synth.play(pad(0.8, None, 0), &settings);
+        for _ in 0..rate * 3 {
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+        }
+        let before = synth.pad.iter().find(|v| v.active).unwrap().level;
+        synth.play(pad(0.4, Some(60), 3), &settings);
+        for _ in 0..rate * 2 {
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
+        }
+        let after = synth.pad.iter().find(|v| v.active).unwrap().level;
+        assert!((after / before - 0.5).abs() < 0.01, "{before} {after}");
+    }
+
+    #[test]
+    fn each_layer_sounds_in_its_own_stem_and_the_drone_is_wide() {
+        use super::super::{Note, Style};
+        let rate = 48_000;
+        let mut synth = Synth::new(rate, 1);
+        let mut settings = Style::Cathedral.settings();
+        settings.enabled = true;
+        for layer in &mut settings.layers {
+            layer.enabled = true;
+        }
+        for instrument in [Instrument::Drone, Instrument::Bells] {
+            synth.play(
+                Event {
+                    at: 0,
+                    note: Note {
+                        instrument,
+                        midi: if instrument == Instrument::Drone {
+                            38
+                        } else {
+                            84
+                        },
+                        velocity: 0.8,
+                        pan: 0.0,
+                        duration: 0,
+                        from: None,
+                        voicing: 0,
+                    },
+                },
+                &settings,
+            );
+        }
+        let mut energy = [0.0f32; Instrument::COUNT];
+        let mut side = 0.0f32;
+        for _ in 0..rate {
+            let mut stems = [[0.0; 2]; Instrument::COUNT];
+            synth.next(1.0, &mut stems);
+            for (sum, stem) in energy.iter_mut().zip(stems) {
+                *sum += stem[0] * stem[0] + stem[1] * stem[1];
+            }
+            let drone = stems[Instrument::Drone.index()];
+            side += (drone[0] - drone[1]).abs();
+        }
+        for instrument in Instrument::ALL {
+            let heard = energy[instrument.index()] > 1e-3;
+            let played = matches!(instrument, Instrument::Drone | Instrument::Bells);
+            assert_eq!(heard, played, "{instrument:?}");
+        }
+        assert!(side > 1.0, "the drone's two sides differ: {side}");
+    }
+
+    #[test]
     fn the_drone_crosses_over_to_a_new_root() {
         let rate = 48_000;
         let mut synth = Synth::new(rate, 1);
@@ -1069,22 +1480,24 @@ mod tests {
                 velocity: 1.0,
                 pan: 0.0,
                 duration: 0,
+                from: None,
+                voicing: 0,
             },
         };
         synth.play(event(31), &settings);
         for _ in 0..rate * 6 {
-            synth.next(1.0);
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
         }
         synth.play(event(38), &settings);
         for _ in 0..rate * 2 {
-            synth.next(1.0);
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
         }
         assert!(
             synth.drone.iter().all(|d| d.active),
             "both sound while crossing"
         );
         for _ in 0..rate * 8 {
-            synth.next(1.0);
+            synth.next(1.0, &mut [[0.0; 2]; Instrument::COUNT]);
         }
         assert_eq!(synth.drone.iter().filter(|d| d.active).count(), 1);
     }

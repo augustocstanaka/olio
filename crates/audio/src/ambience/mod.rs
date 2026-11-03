@@ -23,6 +23,7 @@ mod composer;
 mod dsp;
 mod hall;
 mod journey;
+mod modulation;
 mod sampler;
 mod synth;
 mod track;
@@ -36,9 +37,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::mixer::Ramp;
 use background::Bed;
 pub use composer::{Composer, Event, Note, SHAKER};
-use hall::{Chorus, Hall};
+use hall::{Chorus, Hall, Stage};
 use journey::Course;
 pub use journey::{Journey, Now};
+use modulation::{CONTROL, Motion};
 use synth::Synth;
 pub use track::{TRACK_RATE, render_track};
 
@@ -1640,10 +1642,10 @@ impl Rng {
 const FULL_LEVEL_GAIN: f32 = 0.16;
 /// How much quieter while sounds play.
 const DUCKED: f32 = 0.35;
-/// How much of the instruments goes into their hall, and how much they
-/// are trimmed by so that, hall and all, they sit where they did.
-const HALL_SEND: f32 = 0.6;
-const MUSIC_TRIM: f32 = 0.72;
+/// How much the instruments are trimmed by so that, hall and all, they
+/// sit where they did. Each layer's send into the hall is its place's
+/// (`hall::place`).
+const MUSIC_TRIM: f32 = 0.8;
 /// Below this the hall's tail is no longer heard, and rendering can stop.
 const HALL_QUIET: f32 = 1e-6;
 
@@ -1665,8 +1667,10 @@ pub struct Ambience {
     /// The background against the instruments, and they against it.
     bed_gain: Ramp,
     music_level: Ramp,
-    /// The instruments' ensemble and their hall, and whether its tail
-    /// still rings.
+    /// Each layer's place and drift, the instruments' ensemble and their
+    /// hall, and whether its tail still rings.
+    stage: Stage,
+    motion: Motion,
     chorus: Chorus,
     hall: Hall,
     ringing: bool,
@@ -1691,6 +1695,8 @@ impl Ambience {
             duck: Ramp::at(1.0),
             bed_gain: Ramp::at(1.0),
             music_level: Ramp::at(1.0),
+            stage: Stage::new(rate),
+            motion: Motion::new(rate, seed.rotate_left(29)),
             chorus: Chorus::new(rate),
             hall: Hall::new(rate),
             ringing: false,
@@ -1767,7 +1773,8 @@ impl Ambience {
     }
 
     /// Adds the next `out.len() / channels` frames into `out`: the
-    /// background, and the instruments through their chorus and hall.
+    /// background, and the instruments each in its place, drifting,
+    /// through their chorus and hall.
     /// `ducking` while sounds play.
     pub fn render(&mut self, out: &mut [f32], channels: usize, ducking: bool) {
         let frames = out.len() / channels;
@@ -1802,6 +1809,10 @@ impl Ambience {
             let heard = self.course.settings(&self.settings, from, piece);
             self.follow(heard, from);
             self.composer.poll(&self.heard, from, to);
+            if self.composer.take_ended() {
+                // Silent through the pause, and not heard again after it.
+                self.synth.release_held();
+            }
         }
         let music_gain = self.composer.music_gain();
         let mut tail = 0.0f32;
@@ -1815,14 +1826,21 @@ impl Ambience {
             let (mut left, mut right) = self.bed.next();
             left *= bed_gain;
             right *= bed_gain;
-            let (sl, sr) = self
-                .synth
-                .next(music_gain * self.music_level.next() * MUSIC_TRIM);
-            let (sl, sr) = self.chorus.process(sl, sr);
+            if now.is_multiple_of(CONTROL) {
+                self.motion.tick();
+            }
+            let mut stems = [[0.0; 2]; Instrument::COUNT];
+            self.synth.next(
+                music_gain * self.music_level.next() * MUSIC_TRIM,
+                &mut stems,
+            );
+            let mixed = self.stage.mix(&stems, &self.motion);
+            let (cl, cr) = self.chorus.process(mixed.chorused[0], mixed.chorused[1]);
+            let (sl, sr) = (cl + mixed.plain[0], cr + mixed.plain[1]);
             // The hall rings on after the bed is switched off.
             let (hl, hr) = self
                 .hall
-                .process(sl * gain * HALL_SEND, sr * gain * HALL_SEND);
+                .process(mixed.send[0] * gain, mixed.send[1] * gain);
             tail = tail.max(hl.abs()).max(hr.abs());
             left = (left + sl) * gain + hl;
             right = (right + sr) * gain + hr;
@@ -1841,6 +1859,28 @@ impl Ambience {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_seed_renders_the_same_music_every_time() {
+        let render = |seed: u64| {
+            let mut settings = Style::OpenRoad.settings();
+            settings.enabled = true;
+            for layer in &mut settings.layers {
+                layer.enabled = true;
+            }
+            let mut ambience = Ambience::new(48_000, seed);
+            ambience.set(settings);
+            let mut out = vec![0.0f32; 48_000 * 2 * 20];
+            for block in out.chunks_mut(1024) {
+                ambience.render(block, 2, false);
+            }
+            out
+        };
+        let first = render(9);
+        assert!(first.iter().any(|x| x.abs() > 1e-4));
+        assert_eq!(first, render(9), "the same seed, the same music");
+        assert_ne!(first, render(10), "another seed, other music");
+    }
 
     #[test]
     fn scales_step_through_their_intervals_and_wrap_at_the_octave() {

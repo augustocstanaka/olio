@@ -49,8 +49,9 @@ are intentions, reordered as real use dictates.
   character (variety, concentration, chaos), a journey over time
   (steady, building up, or evolving through related keys, moods and
   backgrounds), energy from barely there to vibrant, endless or pieces; recorded instruments (a
-  71 MB pack of CC0 recordings, downloaded once) or synthesised ones, in
-  a chorus and hall of their own. It plays live
+  71 MB pack of CC0 recordings, downloaded once) or synthesised ones,
+  each near or far in a hall of their own and slowly drifting, the pad's
+  chords led voice by voice. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, or a new set of them (variations, moods or
