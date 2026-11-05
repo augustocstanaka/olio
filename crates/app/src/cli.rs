@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use olio_audio::ambience::{Journey, Style};
+use olio_audio::ambience::{Instrument, Journey, Style};
 use olio_audio::instruments::Recorded;
 
 use crate::instruments;
@@ -172,6 +172,8 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut character: [Option<f32>; 4] = [None; 4];
     let mut journey = None;
     let mut synthesised = false;
+    // Which recorded voice of an instrument, when asked for.
+    let mut voices: Vec<(Instrument, u8)> = Vec::new();
     let mut out = PathBuf::from("previews");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -229,6 +231,19 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                     _ => return Err("--journey needs steady, build or evolve".to_owned()),
                 });
             }
+            "--voice" => {
+                let spec = args.next().unwrap_or_default();
+                let voice = spec.split_once('=').and_then(|(name, number)| {
+                    let instrument = Instrument::ALL
+                        .into_iter()
+                        .find(|instrument| instrument.name().eq_ignore_ascii_case(name))?;
+                    Some((instrument, number.parse::<u8>().ok()?))
+                });
+                voices.push(voice.ok_or(
+                    "--voice needs an instrument and a voice number, like harp=2 (0 is the \
+                     instrument's own)",
+                )?);
+            }
             "--synthesised" => synthesised = true,
             "--out" => out = PathBuf::from(args.next().ok_or("--out needs a directory")?),
             other => return Err(format!("unknown argument {other}")),
@@ -265,6 +280,13 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             settings.journey = journey;
             asked.push(journey.name().to_lowercase());
         }
+        for &(instrument, voice) in &voices {
+            settings.layers[instrument].voice = voice;
+            asked.push(format!(
+                "{} voice {voice}",
+                instrument.name().to_lowercase()
+            ));
+        }
         if synthesised {
             asked.push("synthesised".to_owned());
         }
@@ -274,9 +296,9 @@ fn run_generate(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         };
         if let Some(pack) = &pack {
             for instrument in settings.playing() {
-                if recorded.get(instrument).is_none()
-                    && pack.instruments().any(|i| i == instrument)
-                    && let Some(samples) = pack.load(instrument)?
+                if let Some(voice) = pack.voice_for(instrument, settings.layer(instrument).voice)
+                    && recorded.voice(instrument) != Some(voice)
+                    && let Some(samples) = pack.load(instrument, voice)?
                 {
                     recorded.set(instrument, Some(Arc::new(samples)));
                 }
@@ -334,6 +356,32 @@ mod tests {
                 .join("Campfire (variety 20, chaos 90, energy 90, evolves).wav")
                 .exists()
         );
+
+        // A voice for an instrument, named in the file; with no pack
+        // installed it plays its own.
+        let args = [
+            "--style",
+            "campfire",
+            "--seconds",
+            "3",
+            "--voice",
+            "Harp=2",
+            "--voice",
+            "bells=1",
+            "--synthesised",
+            "--out",
+            dir.path().to_str().unwrap(),
+        ];
+        assert_eq!(generate(args.iter().map(|arg| (*arg).to_owned())), 0);
+        assert!(
+            dir.path()
+                .join("Campfire (harp voice 2, bells voice 1, synthesised).wav")
+                .exists()
+        );
+        for bad in ["harp", "kazoo=1", "harp=x", "harp=300"] {
+            let args = ["--voice".to_owned(), bad.to_owned()];
+            assert_eq!(generate(args.into_iter()), 2, "{bad}");
+        }
 
         let unknown = ["--style", "Polka"].iter().map(|arg| (*arg).to_owned());
         assert_eq!(generate(unknown), 2);

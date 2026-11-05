@@ -178,7 +178,18 @@ _Avoid_: samples (in the UI), sound library, soundfont
 **Instrument pack**:
 The recordings, their manifest (`pack.json`) and credits, built by
 `cargo xtask instruments` from CC0 libraries and published as a release.
+Every voice in it has a name, a licence and a credit line, and its
+version says what it can hold (version 2 added voices, the velocity
+blend and the licence fields; version 1 packs still load).
 _Avoid_: sample pack, bank
+
+**Voice**:
+A recording in the instrument pack that plays one of the Generator's
+instruments: the harp has its own, and others of its role (a folk harp, a
+dan tranh, a kalimba). Chosen per instrument under Instruments' More and
+kept with the settings; a pack without that voice plays the instrument's
+own. A synthesised instrument has one.
+_Avoid_: patch, preset (that is Polish), instrument (that is the role)
 
 **Background**:
 The sound under the generated music: rain, thunder, wind, winter, waves,

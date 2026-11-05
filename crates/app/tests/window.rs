@@ -1254,7 +1254,8 @@ fn surprise_me_plays_something_new_and_back_returns() {
     assert_eq!(harness.query_all_by_label("Back").count(), 0);
 }
 
-/// Installs a small instrument pack in `dir`: a harp of two sine notes.
+/// Installs a small instrument pack in `dir`: a harp of two sine notes,
+/// as two voices (the concert harp and a folk harp) on the same notes.
 fn write_instrument_pack(dir: &Path) {
     use olio_audio::ambience::Instrument;
     use olio_audio::instruments::{
@@ -1288,16 +1289,25 @@ fn write_instrument_pack(dir: &Path) {
     };
     let manifest = Manifest {
         version: PACK_VERSION,
-        instruments: vec![InstrumentManifest {
-            instrument: Instrument::Harp,
-            attack: 0.001,
-            release: 0.3,
-            gain: 1.0,
-            zones: vec![
-                zone("harp/A3.wav", 57, 0, 69),
-                zone("harp/A5.wav", 81, 70, 127),
-            ],
-        }],
+        instruments: ["Concert harp", "Folk harp"]
+            .into_iter()
+            .enumerate()
+            .map(|(voice, name)| {
+                let mut entry = InstrumentManifest::new(
+                    Instrument::Harp,
+                    0.001,
+                    0.3,
+                    1.0,
+                    vec![
+                        zone("harp/A3.wav", 57, 0, 69),
+                        zone("harp/A5.wav", 81, 70, 127),
+                    ],
+                );
+                entry.voice = voice as u8;
+                entry.name = name.to_owned();
+                entry
+            })
+            .collect(),
     };
     std::fs::write(
         pack.join(MANIFEST),
@@ -1454,6 +1464,62 @@ fn recorded_instruments_load_while_the_music_plays_and_go_when_switched_off() {
     harness.run_steps(3);
     assert!(!harness.state().preferences().recorded_instruments);
     assert!(harness.state().recorded_instruments().is_empty());
+}
+
+#[test]
+fn a_pack_with_several_voices_lets_an_instrument_pick_which_it_plays() {
+    use olio_audio::ambience::Instrument;
+    let dir = tempfile::tempdir().unwrap();
+    let instruments = tempfile::tempdir().unwrap();
+    write_instrument_pack(instruments.path());
+    let mut harness = window_with(library(dir.path()), false, instruments.path().to_path_buf());
+    open_generator(&mut harness);
+    let settle = |harness: &mut Harness<'static, OlioApp>| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        harness.run_steps(3);
+        while harness.state().is_loading_instruments() {
+            assert!(Instant::now() < deadline, "the harp never loaded");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        harness.run_steps(3);
+    };
+    // Before the details are open there are no voices to choose from.
+    assert_eq!(harness.query_all_by_label("Folk harp").count(), 0);
+    click_in_generator(&mut harness, "Play live");
+    settle(&mut harness);
+    assert_eq!(harness.state().recorded_voice(Instrument::Harp), Some(0));
+
+    open_more(&mut harness, "Instruments");
+    harness.get_by_label("Concert harp");
+    click_in_generator(&mut harness, "Folk harp");
+    settle(&mut harness);
+    let settings = harness.state().preferences().ambience;
+    assert_eq!(settings.layer(Instrument::Harp).voice, 1);
+    assert_eq!(
+        harness.state().recorded_voice(Instrument::Harp),
+        Some(1),
+        "the folk harp, loaded in the concert harp's place"
+    );
+    assert_eq!(harness.state().recorded_instruments(), [Instrument::Harp]);
+
+    // Back to the first.
+    click_in_generator(&mut harness, "Concert harp");
+    settle(&mut harness);
+    assert_eq!(harness.state().recorded_voice(Instrument::Harp), Some(0));
+
+    // A voice the pack has not (saved from another pack) plays the
+    // instrument's own.
+    let mut settings = harness.state().preferences().ambience;
+    settings.layers[Instrument::Harp].voice = 9;
+    harness.state_mut().set_ambience_for_test(settings);
+    settle(&mut harness);
+    assert_eq!(harness.state().recorded_voice(Instrument::Harp), Some(0));
+    assert_eq!(harness.state().recorded_instruments(), [Instrument::Harp]);
+
+    // An instrument with one voice offers no choice: the bass is not in
+    // this pack at all.
+    assert_eq!(harness.query_all_by_label("Bass voice").count(), 0);
 }
 
 /// Types `name` over whatever the focused field holds, then Return.

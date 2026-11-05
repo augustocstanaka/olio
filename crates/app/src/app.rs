@@ -34,7 +34,7 @@ use crate::prefs::{self, Polish, Preferences, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
 use crate::{instruments, keys, palette, polish, skin};
-use olio_audio::ambience::Instrument;
+use olio_audio::ambience::{AmbienceSettings, Instrument};
 use olio_audio::instruments::{Pack, Recorded};
 
 /// Escape must be held this long to stop everything, so a stray tap does
@@ -390,18 +390,17 @@ impl OlioApp {
         }
     }
 
-    /// True if the Generator wants `instrument` from its recording now:
-    /// playing live, switched on, recorded instruments wanted and in the
-    /// pack.
-    fn wants_recorded(&self, instrument: Instrument) -> bool {
+    /// The voice of `instrument` the Generator wants from its recordings
+    /// now: playing live, switched on, recorded instruments wanted and in
+    /// the pack, the layer's voice or, where the pack has not that one,
+    /// the instrument's own.
+    fn wants_recorded(&self, instrument: Instrument) -> Option<u8> {
         let ambience = &self.prefs.ambience;
-        ambience.enabled
-            && ambience.layer(instrument).enabled
-            && self.prefs.recorded_instruments
-            && self
-                .pack
-                .as_ref()
-                .is_some_and(|pack| pack.instruments().any(|i| i == instrument))
+        let layer = ambience.layer(instrument);
+        if !(ambience.enabled && layer.enabled && self.prefs.recorded_instruments) {
+            return None;
+        }
+        self.pack.as_ref()?.voice_for(instrument, layer.voice)
     }
 
     /// Loads the recorded instruments the music wants, each on a thread of
@@ -413,9 +412,10 @@ impl OlioApp {
                 index += 1;
                 continue;
             };
-            let instrument = self.loading.swap_remove(index).instrument;
+            let loaded = self.loading.swap_remove(index);
+            let instrument = loaded.instrument;
             match result {
-                Ok(Some(samples)) if self.wants_recorded(instrument) => {
+                Ok(Some(samples)) if self.wants_recorded(instrument) == Some(loaded.voice) => {
                     let samples = Arc::new(samples);
                     self.recorded.set(instrument, Some(samples.clone()));
                     if let Audio::Running(engine) = &mut self.audio {
@@ -431,19 +431,29 @@ impl OlioApp {
         }
         for instrument in Instrument::ALL {
             let wanted = self.wants_recorded(instrument);
-            let loaded = self.recorded.get(instrument).is_some();
+            let loaded = self.recorded.voice(instrument);
             let loading = self.loading.iter().any(|l| l.instrument == instrument);
-            if wanted && !loaded && !loading {
-                if let Some(pack) = &self.pack {
-                    let loading =
-                        instruments::Loading::start(ctx.clone(), pack.clone(), instrument);
-                    self.loading.push(loading);
+            match wanted {
+                // Not loaded, or another voice: load the one wanted. The
+                // old voice plays on until the new one arrives.
+                Some(voice) if loaded != Some(voice) && !loading => {
+                    if let Some(pack) = &self.pack {
+                        let loading = instruments::Loading::start(
+                            ctx.clone(),
+                            pack.clone(),
+                            instrument,
+                            voice,
+                        );
+                        self.loading.push(loading);
+                    }
                 }
-            } else if !wanted && loaded {
-                self.recorded.set(instrument, None);
-                if let Audio::Running(engine) = &mut self.audio {
-                    engine.set_instrument(instrument, None);
+                None if loaded.is_some() => {
+                    self.recorded.set(instrument, None);
+                    if let Audio::Running(engine) = &mut self.audio {
+                        engine.set_instrument(instrument, None);
+                    }
                 }
+                _ => {}
             }
         }
     }
@@ -472,6 +482,18 @@ impl OlioApp {
             .into_iter()
             .filter(|instrument| self.recorded.get(*instrument).is_some())
             .collect()
+    }
+
+    /// The voice of an instrument playing from its recordings now, for
+    /// tests.
+    pub fn recorded_voice(&self, instrument: Instrument) -> Option<u8> {
+        self.recorded.voice(instrument)
+    }
+
+    /// Replaces the Generator's settings as the person would, for tests.
+    pub fn set_ambience_for_test(&mut self, settings: AmbienceSettings) {
+        self.prefs.ambience = settings;
+        self.apply_ambience();
     }
 
     /// True while an instrument is loading.
@@ -2533,6 +2555,10 @@ impl eframe::App for OlioApp {
                         loading: !self.loading.is_empty(),
                     },
                 },
+                pack: self
+                    .pack
+                    .as_ref()
+                    .filter(|_| self.prefs.recorded_instruments),
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)

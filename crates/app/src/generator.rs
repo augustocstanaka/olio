@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Color32, Key, Layout, Ui};
 use olio_audio::ambience::{
-    AmbienceSettings, Background, Density, Form, Instrument, Journey, Mood, Now, Presence,
+    AmbienceSettings, Background, Density, Form, Instrument, Journey, Layer, Mood, Now, Presence,
     ROOT_NAMES, Register, ScaleKind, Style,
 };
 use olio_audio::instruments::{Pack, Recorded as Recordings};
@@ -415,16 +415,8 @@ impl Job {
     /// Loads from the pack any recorded instrument the track plays that is
     /// not loaded yet; one that will not load stays synthesised.
     fn load_for(&mut self, track: &TrackPlan) {
-        let Some(pack) = &self.pack else {
-            return;
-        };
-        for instrument in track.settings.playing() {
-            if self.recorded.get(instrument).is_none()
-                && pack.instruments().any(|i| i == instrument)
-                && let Ok(Some(samples)) = pack.load(instrument)
-            {
-                self.recorded.set(instrument, Some(Arc::new(samples)));
-            }
+        if let Some(pack) = &self.pack {
+            load_voices(pack, &mut self.recorded, &track.settings);
         }
     }
 
@@ -519,6 +511,27 @@ pub struct View<'a> {
     pub before_surprise: Option<&'a str>,
     /// Whether the recorded instruments are installed, downloading or on.
     pub recorded: Recorded,
+    /// The pack, while recorded instruments are on: what voices it has.
+    pub pack: Option<&'a Pack>,
+}
+
+/// Loads into `recorded` the voice of each instrument the `settings` play
+/// that is not loaded as such: the layer's, or the instrument's own where
+/// the pack has not that one. A voice that will not load leaves the
+/// instrument synthesised, not playing another voice's recordings.
+fn load_voices(pack: &Pack, recorded: &mut Recordings, settings: &AmbienceSettings) {
+    for instrument in settings.playing() {
+        let layer = settings.layer(instrument);
+        if let Some(voice) = pack.voice_for(instrument, layer.voice)
+            && recorded.voice(instrument) != Some(voice)
+        {
+            let samples = match pack.load(instrument, voice) {
+                Ok(Some(samples)) => Some(Arc::new(samples)),
+                _ => None,
+            };
+            recorded.set(instrument, samples);
+        }
+    }
 }
 
 /// Where the recorded instruments are.
@@ -645,7 +658,7 @@ pub fn show(
                 ui.add_space(4.0);
                 ui.scope(|ui| {
                     if more {
-                        instrument_rows(ui, settings);
+                        instrument_rows(ui, settings, view.pack);
                     } else {
                         instrument_chips(ui, settings);
                     }
@@ -1179,7 +1192,7 @@ const INSTRUMENT_COLUMN: f32 = 132.0;
 
 /// Each instrument on or off with its level; one that is on also shows
 /// how many notes it plays (the drone holds one) and its register.
-fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
+fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings, pack: Option<&Pack>) {
     for instrument in Instrument::ALL {
         let seconds = settings.spacing(instrument);
         let layer = &mut settings.layers[instrument];
@@ -1241,8 +1254,43 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
                 Register::describe,
             );
         });
+        if let Some(pack) = pack {
+            voice_chips(ui, instrument, layer, pack);
+        }
         ui.add_space(6.0);
     }
+}
+
+/// The recordings an instrument can be played from, when the pack has more
+/// than one: the instrument's own and the others of its role (a folk harp
+/// for the harp), side by side under its register.
+fn voice_chips(ui: &mut Ui, instrument: Instrument, layer: &mut Layer, pack: &Pack) {
+    let voices: Vec<(u8, &str)> = pack.voices(instrument).collect();
+    if voices.len() < 2 {
+        return;
+    }
+    let chosen = pack.voice_for(instrument, layer.voice);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(INSTRUMENT_COLUMN + ui.spacing().item_spacing.x);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (voice, name) in voices {
+            let name = if name.is_empty() {
+                instrument.name()
+            } else {
+                name
+            };
+            if skin::chip(ui, name, None, chosen == Some(voice))
+                .on_hover_text(format!(
+                    "Plays the {} from the recording of the {}.",
+                    instrument.name().to_lowercase(),
+                    name.to_lowercase()
+                ))
+                .clicked()
+            {
+                layer.voice = voice;
+            }
+        }
+    });
 }
 
 /// A slider for a 0-to-1 `value` filling the rest of the row, with its
@@ -1430,6 +1478,52 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pack with a harp of two voices whose second has no recordings on
+    /// disk, and the settings of a style that plays the harp with `voice`.
+    fn harp_pack(dir: &std::path::Path, voice: u8) -> (Pack, AmbienceSettings) {
+        use olio_audio::instruments::{MANIFEST, Manifest};
+        crate::instruments::tests::write_pack(dir);
+        let folder = dir.join("olio-instruments");
+        let text = fs::read_to_string(folder.join(MANIFEST)).unwrap();
+        let mut manifest: Manifest = serde_json::from_str(&text).unwrap();
+        let mut broken = manifest.instruments[0].clone();
+        broken.voice = 1;
+        broken.name = "Broken harp".to_owned();
+        for zone in &mut broken.zones {
+            zone.file = "harp/missing.wav".to_owned();
+        }
+        manifest.instruments.push(broken);
+        fs::write(
+            folder.join(MANIFEST),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut settings = Style::RainStudy.settings();
+        settings.layers[Instrument::Harp].voice = voice;
+        (Pack::open(&folder).unwrap(), settings)
+    }
+
+    #[test]
+    fn a_track_plays_the_voice_its_settings_ask_for_and_never_another_when_it_will_not_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut recorded = Recordings::default();
+
+        // The instrument's own, loaded for a track that asks for it.
+        let (pack, settings) = harp_pack(dir.path(), 0);
+        load_voices(&pack, &mut recorded, &settings);
+        assert_eq!(recorded.voice(Instrument::Harp), Some(0));
+
+        // A voice the pack has not: the own one stays.
+        let (pack, settings) = harp_pack(dir.path(), 7);
+        load_voices(&pack, &mut recorded, &settings);
+        assert_eq!(recorded.voice(Instrument::Harp), Some(0));
+
+        // A voice the pack lists but cannot read: synthesised, not voice 0.
+        let (pack, settings) = harp_pack(dir.path(), 1);
+        load_voices(&pack, &mut recorded, &settings);
+        assert!(recorded.get(Instrument::Harp).is_none());
+    }
 
     #[test]
     fn a_set_holds_variations_moods_or_every_style() {

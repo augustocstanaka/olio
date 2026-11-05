@@ -80,12 +80,12 @@ fn write_pack(dir: &Path) {
         tone(220.0, 2.0, !held)
             .write_wav(&dir.join(&file), WavFormat::Int16)
             .unwrap();
-        instruments.push(InstrumentManifest {
+        instruments.push(InstrumentManifest::new(
             instrument,
-            attack: 0.05,
-            release: 0.5,
-            gain: 1.0,
-            zones: vec![ZoneManifest {
+            0.05,
+            0.5,
+            1.0,
+            vec![ZoneManifest {
                 file,
                 root: 57,
                 low: 0,
@@ -97,7 +97,7 @@ fn write_pack(dir: &Path) {
                 pitched: true,
                 tune: 0.0,
             }],
-        });
+        ));
     }
     let manifest = Manifest {
         version: PACK_VERSION,
@@ -136,8 +136,9 @@ fn rendering_the_generator_never_allocates() {
     let dir = tempfile::tempdir().unwrap();
     write_pack(dir.path());
     let pack = Pack::open(dir.path()).unwrap();
-    let load =
-        |instrument| -> Option<Arc<Multisample>> { pack.load(instrument).unwrap().map(Arc::new) };
+    let load = |instrument| -> Option<Arc<Multisample>> {
+        pack.load(instrument, 0).unwrap().map(Arc::new)
+    };
     let recorded: Vec<(Instrument, Arc<Multisample>)> = pack
         .instruments()
         .filter_map(|instrument| Some((instrument, load(instrument)?)))

@@ -22,11 +22,12 @@ usage: cargo xtask <command>
                  and import it into DIR/library
   previews [DIR] render 30 s of each Generator style to a WAV in DIR
                  (default target/previews), to listen to without the app
-  instruments fetch|check|build [--sources DIR] [--out DIR]
-                 the Generator's instrument pack: fetch the recordings it is
-                 made from (default target/instrument-sources), check their
-                 pitches, build the pack and its zip (default
-                 target/instruments)
+  instruments pin|fetch|check|build [--sources DIR] [--out DIR]
+                 the Generator's instrument pack: pin the recordings its
+                 recipes take (rewrites crates/packer/sources.json from the
+                 libraries' pinned commits), fetch them (default
+                 target/instrument-sources), check their pitches, build the
+                 pack and its zip (default target/instruments)
   run [args...]  build the app and run a copy of it, passing args through:
                    cargo xtask run --library target/demo/library
                    cargo xtask run --screenshot out.png --library target/demo/library

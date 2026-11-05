@@ -38,9 +38,15 @@ died away.
 Its instruments can also play from recordings: an instrument pack's
 notes are decoded off the audio thread into a `Multisample` (16-bit
 stereo, about 10 MB a stereo minute) and handed to the mixer in an `Arc`
-(`Message::Instrument`). A fixed pool of 40 sampler voices plays them,
-pitch-shifted with Catmull-Rom interpolation, held notes looping where
-the pack baked a seamless join. Replaced recordings are not freed on the
+(`Message::Instrument`). A fixed pool of 48 sampler voices (and 12 more
+for those fading) plays them, pitch-shifted with Catmull-Rom
+interpolation, held notes looping where the pack baked a seamless join.
+A note may start two of them: between two velocity layers that blend
+(pack version 2) it plays both, at equal power. A pack holds several
+recordings of a role, its voices; a layer's `voice` says which the app
+loads (the instrument's own where the pack has not that one), and
+notes outside a voice's range are moved by octaves into it. Replaced
+recordings are not freed on the
 audio thread: their voices fade over 50 ms, then the `Arc` travels back
 as `Event::Released` to be dropped by `Engine::poll`. An instrument with
 no recordings keeps its synthesised voice. A generated track is the same ambience

@@ -200,25 +200,31 @@ impl Download {
     }
 }
 
-/// An instrument being loaded from the pack, on a thread of its own.
+/// A voice of an instrument being loaded from the pack, on a thread of
+/// its own.
 pub struct Loading {
     pub instrument: Instrument,
+    pub voice: u8,
     done: mpsc::Receiver<Result<Option<Multisample>, String>>,
 }
 
 impl Loading {
-    pub fn start(ctx: egui::Context, pack: Pack, instrument: Instrument) -> Self {
+    pub fn start(ctx: egui::Context, pack: Pack, instrument: Instrument, voice: u8) -> Self {
         let (sender, done) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("olio-instrument-load".to_owned())
             .spawn(move || {
-                let _ = sender.send(pack.load(instrument));
+                let _ = sender.send(pack.load(instrument, voice));
                 ctx.request_repaint();
             });
         if let Err(err) = spawned {
             eprintln!("olio: could not load an instrument: {err}");
         }
-        Self { instrument, done }
+        Self {
+            instrument,
+            voice,
+            done,
+        }
     }
 
     pub fn poll(&self) -> Option<Result<Option<Multisample>, String>> {
@@ -271,16 +277,16 @@ pub(crate) mod tests {
         };
         let manifest = Manifest {
             version: PACK_VERSION,
-            instruments: vec![InstrumentManifest {
-                instrument: Instrument::Harp,
-                attack: 0.001,
-                release: 0.3,
-                gain: 1.0,
-                zones: vec![
+            instruments: vec![InstrumentManifest::new(
+                Instrument::Harp,
+                0.001,
+                0.3,
+                1.0,
+                vec![
                     zone("harp/A3.wav", 57, 0, 69),
                     zone("harp/A5.wav", 81, 70, 127),
                 ],
-            }],
+            )],
         };
         fs::write(
             pack.join(MANIFEST),

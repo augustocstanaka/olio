@@ -53,7 +53,9 @@ are intentions, reordered as real use dictates.
   each near or far in a hall of their own and slowly drifting, the pad's
   chords led voice by voice, the lines looping and echoing at low
   variety, chords chosen from tables (and borrowed from the parallel key
-  when the mood wanders). It plays live
+  when the mood wanders); a version 2 instrument pack with several
+  recorded voices of some instruments (a folk harp, a kalimba, a
+  glockenspiel, a flute, an organ...) and soft and loud notes that blend. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, or a new set of them (variations, moods or

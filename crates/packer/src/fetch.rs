@@ -6,8 +6,10 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+
+use crate::recipes::RECIPES;
 
 #[derive(Deserialize)]
 pub struct Sources {
@@ -15,22 +17,34 @@ pub struct Sources {
     pub files: Vec<SourceFile>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Library {
     pub repo: String,
     pub url: String,
     pub commit: String,
     pub license: String,
     pub name: String,
+    /// Who to credit.
+    pub credit: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct SourceFile {
     pub repo: String,
     pub path: String,
     pub size: u64,
     pub sha: String,
 }
+
+/// `sources.json` as written.
+#[derive(Serialize)]
+struct Listing<'a> {
+    about: &'a str,
+    libraries: &'a [Library],
+    files: &'a [SourceFile],
+}
+
+const ABOUT: &str = "Source recordings for Olio's instrument pack, pinned to commits of the Versilian Studios libraries (CC0 1.0). Written by `olio-packer pin` from the recipes: the files they take, each with its git blob hash.";
 
 pub fn sources() -> Sources {
     serde_json::from_str(include_str!("../sources.json")).expect("sources.json is valid")
@@ -75,6 +89,123 @@ fn encode(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A directory listing of a library at its pinned commit, as GitHub's
+/// API gives it.
+#[derive(Deserialize)]
+struct Tree {
+    truncated: bool,
+    tree: Vec<TreeEntry>,
+}
+
+#[derive(Deserialize)]
+struct TreeEntry {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+    sha: String,
+    #[serde(default)]
+    size: u64,
+}
+
+/// Every recording of every library, at the commits `sources.json` pins,
+/// read from GitHub's tree listing.
+fn listing(libraries: &[Library]) -> Result<Vec<SourceFile>, String> {
+    let mut files = Vec::new();
+    for library in libraries {
+        let url = format!(
+            "https://api.github.com/repos/sgossner/{}/git/trees/{}?recursive=1",
+            library.repo, library.commit
+        );
+        let response = ureq::get(&url)
+            .header("User-Agent", "olio-packer")
+            .call()
+            .map_err(|err| format!("{url}: {err}"))?;
+        let mut data = Vec::new();
+        response
+            .into_body()
+            .into_reader()
+            .read_to_end(&mut data)
+            .map_err(|err: io::Error| format!("{url}: {err}"))?;
+        let tree: Tree = serde_json::from_slice(&data).map_err(|err| format!("{url}: {err}"))?;
+        if tree.truncated {
+            return Err(format!("{}: the listing was cut short", library.repo));
+        }
+        files.extend(
+            tree.tree
+                .into_iter()
+                .filter(|entry| entry.kind == "blob" && entry.path.ends_with(".wav"))
+                .map(|entry| SourceFile {
+                    repo: library.repo.clone(),
+                    path: entry.path,
+                    size: entry.size,
+                    sha: entry.sha,
+                }),
+        );
+    }
+    Ok(files)
+}
+
+/// Rewrites `sources.json` (in the packer's source folder) to list the
+/// files the recipes take from the libraries' pinned commits, with what
+/// each recipe takes and the download it makes.
+pub fn pin() -> Result<(), String> {
+    let libraries = sources().libraries;
+    let everything = Sources {
+        files: listing(&libraries)?,
+        libraries: libraries.clone(),
+    };
+    let mut chosen: Vec<SourceFile> = Vec::new();
+    let mut total = 0;
+    for recipe in RECIPES {
+        let mut bytes = 0;
+        let takes = crate::build::gather_thinned(recipe, &everything, Path::new(""), true)?;
+        for (path, _) in &takes {
+            let file = everything
+                .files
+                .iter()
+                .find(|file| &local(Path::new(""), file) == path)
+                .ok_or_else(|| format!("{} is not listed", path.display()))?;
+            bytes += file.size;
+            if !chosen
+                .iter()
+                .any(|have| have.repo == file.repo && have.path == file.path)
+            {
+                chosen.push(file.clone());
+            }
+        }
+        println!(
+            "{:?} {}: {} recordings, {:.1} MB",
+            recipe.instrument,
+            recipe.name,
+            takes.len(),
+            bytes as f64 / 1e6
+        );
+        total += bytes;
+    }
+    chosen.sort_by(|a, b| (&a.repo, &a.path).cmp(&(&b.repo, &b.path)));
+    let listing = Listing {
+        about: ABOUT,
+        libraries: &libraries,
+        files: &chosen,
+    };
+    let mut text = Vec::new();
+    let format = serde_json::ser::PrettyFormatter::with_indent(b" ");
+    let mut serializer = serde_json::Serializer::with_formatter(&mut text, format);
+    listing
+        .serialize(&mut serializer)
+        .map_err(|err| err.to_string())?;
+    text.push(b'\n');
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("sources.json");
+    fs::write(&path, text).map_err(|err| format!("{}: {err}", path.display()))?;
+    println!(
+        "{} files, {:.0} MB to download (some used by several voices: {:.0} MB counted twice)",
+        chosen.len(),
+        chosen.iter().map(|file| file.size).sum::<u64>() as f64 / 1e6,
+        (total - chosen.iter().map(|file| file.size).sum::<u64>()) as f64 / 1e6
+    );
+    Ok(())
 }
 
 /// Downloads every listed file not already in `dir`.
