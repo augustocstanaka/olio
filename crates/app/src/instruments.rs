@@ -20,9 +20,9 @@ use olio_library::Store;
 use sha2::{Digest, Sha256};
 
 /// The published pack: where it is, what it hashes to, how big it is.
-pub const PACK_URL: &str = "https://github.com/augustocstanaka/olio/releases/download/instruments-1/olio-instruments-1.zip";
-pub const PACK_SHA256: &str = "9b6df58d19982b4beecc8dfd2c93c47ff2f6b1e92bf1ff44ca848efd1db606c4";
-pub const PACK_BYTES: u64 = 71_276_756;
+pub const PACK_URL: &str = "https://github.com/augustocstanaka/olio/releases/download/instruments-2/olio-instruments-2.zip";
+pub const PACK_SHA256: &str = "9e3687252cb3a6b26e6139f6129cde203c2cf0c893125b1fe79e6fcdf0d089c8";
+pub const PACK_BYTES: u64 = 148_235_075;
 /// The pack's folder, inside the zip and once installed.
 const PACK_NAME: &str = "olio-instruments";
 
@@ -38,7 +38,7 @@ pub fn installed(dir: &Path) -> Option<Pack> {
     Pack::open(&dir.join(PACK_NAME)).ok()
 }
 
-/// "71 MB".
+/// "148 MB".
 pub fn megabytes(bytes: u64) -> String {
     format!("{} MB", (bytes as f64 / 1e6).round())
 }
@@ -335,6 +335,6 @@ pub(crate) mod tests {
         // Again, over the top of itself.
         install_zip(&zip_path, None, dir.path()).unwrap();
         assert!(installed(dir.path()).is_some());
-        assert_eq!(megabytes(PACK_BYTES), "71 MB");
+        assert_eq!(megabytes(PACK_BYTES), "148 MB");
     }
 }

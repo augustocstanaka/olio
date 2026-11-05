@@ -49,7 +49,7 @@ are intentions, reordered as real use dictates.
   character (variety, concentration, chaos), a journey over time
   (steady, building up, or evolving through related keys, moods and
   backgrounds), energy from barely there to vibrant, endless or pieces; recorded instruments (a
-  71 MB pack of CC0 recordings, downloaded once) or synthesised ones,
+  148 MB pack of CC0 recordings, downloaded once) or synthesised ones,
   each near or far in a hall of their own and slowly drifting, the pad's
   chords led voice by voice, the lines looping and echoing at low
   variety, chords chosen from tables (and borrowed from the parallel key

@@ -81,13 +81,13 @@ Milestone 0, the playable skeleton, is done. Olio can:
     strings, a pad, a drone, a piano, a plucked violin and soft hand
     drums (a frame drum and a shaker), each with its own level, a Notes
     slider from very sparse to busy, and register. They are synthesised
-    until you press **Download Recorded Instruments** (71 MB, once): then
+    until you press **Download Recorded Instruments** (148 MB, once): then
     a real grand piano, concert harp, hand chimes, violin and bass
     pizzicato, cello, viola and violin sections, bowed vibraphone under
     the pad, and a frame drum and shaker play instead, each loaded as
     the music uses it; the Recorded instruments switch turns them off.
-    A version 2 pack (`cargo xtask instruments`) has several recordings,
-    **voices**, of some instruments, chosen under Instruments' More: the
+    The pack has several recordings, **voices**, of some instruments,
+    chosen under Instruments' More: the
     harp as a folk harp, a dan tranh or a kalimba; the bells as a
     glockenspiel or a vibraphone; the strings as a flute, a clarinet or a
     horn; the pad as a bowed psaltery, wine glasses or an organ. Soft and

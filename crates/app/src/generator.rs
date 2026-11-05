@@ -1127,8 +1127,9 @@ fn balance(ui: &mut Ui, settings: &mut AmbienceSettings) {
 /// installed, a switch between them and the synthesised ones.
 fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
     const ABOUT: &str = "A grand piano, harp, hand chimes, violin and bass pizzicato, string \
-                         sections, bowed vibraphone and hand drums, recorded by Versilian \
-                         Studios (public domain)";
+                         sections, bowed vibraphone and hand drums, with other recordings of \
+                         the harp, bells, strings and pad to choose from, recorded by \
+                         Versilian Studios (public domain)";
     match recorded {
         Recorded::Unavailable => {}
         Recorded::Missing => {

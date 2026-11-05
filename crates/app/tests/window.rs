@@ -1341,7 +1341,7 @@ fn without_recorded_instruments_the_generator_offers_their_download() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = window(library(dir.path()), false);
     open_generator(&mut harness);
-    harness.get_by_label("Download Recorded Instruments (71 MB)");
+    harness.get_by_label("Download Recorded Instruments (148 MB)");
     assert_eq!(
         harness.query_all_by_label("Recorded instruments").count(),
         0

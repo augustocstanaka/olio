@@ -33,7 +33,7 @@ shape more than a model's.
 
 ## Consequences
 
-- Olio downloads at most the instrument pack (about 71 MB), never a
+- Olio downloads at most the instrument pack (about 148 MB), never a
   Python environment or model weights.
 - The `music-model-1` GitHub release and any installed `MusicModel`
   folder are no longer used by the app; removing them is a separate,
