@@ -1,7 +1,10 @@
-//! The panel on the right: the selected tile's sound, playback, fades and
-//! reverb.
+//! The panel on the right: the selected tile, or the front set when none
+//! is. The tile's name, emoji and colour are always in view; the rest is
+//! grouped in sections that open and close (Sound, How it plays, Polish),
+//! remembered in the preferences. Every control that is not obvious says
+//! what it does on hover.
 
-use egui::{Button, Color32, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
+use egui::{Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
 use olio_control::{Command, TileKey, TileSetting};
 use olio_library::{MAX_COLUMNS, MAX_FADE_SECONDS, Set, Tile, TileColor, TileId};
 
@@ -9,7 +12,8 @@ use crate::clips::ClipState;
 use crate::emoji::EmojiImages;
 use crate::menu::{self, MenuAction};
 use crate::meter::{self, Meter};
-use crate::prefs::Polish;
+use crate::prefs::{Disclosure, Polish};
+use crate::skin::{self, Disclosed};
 use crate::{format, palette};
 
 pub enum InspectorAction {
@@ -47,11 +51,14 @@ pub fn show(
     ui: &mut Ui,
     view: &View,
     title_draft: &mut Option<(TileId, String)>,
+    disclosure: &mut Disclosure,
 ) -> Vec<InspectorAction> {
     let mut actions = Vec::new();
     egui::ScrollArea::vertical()
         .auto_shrink([false; 2])
         .show(ui, |ui| {
+            // Clear of the scroll bar, which floats over the content.
+            ui.set_max_width(ui.available_width() - 12.0);
             ui.add_space(10.0);
             match view.tile {
                 Some(tile) => {
@@ -59,13 +66,28 @@ pub fn show(
                         emoji_well(ui, tile, view.images, &mut actions);
                         title_field(ui, tile, view.focus_title, title_draft, &mut actions);
                     });
-                    tile_settings(ui, tile, view, &mut actions);
+                    tile_settings(ui, tile, view, disclosure, &mut actions);
                 }
-                None => set_summary(ui, view.set, view.fit_columns, &mut actions),
+                None => set_summary(ui, view.set, view.fit_columns, disclosure, &mut actions),
             }
             ui.add_space(10.0);
         });
     actions
+}
+
+/// A section of a panel whose open or closed state is kept in
+/// `disclosure` under `key`.
+pub(crate) fn section<R>(
+    ui: &mut Ui,
+    disclosure: &mut Disclosure,
+    key: &str,
+    title: &str,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> Disclosed<R> {
+    let mut open = disclosure.is_open(key);
+    let shown = skin::section(ui, title, &mut open, body);
+    disclosure.set_open(key, open);
+    shown
 }
 
 /// The tile's title, edited through a draft so that what is typed (such as
@@ -90,13 +112,16 @@ fn title_field(
     let Some((_, text)) = draft.as_mut() else {
         return;
     };
-    let field = ui.add(
-        egui::TextEdit::singleline(text)
-            .id(id)
-            .font(egui::TextStyle::Heading)
-            .hint_text("Title")
-            .desired_width(f32::INFINITY),
-    );
+    let field = skin::field(ui, |ui| {
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .id(id)
+                .font(egui::TextStyle::Heading)
+                .hint_text("Title")
+                .desired_width(f32::INFINITY),
+        )
+    })
+    .on_hover_text("The tile's title, as it reads on the tile and in the toolbar");
     if focus {
         field.request_focus();
     }
@@ -114,16 +139,23 @@ fn title_field(
     }
 }
 
-fn set_summary(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorAction>) {
+fn set_summary(
+    ui: &mut Ui,
+    set: &Set,
+    fit: u8,
+    disclosure: &mut Disclosure,
+    actions: &mut Vec<InspectorAction>,
+) {
     ui.label(RichText::new(&set.name).strong().size(16.0));
     ui.add_space(4.0);
     ui.weak(match set.tiles.len() {
         1 => "1 tile".to_owned(),
         count => format!("{count} tiles"),
     });
-    ui.add_space(12.0);
-    columns_row(ui, set, fit, actions);
-    ui.add_space(16.0);
+    section(ui, disclosure, "columns", "Columns", |ui| {
+        columns_row(ui, set, fit, actions);
+    });
+    ui.add_space(20.0);
     ui.label("Select a tile to change its title, colour, fades, reverb and how it plays.");
     ui.add_space(10.0);
     ui.weak("Press a tile's key or double-click it to play it. The arrow keys move the selection and Return plays it. Hold Esc to stop everything.");
@@ -134,12 +166,9 @@ fn set_summary(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorActio
 fn columns_row(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorAction>) {
     let (columns, narrowest) = (set.columns, set.min_columns());
     ui.horizontal(|ui| {
-        ui.label("Columns");
         let fewer = ui
-            .add_enabled(
-                columns > narrowest,
-                Button::new("−").min_size(Vec2::splat(26.0)),
-            )
+            .add_enabled_ui(columns > narrowest, |ui| skin::button(ui, "−", false))
+            .inner
             .on_hover_text(format!(
                 "One column fewer ({})",
                 menu::shortcut_text(ui.ctx(), MenuAction::Narrower)
@@ -153,12 +182,11 @@ fn columns_row(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorActio
         if fewer.clicked() {
             actions.push(InspectorAction::SetColumns(columns - 1));
         }
-        ui.label(RichText::new(columns.to_string()).strong());
+        skin::readout_label(ui, 36.0, &columns.to_string())
+            .on_hover_text("How many columns wide the set is");
         let more = ui
-            .add_enabled(
-                columns < MAX_COLUMNS,
-                Button::new("+").min_size(Vec2::splat(26.0)),
-            )
+            .add_enabled_ui(columns < MAX_COLUMNS, |ui| skin::button(ui, "+", false))
+            .inner
             .on_hover_text(format!(
                 "One column more ({})",
                 menu::shortcut_text(ui.ctx(), MenuAction::Wider)
@@ -171,7 +199,8 @@ fn columns_row(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorActio
         }
         let fits = fit.max(narrowest) == columns;
         let button = ui
-            .add_enabled(!fits, Button::new("Fit to Window"))
+            .add_enabled_ui(!fits, |ui| skin::button(ui, "Fit to Window", false))
+            .inner
             .on_hover_text(format!(
                 "{fit} columns fit the window at this tile size ({})",
                 menu::shortcut_text(ui.ctx(), MenuAction::FitColumns)
@@ -192,10 +221,17 @@ fn columns_row(ui: &mut Ui, set: &Set, fit: u8, actions: &mut Vec<InspectorActio
         last(1),
         last(2),
         last(3)
-    ));
+    ))
+    .on_hover_text("The keys that play each row of tiles at this width");
 }
 
-fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<InspectorAction>) {
+fn tile_settings(
+    ui: &mut Ui,
+    tile: &Tile,
+    view: &View,
+    disclosure: &mut Disclosure,
+    actions: &mut Vec<InspectorAction>,
+) {
     let (state, playing) = (view.state, view.playing);
     let set = |setting| InspectorAction::Command(Command::SetTile(tile.id, setting));
 
@@ -234,95 +270,100 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
         Some(ClipState::Failed(message)) => format!("Key {key} · can't play: {message}"),
         Some(ClipState::Loading) | None => format!("Key {key} · loading…"),
     };
-    ui.weak(details);
+    ui.weak(details)
+        .on_hover_text("The key that plays it, how long it plays, and what Trim silence and Normalize level do to it");
     ui.add(egui::Label::new(RichText::new(&tile.sound.original_name).weak()).truncate())
         .on_hover_text("The file this sound was imported from");
-    if view.spectrograms
-        && let Some(ClipState::Ready(ready)) = state
-    {
+
+    section(ui, disclosure, "sound", "Sound", |ui| {
+        if view.spectrograms
+            && let Some(ClipState::Ready(ready)) = state
+        {
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), Sense::hover());
+            let dark = ui.visuals().dark_mode;
+            crate::grid::spectrogram(ui.painter(), rect, ready, None, tile, dark);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Spectrogram"));
+            response.on_hover_text("How the sound's energy spreads over frequency as it plays: low at the bottom, high at the top");
+            ui.add_space(8.0);
+        }
+        let (label, hint) = if playing {
+            ("■ Stop", "Stops the tile, with its fade out".to_owned())
+        } else {
+            ("▶ Play", format!("Plays the tile, as pressing {key} does"))
+        };
+        if skin::wide_button(ui, label, Some(&key), false)
+            .on_hover_text(hint)
+            .clicked()
+        {
+            actions.push(InspectorAction::Command(Command::ToggleTile(tile.id)));
+        }
         ui.add_space(6.0);
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), Sense::hover());
-        let dark = ui.visuals().dark_mode;
-        crate::grid::spectrogram(ui.painter(), rect, ready, None, tile, dark);
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Spectrogram"));
-        response.on_hover_text("How the sound's energy spreads over frequency as it plays: low at the bottom, high at the top");
-    }
+        level_row(ui, view.level.unwrap_or_default(), view.now);
+    });
 
-    ui.add_space(10.0);
-    let label = if playing { "■ Stop" } else { "▶ Play" };
-    let button = Button::new(label)
-        .shortcut_text(&key)
-        .min_size(Vec2::new(ui.available_width(), 32.0));
-    if ui.add(button).clicked() {
-        actions.push(InspectorAction::Command(Command::ToggleTile(tile.id)));
-    }
-    ui.add_space(4.0);
-    polish_button(ui, tile, view.polish, actions);
-    ui.add_space(6.0);
-    level_row(ui, view.level.unwrap_or_default(), view.now);
+    section(ui, disclosure, "how_it_plays", "How it plays", |ui| {
+        let mut looping = tile.looping;
+        if skin::switch(ui, "Loop", &mut looping)
+            .on_hover_text("Plays again from the start until you stop it")
+            .clicked()
+        {
+            actions.push(set(TileSetting::Looping(looping)));
+        }
+        let mut trim = tile.trim_silence;
+        if skin::switch(ui, "Trim silence", &mut trim)
+            .on_hover_text("Skips the silence at the start and end of the sound")
+            .clicked()
+        {
+            actions.push(set(TileSetting::TrimSilence(trim)));
+        }
+        let mut normalize = tile.normalize;
+        if skin::switch(ui, "Normalize level", &mut normalize)
+            .on_hover_text(
+                "Plays at the same loudness as other normalized sounds, without clipping. \
+                 The file is not changed.",
+            )
+            .clicked()
+        {
+            actions.push(set(TileSetting::Normalize(normalize)));
+        }
+    });
 
-    section(ui, "Playback");
-    let mut looping = tile.looping;
-    if ui
-        .checkbox(&mut looping, "Loop")
-        .on_hover_text("Play again from the start until stopped")
-        .changed()
-    {
-        actions.push(set(TileSetting::Looping(looping)));
-    }
-    let mut trim = tile.trim_silence;
-    if ui
-        .checkbox(&mut trim, "Trim silence")
-        .on_hover_text("Skip silence at the start and end of the sound")
-        .changed()
-    {
-        actions.push(set(TileSetting::TrimSilence(trim)));
-    }
-    let mut normalize = tile.normalize;
-    if ui
-        .checkbox(&mut normalize, "Normalize level")
-        .on_hover_text(
-            "Play at the same loudness as other normalized sounds, without clipping. \
-             The file is not changed.",
-        )
-        .changed()
-    {
-        actions.push(set(TileSetting::Normalize(normalize)));
-    }
+    section(ui, disclosure, "polish", "Polish", |ui| {
+        polish_button(ui, tile, view.polish, actions);
+        ui.add_space(8.0);
+        let mut fade_in = tile.fade_in_seconds;
+        if fade_row(ui, "Fade in", &mut fade_in)
+            .on_hover_text("How long the sound takes to rise from silence when it starts")
+            .changed()
+        {
+            actions.push(set(TileSetting::FadeIn(fade_in)));
+        }
+        let mut fade_out = tile.fade_out_seconds;
+        if fade_row(ui, "Fade out", &mut fade_out)
+            .on_hover_text(
+                "How long it takes to sink to silence before the end, and when you stop the tile",
+            )
+            .changed()
+        {
+            actions.push(set(TileSetting::FadeOut(fade_out)));
+        }
+        let mut reverb = tile.reverb;
+        let readout = format!("{:.0} %", reverb * 100.0);
+        if skin::slider_row(ui, "Reverb", "Reverb", &mut reverb, 0.0..=1.0, &readout)
+            .on_hover_text("How much of the tile goes to the room reverb that every tile shares")
+            .changed()
+        {
+            actions.push(set(TileSetting::Reverb(reverb)));
+        }
+    });
 
-    section(ui, "Fades");
-    fill_with_slider(ui);
-    ui.label("Fade in");
-    let mut fade_in = tile.fade_in_seconds;
-    if menu::keeps_arrows(ui.add(fade_slider(&mut fade_in))).changed() {
-        actions.push(set(TileSetting::FadeIn(fade_in)));
-    }
-    ui.add_space(4.0);
-    ui.label("Fade out")
-        .on_hover_text("Before the end, and when you stop the tile");
-    let mut fade_out = tile.fade_out_seconds;
-    if menu::keeps_arrows(ui.add(fade_slider(&mut fade_out))).changed() {
-        actions.push(set(TileSetting::FadeOut(fade_out)));
-    }
-
-    section(ui, "Effects");
-    ui.label("Reverb");
-    let mut percent = tile.reverb * 100.0;
-    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-        .suffix(" %")
-        .max_decimals(0);
-    if menu::keeps_arrows(ui.add(slider)).changed() {
-        actions.push(set(TileSetting::Reverb(percent / 100.0)));
-    }
-
-    ui.add_space(28.0);
-    let remove = Button::new(RichText::new("Remove Tile").color(palette::danger()))
-        .stroke(Stroke::new(1.0, palette::danger().gamma_multiply(0.6)))
-        .fill(Color32::TRANSPARENT);
-    if ui
-        .add(remove)
-        .on_hover_text("Take the tile off the board; Undo puts it back")
+    ui.add_space(24.0);
+    if skin::alarm_button(ui, "Remove Tile")
+        .on_hover_text(format!(
+            "Takes the tile off the board ({}); Undo puts it back",
+            menu::shortcut_text(ui.ctx(), MenuAction::RemoveTile)
+        ))
         .clicked()
     {
         actions.push(InspectorAction::Remove(tile.id));
@@ -332,13 +373,14 @@ fn tile_settings(ui: &mut Ui, tile: &Tile, view: &View, actions: &mut Vec<Inspec
 /// The tile's emoji, or a place for one; a click opens the picker.
 fn emoji_well(ui: &mut Ui, tile: &Tile, images: &EmojiImages, actions: &mut Vec<InspectorAction>) {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::click());
-    let visuals = ui.visuals();
-    let fill = if response.hovered() {
-        visuals.widgets.hovered.weak_bg_fill
+    let p = skin::palette(ui.ctx());
+    // A well the emoji sits in, a little lighter under the pointer.
+    let floor = if response.hovered() {
+        p.sunken.lerp_to_gamma(p.light, 0.25)
     } else {
-        visuals.extreme_bg_color
+        p.sunken
     };
-    ui.painter().rect_filled(rect, 8, fill);
+    skin::inset(ui.painter(), rect, skin::BUTTON_RADIUS, floor);
     let picture = Rect::from_center_size(rect.center(), Vec2::splat(26.0));
     if tile.emoji.is_empty() {
         ui.painter().text(
@@ -346,10 +388,10 @@ fn emoji_well(ui: &mut Ui, tile: &Tile, images: &EmojiImages, actions: &mut Vec<
             egui::Align2::CENTER_CENTER,
             "☺",
             egui::FontId::proportional(20.0),
-            visuals.weak_text_color(),
+            p.text_weak,
         );
     } else {
-        images.paint(ui.painter(), picture, &tile.emoji, visuals.text_color());
+        images.paint(ui.painter(), picture, &tile.emoji, p.text);
     }
     let shortcut = menu::shortcut_text(ui.ctx(), MenuAction::ChooseEmoji);
     let hint = if tile.emoji.is_empty() {
@@ -366,23 +408,20 @@ fn emoji_well(ui: &mut Ui, tile: &Tile, images: &EmojiImages, actions: &mut Vec<
 /// How loud the tile is playing, with the loudest level lately in dB.
 fn level_row(ui: &mut Ui, level: Meter, now: f64) {
     ui.horizontal(|ui| {
-        ui.label("Level");
-        let readout_width = 58.0;
+        skin::row_name(ui, "Level");
+        let readout_width = skin::ROW_READOUT_WIDTH;
         let width = (ui.available_width() - readout_width - ui.spacing().item_spacing.x).max(40.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 8.0), Sense::hover());
-        let dark = ui.visuals().dark_mode;
-        meter::paint_bar(ui.painter(), rect, &level, meter::Colors::Zones, dark);
+        meter::paint_bar(ui.painter(), rect, &level, meter::Colors::Zones);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Tile level"));
+        response.on_hover_text("How loud the tile is playing now, before the master volume");
         let text = if level.is_resting(now) {
             "silent".to_owned()
         } else {
             meter::readout(level.hold_db())
         };
-        ui.add_sized(
-            [readout_width, 16.0],
-            egui::Label::new(RichText::new(text).weak()),
-        )
-        .on_hover_text("The loudest level in the last moment, before the master volume");
+        skin::readout_label(ui, readout_width, &text)
+            .on_hover_text("The loudest level in the last moment, before the master volume");
     });
 }
 
@@ -396,16 +435,12 @@ fn polish_button(ui: &mut Ui, tile: &Tile, polish: Polish, actions: &mut Vec<Ins
         "✨ Polish"
     };
     let shortcut = menu::shortcut_text(ui.ctx(), MenuAction::PolishSelected);
-    let button = Button::new(label)
-        .shortcut_text(shortcut)
-        .selected(polished)
-        .min_size(Vec2::new(ui.available_width(), 32.0));
     let hint = if polished {
         "Click to take the fades and reverb off again.".to_owned()
     } else {
         format!("Fade and reverb in one click: {}.", polish.describe())
     };
-    let response = ui.add(button).on_hover_text(format!(
+    let response = skin::wide_button(ui, label, Some(&shortcut), polished).on_hover_text(format!(
         "{hint}\nChange the preset in Playback ▸ Polish Preset…"
     ));
     if response.clicked() {
@@ -413,25 +448,27 @@ fn polish_button(ui: &mut Ui, tile: &Tile, polish: Polish, actions: &mut Vec<Ins
     }
 }
 
-pub fn fade_slider(seconds: &mut f32) -> egui::Slider<'_> {
-    egui::Slider::new(seconds, 0.0..=MAX_FADE_SECONDS)
-        .logarithmic(true)
-        .smallest_positive(0.05)
-        .suffix(" s")
-        .max_decimals(2)
+/// A fade's length on a slider row: the slider moves along the square root
+/// of the seconds, so the short fades most tiles want have most of its
+/// travel. Marks the response changed only when the seconds change.
+pub fn fade_row(ui: &mut Ui, name: &str, seconds: &mut f32) -> egui::Response {
+    let mut along = (seconds.max(0.0) / MAX_FADE_SECONDS).sqrt();
+    let readout = fade_words(*seconds);
+    let response = skin::slider_row(ui, name, name, &mut along, 0.0..=1.0, &readout);
+    if response.changed() {
+        // To a hundredth of a second, as the readout shows.
+        *seconds = ((MAX_FADE_SECONDS * along * along) * 100.0).round() / 100.0;
+    }
+    response
 }
 
-/// Makes the sliders below fill the panel, leaving room for the value box.
-pub(crate) fn fill_with_slider(ui: &mut Ui) {
-    let value_box = 64.0;
-    let width = (ui.available_width() - value_box - ui.spacing().item_spacing.x).max(80.0);
-    ui.spacing_mut().slider_width = width;
-}
-
-fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(16.0);
-    ui.label(RichText::new(title).strong());
-    ui.add_space(6.0);
+/// "0.50 s", "12.0 s".
+fn fade_words(seconds: f32) -> String {
+    if seconds < 10.0 {
+        format!("{seconds:.2} s")
+    } else {
+        format!("{seconds:.1} s")
+    }
 }
 
 fn swatch(ui: &mut Ui, color: TileColor, chosen: bool) -> egui::Response {
@@ -439,18 +476,23 @@ fn swatch(ui: &mut Ui, color: TileColor, chosen: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
     let painter = ui.painter();
     painter.circle_filled(rect.center(), 8.0, palette::strong(color, dark));
+    let p = skin::palette(ui.ctx());
     if chosen {
-        painter.circle_stroke(
-            rect.center(),
-            10.5,
-            Stroke::new(2.0, ui.visuals().strong_text_color()),
-        );
+        painter.circle_stroke(rect.center(), 10.5, Stroke::new(2.0, p.text));
     } else if response.hovered() {
-        painter.circle_stroke(
-            rect.center(),
-            10.5,
-            Stroke::new(1.0, ui.visuals().weak_text_color()),
-        );
+        painter.circle_stroke(rect.center(), 10.5, Stroke::new(1.0, p.accent));
     }
-    response.on_hover_text(color.name())
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, chosen, color.name()));
+    response.on_hover_text(format!("Colour the tile {}", color.name().to_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fade_reads_to_a_hundredth_under_ten_seconds() {
+        assert_eq!(fade_words(0.5), "0.50 s");
+        assert_eq!(fade_words(12.25), "12.2 s");
+    }
 }

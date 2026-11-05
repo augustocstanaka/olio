@@ -1,22 +1,108 @@
 {
- "about": "Source recordings for Olio's instrument pack, pinned to commits of the Versilian Studios libraries (CC0 1.0).",
+ "about": "Source recordings for Olio's instrument pack, pinned to commits of the Versilian Studios libraries (CC0 1.0). Written by `olio-packer pin` from the recipes: the files they take, each with its git blob hash.",
  "libraries": [
   {
    "repo": "VCSL",
    "url": "https://github.com/sgossner/VCSL",
    "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
    "license": "CC0-1.0",
-   "name": "Versilian Community Sample Library"
+   "name": "Versilian Community Sample Library",
+   "credit": "Sam Gossner and Versilian Studios"
   },
   {
    "repo": "VSCO-2-CE",
    "url": "https://github.com/sgossner/VSCO-2-CE",
    "commit": "440300901dfe9275fd84e0b7763af1f8443ae62e",
    "license": "CC0-1.0",
-   "name": "Versilian Studios Chamber Orchestra 2, Community Edition"
+   "name": "Versilian Studios Chamber Orchestra 2, Community Edition",
+   "credit": "Sam Gossner and Versilian Studios"
   }
  ],
  "files": [
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_C1_rr1.wav",
+   "size": 1951322,
+   "sha": "e69a26eb142374137c8c95f9915bbf1052bbfa1a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_C2_rr1.wav",
+   "size": 2318732,
+   "sha": "144d124595ccd2d1df26da71255da563454d4169"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_C3_rr1.wav",
+   "size": 2284700,
+   "sha": "187f31899898951431bf5f1e0d53b1bf565658c0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_C4_rr1.wav",
+   "size": 1900370,
+   "sha": "58a6f80a981f5587ad99d042957a0c0ccabc05d5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_C5_rr1.wav",
+   "size": 1653506,
+   "sha": "ca30b3d04d61c1b51804b2080a70853389a47620"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_E1_rr1.wav",
+   "size": 2331800,
+   "sha": "663898b5a1704ff33e5915a5aee3edc3ba276ada"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_E2_rr1.wav",
+   "size": 2706194,
+   "sha": "d8bb9348a4aea46574de4dd4d3342db2e0b57d3f"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_E3_rr1.wav",
+   "size": 2350532,
+   "sha": "efab486511dbaf6d1ef21a2c313ca5ca00f96e0e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_E4_rr1.wav",
+   "size": 2144870,
+   "sha": "5c497bf0a9e878f4beda76a7e7892d891f5e34d0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_E5_rr1.wav",
+   "size": 1864358,
+   "sha": "92968366936e368fa09203cbad7ceda6eb5c2d0a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_G#1_rr1.wav",
+   "size": 1931876,
+   "sha": "133a95d04d2d2e208bde57183ae393cfd99e0fe2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_G#2_rr1.wav",
+   "size": 2297822,
+   "sha": "d25e8854f7e6d8d2e17e9968710b070961b3c305"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_G#3_rr1.wav",
+   "size": 2255252,
+   "sha": "5ef48c3b7a0322f674df0bc0e0646a519e706801"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Aerophones/Edge-blown Aerophones/Renaissance Organ/8'/RenOrgan_8foot_Room_G#4_rr1.wav",
+   "size": 1749554,
+   "sha": "ede1ab3071393e50f2a70099071fa75cc7e6f62e"
+  },
   {
    "repo": "VCSL",
    "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_A2_f1.wav",
@@ -103,18 +189,6 @@
   },
   {
    "repo": "VCSL",
-   "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_C3_f2.wav",
-   "size": 2788402,
-   "sha": "fcc9d395b347f7dbbaf345f51227c816cd3decea"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_C3_mf3.wav",
-   "size": 1886028,
-   "sha": "2e2b9b2eeab0619e912418ecf9cfbd34623157d4"
-  },
-  {
-   "repo": "VCSL",
    "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_C5_f1.wav",
    "size": 2238054,
    "sha": "81378311f0804bea313d7c13f8d80150701a1168"
@@ -166,12 +240,6 @@
    "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_D7_f1.wav",
    "size": 498098,
    "sha": "1087b28d75ff411ff8d248743bfd68cbc3133307"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_D7_p1.wav",
-   "size": 200462,
-   "sha": "45a921c0f63361608957d88bc532414d06c22787"
   },
   {
    "repo": "VCSL",
@@ -247,21 +315,9 @@
   },
   {
    "repo": "VCSL",
-   "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_F7_p1.wav",
-   "size": 230814,
-   "sha": "10fcedf26120650a5a125a03adc596a75530a343"
-  },
-  {
-   "repo": "VCSL",
    "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_G1_f1.wav",
    "size": 2786426,
    "sha": "d0c69a718a435789eeb17af9b8e3edc7d85d370d"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Chordophones/Composite Chordophones/Concert Harp/KSHarp_G1_mp1.wav",
-   "size": 1189890,
-   "sha": "b7935d0f8828a40be189f960960d4cb8d3235328"
   },
   {
    "repo": "VCSL",
@@ -289,9 +345,645 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#1_v2_RR1.wav",
+   "size": 1418986,
+   "sha": "b211ad1819eb55a5fd973f10057328d0644eb985"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#1_v3_RR1.wav",
+   "size": 2021686,
+   "sha": "040bcecc6e77ed184449534ba747a152fc0d06e3"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#2_v2_RR1.wav",
+   "size": 1109786,
+   "sha": "d38b94d58bef86f05ab387a6f13a1279e1327729"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#2_v3_RR1.wav",
+   "size": 1421070,
+   "sha": "f0d3b402a9f86d698de3e5d3dca7a9cbe22fe4a0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#3_v2_RR1.wav",
+   "size": 691094,
+   "sha": "fedcdbbd780dd9aa1e7b75f54301495b30453573"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#3_v3_RR1.wav",
+   "size": 928246,
+   "sha": "69b3f272fa0bf802e4f09440a2a11499515fbde4"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#4_v2_RR1.wav",
+   "size": 339042,
+   "sha": "ee03a175b140e4cc75feb490c1f90fad2ec8ddc2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_A#4_v3_RR1.wav",
+   "size": 487118,
+   "sha": "b6a2c2353bd27c5f5836dcf2ee86d7288b1beb75"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C1_v2_RR1.wav",
+   "size": 3515478,
+   "sha": "9cee2a84ee7121af23fdfb5f7c1f53b3053b4a51"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C1_v3_RR1.wav",
+   "size": 5312742,
+   "sha": "3c77fd569f742690a7342bd74f7d95555f723965"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C2_v2_RR1.wav",
+   "size": 1807522,
+   "sha": "086a2c7ffc1097a4809cdc3ec100075d2530a231"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C2_v3_RR1.wav",
+   "size": 2269150,
+   "sha": "3057eac4ed155dccb81b5a32b42a739a338850d1"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C3_v2_RR1.wav",
+   "size": 1382798,
+   "sha": "3ac7ac020fc58cf16430fc249e5776d9c4a71702"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C3_v3_RR1.wav",
+   "size": 1694154,
+   "sha": "9ae53ecf5005f36ca7e603b3bee27c4c93f3eca8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C4_v2_RR1.wav",
+   "size": 775134,
+   "sha": "7118eaa188436970e23b28019b5b6e7fe6a1b5ef"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C4_v3_RR1.wav",
+   "size": 1920290,
+   "sha": "f2584887742dc41265f22144a5ad1b760ba74191"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C5_v2_RR1.wav",
+   "size": 366550,
+   "sha": "b70f08e86b506b0f9df03a47a6ba34669e41328b"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_C5_v3_RR1.wav",
+   "size": 535838,
+   "sha": "f5717536f5240897ba3739a799d75bd3b9686a9c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D1_v2_RR1.wav",
+   "size": 3182430,
+   "sha": "1e67eb61e5f936700f4e84b41861f909538dcb09"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D1_v3_RR1.wav",
+   "size": 3885054,
+   "sha": "7ea6a40c48d133090bdcacde8520d4373d8dbcd0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D2_v2_RR1.wav",
+   "size": 1177714,
+   "sha": "8a93ae8df0eab0abb07ec302ee66d3af2f1bc2b5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D2_v3_RR1.wav",
+   "size": 2242510,
+   "sha": "1be88965cb44118d8b4c6be8cd39d7b44feca5ff"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D3_v2_RR1.wav",
+   "size": 1008386,
+   "sha": "a8df549257d80a918dda9387aa2d7f53786b0287"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D3_v3_RR1.wav",
+   "size": 1685798,
+   "sha": "d0c40da65767c820da5de757812664d08a3d11fe"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D4_v2_RR1.wav",
+   "size": 955322,
+   "sha": "3135cb1ae0a767f1f474e94b01f8898222ab6138"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D4_v3_RR1.wav",
+   "size": 1420538,
+   "sha": "88424427d0e7556fbb71e329a7a1d4fddac334a8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D5_v2_RR1.wav",
+   "size": 460266,
+   "sha": "eafa57ed115d029e114bf87cbacf71d017882e39"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_D5_v3_RR1.wav",
+   "size": 445474,
+   "sha": "89c60bf8b5dacfa112553d5c0d1add55bbf85bd5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E1_v2_RR1.wav",
+   "size": 2516318,
+   "sha": "86d3106527ace3998169775ad3aba9350fc9f4a6"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E1_v3_RR1.wav",
+   "size": 2866818,
+   "sha": "00418261e8568bb7623f06df99da1fbaf83d98de"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E2_v2_RR1.wav",
+   "size": 1371190,
+   "sha": "e8cf7b7dfe1d61ad6e15631c8484d2a4f35a2d96"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E2_v3_RR1.wav",
+   "size": 1488406,
+   "sha": "5dce34673abb59c0cd6f9d7db4c7b2a9f762edc6"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E3_v2_RR1.wav",
+   "size": 1177490,
+   "sha": "4ca727d26035e15870489c41951bc7bf17d61391"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E3_v3_RR1.wav",
+   "size": 1682518,
+   "sha": "7726e22ed344c4ae0ae0a2831247867863c018f9"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E4_v2_RR1.wav",
+   "size": 723350,
+   "sha": "ff735f749015cb839cc19d05160980be81b01ed2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E4_v3_RR1.wav",
+   "size": 1247870,
+   "sha": "c7793e9d85b05d463931fb8ea1f5d6de98943484"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E5_v2_RR1.wav",
+   "size": 284994,
+   "sha": "d5b9596f1c57827e24ac83af8b5b771d94d90509"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_E5_v3_RR1.wav",
+   "size": 332134,
+   "sha": "c7a383c823c85ec68bc080409c9bb67f0040c458"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#1_v2_RR1.wav",
+   "size": 1473982,
+   "sha": "9f553128395fda405728daebc3cbc192e870c3a5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#1_v3_RR1.wav",
+   "size": 2749402,
+   "sha": "a9e4e2553df6e3d6fe8086be3446ecb100bda253"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#2_v2_RR1.wav",
+   "size": 1587074,
+   "sha": "d690855e9896841c1c82de319800825d6ff61115"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#2_v3_RR1.wav",
+   "size": 1669302,
+   "sha": "d682ad485dc4d554db3f3c9b908c93a902aa9430"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#3_v2_RR1.wav",
+   "size": 1166902,
+   "sha": "6acda3cc4955b5d1b686d2f5cbeecf2db2f2589e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#3_v3_RR1.wav",
+   "size": 1832782,
+   "sha": "1308887d5e685cb79c149709d81a07406470d5e4"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#4_v2_RR1.wav",
+   "size": 517414,
+   "sha": "b5bf52a9f4ad87f207e57ff49b8b1f10a547b451"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#4_v3_RR1.wav",
+   "size": 1026958,
+   "sha": "c569041d15d8fc22175e68a0f795fa8c3a065184"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#5_v2_RR1.wav",
+   "size": 276122,
+   "sha": "76504ef8d7a3341c058908722182ec27897a7755"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_F#5_v3_RR1.wav",
+   "size": 400606,
+   "sha": "8218daf8287eacddf97bf20a1337cce149617fdd"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#1_v2_RR1.wav",
+   "size": 3231918,
+   "sha": "691bfbe099104ef3910d8f1225a9e10d32db9a57"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#1_v3_RR1.wav",
+   "size": 3424654,
+   "sha": "656a4ef4bd165e38483c69f9348821afd9d40328"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#2_v2_RR1.wav",
+   "size": 1327638,
+   "sha": "5ad39e9e388015c8f0d11fc4b3bf42dd67f43c79"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#2_v3_RR1.wav",
+   "size": 1155814,
+   "sha": "fa72561f28564f1330fc7396ffeb906d0fd73740"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#3_v2_RR1.wav",
+   "size": 718130,
+   "sha": "643f972c49a88612cf992d9acd391b2ac896a6fc"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#3_v3_RR1.wav",
+   "size": 1029406,
+   "sha": "56c6ff4cebcdf70361be1c0510d2c5c0e4cfa32d"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#4_v2_RR1.wav",
+   "size": 348666,
+   "sha": "6c09e7c12f91e81d3f8d5defe14b9dba9fdbf372"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#4_v3_RR1.wav",
+   "size": 606230,
+   "sha": "cd5addbee8ed2feca4cf22f442f0c3019dca0472"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#5_v2_RR1.wav",
+   "size": 222890,
+   "sha": "1ce2b60342e5607ffaedac7fdc32898dd4b38804"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Composite Chordophones/Folk Harp/EWHarp_Normal_G#5_v3_RR1.wav",
+   "size": 269894,
+   "sha": "d2c604df8650414bf988ff264ec21ee2e14c7b56"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B1_f_1.wav",
+   "size": 863957,
+   "sha": "fe276c4a96e67fe2d992d608bb993f85555d1a2e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B1_ff_1.wav",
+   "size": 832091,
+   "sha": "b5f5170522168a9cb88dabbc54f93f6eeacf58ee"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B1_mf_1.wav",
+   "size": 889304,
+   "sha": "5085255e599e8934cad503c989ab2ce5bf4b2b0d"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B2_f_1.wav",
+   "size": 866756,
+   "sha": "42764365c035d1437e7eba4d45ee7a37e6a791e6"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B2_ff_1.wav",
+   "size": 864548,
+   "sha": "105c484cbf827eb8115a45cd7e79ceb3f507c78e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B3_f_1.wav",
+   "size": 758849,
+   "sha": "bb8f1f5ec0fc46073fdf0808b9f0b63cd891ca39"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B3_ff_1.wav",
+   "size": 788951,
+   "sha": "e93e50b270bd1f25133e30e495988204e04853ba"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B3_mf_1.wav",
+   "size": 840533,
+   "sha": "5f5277c2ca02e9d109422003610162a5c5b6ac43"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B4_f_1.wav",
+   "size": 292481,
+   "sha": "1f5b2b165a22f99246f34d1c91c1381a15ca3cf8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B4_ff_1.wav",
+   "size": 292331,
+   "sha": "53e04acd771dfa78a8a90c69f63968f256450b05"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/B4_mf_1.wav",
+   "size": 290825,
+   "sha": "aa0adeda97fdd7b9cb8289b8961411a903f2d973"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#2_f_1.wav",
+   "size": 828089,
+   "sha": "c02aa96040b33d309b117bddd279e4ccf2a6a344"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#2_ff_1.wav",
+   "size": 822962,
+   "sha": "9840f2302781331c02a9c00c9b9080be94453f80"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#2_mf_1.wav",
+   "size": 882350,
+   "sha": "a1149fe3bfb40f2eeb48f0446838e2f74e3ed9a2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#3_f_1.wav",
+   "size": 785462,
+   "sha": "59e2af74f674d0aa2e3ed0a38f9bedda7eddde1e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#3_ff_1.wav",
+   "size": 752294,
+   "sha": "643965c07bdb3c8c59d6a08775c09343d6595ebe"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#3_mf_1.wav",
+   "size": 799406,
+   "sha": "5de823f46738c786c38eb7d4e2283071f39c85cd"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#4_f_1.wav",
+   "size": 790664,
+   "sha": "d8aa030862826d12ef5cd707e64f76b34a70cae5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#4_ff_1.wav",
+   "size": 844505,
+   "sha": "107f8f6c8e1cd33eded3c21f5840c08e0df4bbb2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/C#4_mf_1.wav",
+   "size": 777002,
+   "sha": "971ee9aafc72f9ef4639a1d5f6c738d94b149bbc"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#2_f_1.wav",
+   "size": 833654,
+   "sha": "19f23b9bac92d0d7316688027a27f23d0da884e8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#2_ff_1.wav",
+   "size": 841361,
+   "sha": "48d5acf5ac2b133b9bcfcf0620b05335d7b4a1e5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#2_mf_1.wav",
+   "size": 798830,
+   "sha": "8e290774b6be81c8281489db15048e464542e166"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#3_f_1.wav",
+   "size": 853037,
+   "sha": "87dfb23676a20a4c313810c9835d1052f3bb0411"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#3_ff_1.wav",
+   "size": 841298,
+   "sha": "c184ee2bf15ba52c2f0ec8cea1d3ceb41fc46bb3"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#3_mf_1.wav",
+   "size": 781172,
+   "sha": "8b01444bac5a0cbf64446e37743ad05615eba74f"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#4_f_1.wav",
+   "size": 576086,
+   "sha": "4022bf489b3e778de3dc6d1f774891d8175c1226"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#4_ff_1.wav",
+   "size": 538058,
+   "sha": "5ec9931d69faf9d26c697f0cc39d56e08cc889b3"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/D#4_mf_1.wav",
+   "size": 780944,
+   "sha": "30c4b0ae81ee96cb71ed3ae4dfd2a357a6497386"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#2_f_1.wav",
+   "size": 854735,
+   "sha": "b88bcbab2ddf37f3fb2aca5ef408f9f8d1a0e56f"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#2_ff_1.wav",
+   "size": 837401,
+   "sha": "9f8c1a92c60aa81ab4bbcf4c19e0c56731ad635f"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#2_mf_1.wav",
+   "size": 839318,
+   "sha": "d2437dbbe14161211f608d2aa18e0fb4131bc695"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#3_f_1.wav",
+   "size": 784835,
+   "sha": "a1bf1acff47ff43a4494f66a54aad525a5768b64"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#3_ff_1.wav",
+   "size": 819923,
+   "sha": "27e38717935aaaf82906711d8bb78c4716375c57"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#3_mf_1.wav",
+   "size": 757769,
+   "sha": "53f157cf6f92096d5fa5b2c53de59e487e50d335"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#4_f_1.wav",
+   "size": 568373,
+   "sha": "1e6d03aed6f9c224326e592a091d9c1a4e8ec2ac"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#4_ff_1.wav",
+   "size": 527780,
+   "sha": "2f1ca5c54f6167303b72006334a246a19beb5bb8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/F#4_mf_1.wav",
+   "size": 541823,
+   "sha": "cb57e82249f9fd211481fefc5808e024dcbbe067"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#2_f_1.wav",
+   "size": 830900,
+   "sha": "4bf75bdb5f233f64067ce647ebfa68b4d1d064ea"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#2_ff_1.wav",
+   "size": 770531,
+   "sha": "9f8c9cd84bc45b25fb9734070a2927e423efdf63"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#2_mf_1.wav",
+   "size": 795671,
+   "sha": "16381275397d502c2e6fe39332833edc76901a2e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#3_f_1.wav",
+   "size": 856616,
+   "sha": "8b58585a42d486e06492837bf5b3326f1a02a069"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#3_ff_1.wav",
+   "size": 869021,
+   "sha": "e35ab5aeec7506ac25fa67a03baf610d4ae4250e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#3_mf_1.wav",
+   "size": 787553,
+   "sha": "a7c64e256ed837916d90fa99f1c363ba1bf7880c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#4_f_1.wav",
+   "size": 445328,
+   "sha": "a8ccffc7054b9a67839eabe726b9f1e188f33d74"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#4_ff_1.wav",
+   "size": 478436,
+   "sha": "a6b5e6147475af44e7f6cc2851ea32248ed4f2f5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Dan Tranh/Normal/G#4_mf_1.wav",
+   "size": 476969,
+   "sha": "0c1e81f700f7dfbb848bb427ce0545a3235646f6"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#-1_v2_rr1_Player.wav",
    "size": 2546696,
    "sha": "39b1c4e152bb2c6e539d27badc8a30f25ff4fb29"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#-1_v3_rr1_Player.wav",
+   "size": 2986524,
+   "sha": "b27ac840577a8a6aaaa7fb59b03d50b6416c472f"
   },
   {
    "repo": "VCSL",
@@ -307,6 +999,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#2_v3_rr1_Player.wav",
+   "size": 4722104,
+   "sha": "bfec302e345d1eb366a8803593c329e92ae94db9"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#3_v1_rr1_Player.wav",
    "size": 2234568,
    "sha": "1cb059e8a7b5d22ed81dca97cd9d43b35826e214"
@@ -316,6 +1014,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#3_v2_rr1_Player.wav",
    "size": 3332776,
    "sha": "013c74ca66ddabb9b5d86b08534720b5d3d7ebf7"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#3_v3_rr1_Player.wav",
+   "size": 3667336,
+   "sha": "299abe2fdec1ca4ca279554491e4a2b6bfd2c061"
   },
   {
    "repo": "VCSL",
@@ -331,6 +1035,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A#4_v3_rr1_Player.wav",
+   "size": 2441832,
+   "sha": "18b0166dd6549c686464a3487d2f339b25987d2e"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A0_v1_rr1_Player.wav",
    "size": 2468044,
    "sha": "c0cc11da26804b3d0960157c593a3aff3c89bb04"
@@ -340,6 +1050,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A0_v2_rr1_Player.wav",
    "size": 5116608,
    "sha": "5d02b897b30810747cc9505bf00957f80df914ef"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A0_v3_rr1_Player.wav",
+   "size": 5522460,
+   "sha": "b883985f7daac742466bb5d8e728d52295b06cc6"
   },
   {
    "repo": "VCSL",
@@ -355,6 +1071,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A1_v3_rr1_Player.wav",
+   "size": 5869676,
+   "sha": "0a5d56d1130a2d086d0dfb9bec447d5a1dd7508c"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A5_v1_rr1_Player.wav",
    "size": 421472,
    "sha": "4d41dc7741cba4969167ea367ffe5d214726238f"
@@ -364,6 +1086,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A5_v2_rr1_Player.wav",
    "size": 903768,
    "sha": "e73c4308e0a4a84bc321982aee9e423be0a5af40"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A5_v3_rr1_Player.wav",
+   "size": 805560,
+   "sha": "be7139628b7d581f08dc425da9c1ece640480c52"
   },
   {
    "repo": "VCSL",
@@ -379,6 +1107,18 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_A6_v3_rr1_Player.wav",
+   "size": 816888,
+   "sha": "80d7890f36dd25c59898ed8a9f0a7fb444b23b82"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_B4_v3_rr1_Player.wav",
+   "size": 1484132,
+   "sha": "2fff07a15c5303fd975905ace855e8b3c245f633"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C0_v1_rr1_Player.wav",
    "size": 3470376,
    "sha": "24a6d6718b90b44360317e1704debc7c0734b7ae"
@@ -388,6 +1128,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C0_v2_rr1_Player.wav",
    "size": 3557396,
    "sha": "7a584d574d094d6f5b5628c4bcb71bdaef900d6c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C0_v3_rr1_Player.wav",
+   "size": 3986272,
+   "sha": "06c5d8dabecb7a02fac3cda02d3b124ae8318fb2"
   },
   {
    "repo": "VCSL",
@@ -403,6 +1149,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C1_v3_rr1_Player.wav",
+   "size": 6370124,
+   "sha": "70beefba61b67f83a78d3850abb0c8279a549a40"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C2_v1_rr1_Player.wav",
    "size": 2939740,
    "sha": "d9a3a86ade95ae1015e6847728c209b67a829710"
@@ -412,6 +1164,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C2_v2_rr1_Player.wav",
    "size": 4116252,
    "sha": "3e64901412fe7935e3a1152b0b7a2d93645e53ef"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C2_v3_rr1_Player.wav",
+   "size": 5398316,
+   "sha": "0ed4702b3c8c668a58acc27e2a87db7730032fcc"
   },
   {
    "repo": "VCSL",
@@ -427,6 +1185,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C3_v3_rr1_Player.wav",
+   "size": 3579752,
+   "sha": "6235c862be7bd3bb1dce47822ef0bcdfb3a299b5"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C4_v1_rr1_Player.wav",
    "size": 1768284,
    "sha": "3f44173e0c32ca3caab64725d980b51a3c7faad0"
@@ -436,6 +1200,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C4_v2_rr1_Player.wav",
    "size": 2613976,
    "sha": "09dfd90293a537066bd825dac73f823bf46d0aa9"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C4_v3_rr1_Player.wav",
+   "size": 2600852,
+   "sha": "a8a644c488609ba0dbccc1eef9c1548c97fba4a3"
   },
   {
    "repo": "VCSL",
@@ -451,6 +1221,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C5_v3_rr1_Player.wav",
+   "size": 1422884,
+   "sha": "b2c2002492e4bf9e2d58f6107a38b4ee1905b902"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C6_v1_rr1_Player.wav",
    "size": 527624,
    "sha": "a11853be806cc7353384746e7e554961b2d21ccf"
@@ -460,6 +1236,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C6_v2_rr1_Player.wav",
    "size": 666520,
    "sha": "38e2ea4d854e7ccb211981e664337d9ed551e95e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C6_v3_rr1_Player.wav",
+   "size": 993184,
+   "sha": "8faa2f2bc7b21702b6863db9843eff015969fc6c"
   },
   {
    "repo": "VCSL",
@@ -475,6 +1257,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_C7_v3_rr1_Player.wav",
+   "size": 736724,
+   "sha": "82d32828720181419eaba4ae361f54e574f4ba63"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#0_v1_rr1_Player.wav",
    "size": 3215036,
    "sha": "6d390dfb42a725c46c2ec8940df005c5a0b922cb"
@@ -484,6 +1272,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#0_v2_rr1_Player.wav",
    "size": 3843280,
    "sha": "6d7d454ef878105df55961a7b3773e9cbccb5fe1"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#0_v3_rr1_Player.wav",
+   "size": 4663456,
+   "sha": "540973c0568798e90ea4242d82e6a17664e55eb7"
   },
   {
    "repo": "VCSL",
@@ -499,6 +1293,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#1_v3_rr1_Player.wav",
+   "size": 6056848,
+   "sha": "defe738b102f8aa92016d2b65677f88c007d0b85"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#5_v1_rr1_Player.wav",
    "size": 584968,
    "sha": "eb1ea35ee591c5a1b3137bf9bd35dd91ff3b0be9"
@@ -508,6 +1308,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#5_v2_rr1_Player.wav",
    "size": 859500,
    "sha": "0b7372621c00d056834fed1d37ab54a2f3fae8bf"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#5_v3_rr1_Player.wav",
+   "size": 750960,
+   "sha": "870dc0b29a56c17a780f45fc16bdedb46c8ba6a6"
   },
   {
    "repo": "VCSL",
@@ -523,6 +1329,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D#6_v3_rr1_Player.wav",
+   "size": 790928,
+   "sha": "d5ce17947c1e37d266d71d8b14fac956f3a23384"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D2_v1_rr1_Player.wav",
    "size": 2365360,
    "sha": "a7548612db91c9dd678b118f81e4698e3d4b82c9"
@@ -532,6 +1344,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D2_v2_rr1_Player.wav",
    "size": 3889372,
    "sha": "3ffe04ad6879f533db10d94c349c9b1a2c9e16fc"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D2_v3_rr1_Player.wav",
+   "size": 4806100,
+   "sha": "bb0c34a0fcc11f017a2381201d497dc9f05a50a8"
   },
   {
    "repo": "VCSL",
@@ -547,6 +1365,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D3_v3_rr1_Player.wav",
+   "size": 4395364,
+   "sha": "cd962c42b6ab054589d7f5d69b1d345a1729f026"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D4_v1_rr1_Player.wav",
    "size": 1168136,
    "sha": "76377d013c4771cf2831b99fb230a6fee2c8d8ac"
@@ -556,6 +1380,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D4_v2_rr1_Player.wav",
    "size": 3251156,
    "sha": "f375fc67ab4e4729892b35379ea29fb645252941"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_D4_v3_rr1_Player.wav",
+   "size": 2888148,
+   "sha": "f4f116ca50243c04a358c440ffcf82d8ba1adfe1"
   },
   {
    "repo": "VCSL",
@@ -571,6 +1401,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_E2_v3_rr1_Player.wav",
+   "size": 5643696,
+   "sha": "0e69ed025585359463a5bce9062a2321375b4bd3"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_E3_v1_rr1_Player.wav",
    "size": 1680460,
    "sha": "ca7e6be66103bb3bd979b8d1ae8d0741cc15cc95"
@@ -580,6 +1416,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_E3_v2_rr1_Player.wav",
    "size": 2694956,
    "sha": "169ffb7b4ff65de84f17d4a366270c7fb1c647d6"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_E3_v3_rr1_Player.wav",
+   "size": 3832220,
+   "sha": "f7adeace836b1cfc68fec820e335c8eeb486d5ae"
   },
   {
    "repo": "VCSL",
@@ -595,6 +1437,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_E4_v3_rr1_Player.wav",
+   "size": 2012112,
+   "sha": "d77f5692461d875fdbfd018c6bb31efbf208d845"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#0_v1_rr1_Player.wav",
    "size": 3361116,
    "sha": "e8f6a796b0638434b5d385ea62194ace160dc1df"
@@ -604,6 +1452,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#0_v2_rr1_Player.wav",
    "size": 4636940,
    "sha": "f545a318cdaf9d0f89b94cf2f9cc4281fe4246d0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#0_v3_rr1_Player.wav",
+   "size": 4792900,
+   "sha": "d106782e1915b8cf01babdb548f2e45f20424279"
   },
   {
    "repo": "VCSL",
@@ -619,6 +1473,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#1_v3_rr1_Player.wav",
+   "size": 5544884,
+   "sha": "8312c7a2d28fd83278b51e6b85fde52a878a8cdb"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#2_v1_rr1_Player.wav",
    "size": 2964540,
    "sha": "0ec581c5af22b6da5281924172e57440ee6c7cf5"
@@ -628,6 +1488,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#2_v2_rr1_Player.wav",
    "size": 4180040,
    "sha": "0823d5cf46ba400c46f09df044cad831682bc872"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#2_v3_rr1_Player.wav",
+   "size": 4257708,
+   "sha": "c959cbd2c078795d8c0948435e41de5042173465"
   },
   {
    "repo": "VCSL",
@@ -643,6 +1509,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#3_v3_rr1_Player.wav",
+   "size": 4119036,
+   "sha": "9532f7b053d4997bc670526ba9c7dd9e2b106a91"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#4_v1_rr1_Player.wav",
    "size": 1761760,
    "sha": "0f71741893f3d28ccc2cbefa02a9159af76f8777"
@@ -652,6 +1524,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#4_v2_rr1_Player.wav",
    "size": 2107112,
    "sha": "767367e00adec4cdf1ac12e2ca2ebbc9924fc2d5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#4_v3_rr1_Player.wav",
+   "size": 2276132,
+   "sha": "eced019094998a59b214cedde1ec0104898e02b0"
   },
   {
    "repo": "VCSL",
@@ -667,6 +1545,18 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#5_v3_rr1_Player.wav",
+   "size": 1319588,
+   "sha": "65f7a2b2f6af2368485ee576b91f07d776a27f40"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_F#6_v3_rr1_Player.wav",
+   "size": 783028,
+   "sha": "33f22f89bf77ae0d12d831837bcdc9b5aa7f9cea"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#2_v1_rr1_Player.wav",
    "size": 2431284,
    "sha": "4877419343a30c043d676ac53630691d546a2056"
@@ -676,6 +1566,12 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#2_v2_rr1_Player.wav",
    "size": 3987640,
    "sha": "ffab430d9b09f8b235ada01c3007a810c386435c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#2_v3_rr1_Player.wav",
+   "size": 4242120,
+   "sha": "2ba2fd2fa75a08a4d4e37d0139b498b59a9f9f28"
   },
   {
    "repo": "VCSL",
@@ -691,6 +1587,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#3_v3_rr1_Player.wav",
+   "size": 4446256,
+   "sha": "6c6dc31a0ca8184779319874abaecdbab2e15d9f"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#4_v1_rr1_Player.wav",
    "size": 1381584,
    "sha": "4b8bd147a5af7046789b5a5cec0312af6d85c1a8"
@@ -703,6 +1605,12 @@
   },
   {
    "repo": "VCSL",
+   "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G#4_v3_rr1_Player.wav",
+   "size": 2313244,
+   "sha": "e65bd557f2436d051910c5d194192036070cbe7e"
+  },
+  {
+   "repo": "VCSL",
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G6_v1_rr1_Player.wav",
    "size": 335620,
    "sha": "fe4fc026486e871ff600609d17f96de2d07062f0"
@@ -712,6 +1620,366 @@
    "path": "Chordophones/Zithers/Grand Piano, Kawai/Sustains/GPiano_sus_G6_v2_rr1_Player.wav",
    "size": 291456,
    "sha": "b25261f0cd7d947cf7d8ec7ca9dd6bc7025fae9a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_A#3_Main_LongBow_rr2.wav",
+   "size": 2029394,
+   "sha": "7ec6269580faaef937d9ec95670c79f20e88f8f3"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_A#4_Main_LongBow_rr2.wav",
+   "size": 1540940,
+   "sha": "8a7601d014c730f909caf15f57e1bcbe56c83985"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_C4_Main_LongBow_rr1.wav",
+   "size": 2226584,
+   "sha": "a7168b43cf9065fea40a8d8a5062aace13b05254"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_C5_Main_LongBow_rr1.wav",
+   "size": 1727012,
+   "sha": "39bd258c49e4fba9e70614e043fc94de4b0c6c9b"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_D4_Main_LongBow_rr1.wav",
+   "size": 1672514,
+   "sha": "6a21751009ebad0e745fedc8edf65c5a408699a6"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_D5_Main_LongBow_rr2.wav",
+   "size": 1502318,
+   "sha": "e722b975d6eeaf0311d80d444b56dd6b25ba12e9"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_E4_Main_LongBow_rr2.wav",
+   "size": 2036780,
+   "sha": "f5ac38dfd1fb285f5fd4c2feb53af3f5303a360c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_E5_Main_LongBow_rr2.wav",
+   "size": 1424648,
+   "sha": "d95cfc61cf5bf6707704d0548beee9ac0f474363"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_F#4_Main_LongBow_rr1.wav",
+   "size": 1990082,
+   "sha": "be56be190bb621785f3093db64780be84a1b95f0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_F#5_Main_LongBow_rr2.wav",
+   "size": 1257752,
+   "sha": "f26a732061063b01454a5ab7b56a5ebd64a76aa3"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow/BowedPsaltery_G#4_Main_LongBow_rr1.wav",
+   "size": 1785356,
+   "sha": "132c0a771cb10769dcaa4e6682b6d3f8386ac13a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass1_D#4_Slow_1_Main.wav",
+   "size": 6688724,
+   "sha": "7185594e0e4431a76c8d9b1aae4e946c052680a2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass2_F#4_Slow_1_Main.wav",
+   "size": 4148594,
+   "sha": "c81cbced2cd1dc4109046668d5a01567303516da"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass3_A#4_Slow_1_Main.wav",
+   "size": 4637750,
+   "sha": "577df4ee37495ecf8f25656fba3247588d0caabb"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/glass4_D5_Slow_2_Main.wav",
+   "size": 3106922,
+   "sha": "3dc166c18c334a0d10dc93c3cd86ef1276e77fb1"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#2_k8_50_100_rr2.wav",
+   "size": 1519282,
+   "sha": "8b9b4129e30bb2d5dc5eb622141cbdf8c44548af"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#3_k18_50_100_rr2.wav",
+   "size": 675160,
+   "sha": "3a75aef8c53eb1cc305d8ef7a3712822b64d8b1f"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#4_k2_50_100_rr2.wav",
+   "size": 401296,
+   "sha": "45be8dfa5dff17d049a9878a16dc8f9130430ba8"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_B1_k13_50_100_rr2.wav",
+   "size": 1567306,
+   "sha": "1a3bea0fa7ba9a8d2390f45fcc8c10081f5c95d7"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_B4_k23_50_100_rr2.wav",
+   "size": 318232,
+   "sha": "746cf96eda13dc2a35a423bd254c6720ba33d816"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#2_k10_50_100_rr2.wav",
+   "size": 1720294,
+   "sha": "3d3582a2ac15ad9e7386e3d6a079e92c93ae43a4"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#3_k16_50_100_rr2.wav",
+   "size": 925192,
+   "sha": "2f54d3673ff420cf68a3e033852794cc4198d938"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#4_k5_50_100_rr2.wav",
+   "size": 716518,
+   "sha": "d5609bd3ca8d16fff82e4c380c189122a0d00484"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#5_k24_50_100_rr2.wav",
+   "size": 566284,
+   "sha": "af397239194031376122e9115b184336e6820709"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#6_k27_50_100_rr2.wav",
+   "size": 543886,
+   "sha": "0fb035cdae41a655ce50f2207fce100f4629ddff"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#2_k14_50_100_rr2.wav",
+   "size": 1285486,
+   "sha": "e8f675d22789818c60c6c4606de7e72300537c18"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#3_k7_50_100_rr2.wav",
+   "size": 1234402,
+   "sha": "624a4f6c77b36bc1d2acce60c251f08ea9d139ac"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#4_k20_50_100_rr2.wav",
+   "size": 488326,
+   "sha": "311b202242d5c9cc873a93fa911672600900f701"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#4_k4_50_100_rr2.wav",
+   "size": 537622,
+   "sha": "80a6cafcff6c340bd3e24af006055c9b0a876b79"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D4_k19_50_100_rr2.wav",
+   "size": 605566,
+   "sha": "244fccedb259602964ebfaef12477c6fc3692922"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_E5_k25_50_100_rr2.wav",
+   "size": 600946,
+   "sha": "3a322a3a34ba264a6cc9b8fb956d251d38edc471"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F#5_k1_50_100_rr2.wav",
+   "size": 508924,
+   "sha": "e3412a5fe3e0a6019fba477d144b00fbb223a8a7"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F2_k9alt_50_100_rr2.wav",
+   "size": 1038820,
+   "sha": "5a6025b16973ceeec511e7da85993e7068d509f0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F3_k17_50_100_rr2.wav",
+   "size": 927430,
+   "sha": "2921df361d187efbfbac9fe19ef0bc57d9ddeef5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F4_k21_50_100_rr2.wav",
+   "size": 481162,
+   "sha": "6d8ff6b6bc8f9096e95a3a301798aeb7423d3b5a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F4_k3_50_100_rr2.wav",
+   "size": 512152,
+   "sha": "004f734fb4426b45b3566eccbd01b86350c2cc57"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G#1_k11_50_100_rr2.wav",
+   "size": 2159638,
+   "sha": "f7fc23788c2866b00e1d7b65eb3a62b22b6de277"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G#5_k26_50_100_rr2.wav",
+   "size": 487948,
+   "sha": "282be6a47cfac2222c9b2d5731c4c3eaf1eea57e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G1_k12_50_100_rr2.wav",
+   "size": 1281556,
+   "sha": "25a2f3ecd4903a02ae0de586dab851fe3c65d2c1"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G2_k15_50_100_rr2.wav",
+   "size": 1562464,
+   "sha": "1cdcb20c88f8dada72cc63fa0513851499a0c342"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G3_k6_50_100_rr2.wav",
+   "size": 962998,
+   "sha": "d6d1dcfda468ee43bd403160401102c634929c81"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G4_k22_50_100_rr2.wav",
+   "size": 554566,
+   "sha": "d24779b58dcdb149b750dd82535087a0ab194248"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C5_01.wav",
+   "size": 1323482,
+   "sha": "25185183d6a23973dcb245843b86c33108098381"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C6_01.wav",
+   "size": 1323482,
+   "sha": "f15847a111ce01f6d1bf285c835c941a22c9a38b"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C7_01.wav",
+   "size": 464710,
+   "sha": "7e4bc7ee61184e7d3171eeca26d1f95c2f8de3c2"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G#6_01.wav",
+   "size": 931630,
+   "sha": "c0da4e02db0fb6a394223dc3b6cb2d25d402499c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G4_01.wav",
+   "size": 1323482,
+   "sha": "741d607d19f0b9ca9c449391d332946bd89d4fa5"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G5_01.wav",
+   "size": 1323482,
+   "sha": "5a74c7a1c297fc67ddd6f1ba3e829f59478ce05a"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C5_01.wav",
+   "size": 1271310,
+   "sha": "db079c70946137f543820b6a6ac023d0afaac47c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C6_01.wav",
+   "size": 1271310,
+   "sha": "c02ff721d10eb3551372806653368f45ea5dc367"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C7_01.wav",
+   "size": 492418,
+   "sha": "a0f4aff9ef7d73e49a16f4054ead1369a78572b0"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G4_01.wav",
+   "size": 1271310,
+   "sha": "a7d9ca6c68e4c56327d83f0653ee3e16e4810265"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G5_01.wav",
+   "size": 1226714,
+   "sha": "dbaf80bc3975016095de3a611a202b581931311c"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G6_01.wav",
+   "size": 843122,
+   "sha": "e95738492bdc207b11ad32891a9a1ea090b6719e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_C5_02.wav",
+   "size": 709206,
+   "sha": "b68621c4f4fc482284bc8e848ea2d2654366d49e"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_C6_01.wav",
+   "size": 706962,
+   "sha": "d3c777e9470ee9d4b1821817585967500fc34362"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_C7_03.wav",
+   "size": 706962,
+   "sha": "058b6acda9c40c9df19d8a911e79c0c4a60c3111"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_G4_01.wav",
+   "size": 706962,
+   "sha": "0fb4b3e2baea5685fa4bb29aba340781c0ab0077"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_G5_01.wav",
+   "size": 706962,
+   "sha": "2de4932c129eaacdb2ec9e6e9795cdf00e112cf7"
+  },
+  {
+   "repo": "VCSL",
+   "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_soft_G6_01.wav",
+   "size": 585962,
+   "sha": "36c308a3c51796da6754a53373787e818830de5b"
   },
   {
    "repo": "VCSL",
@@ -901,30 +2169,6 @@
   },
   {
    "repo": "VCSL",
-   "path": "Idiophones/Struck Idiophones/Shaker, Small/Mid_Shaker_Roll_Fast_rr1.wav",
-   "size": 451540,
-   "sha": "7482046d3f0b5ada6387f416db6eb429a29e996a"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Idiophones/Struck Idiophones/Shaker, Small/Mid_Shaker_Roll_Fast_rr2.wav",
-   "size": 775688,
-   "sha": "458de1761fad1f42454ded27c8346efd7489f50d"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Idiophones/Struck Idiophones/Shaker, Small/Mid_Shaker_Slap_rr1.wav",
-   "size": 120316,
-   "sha": "4c5f3a96e6908454d90198bcc8090f5c816198ea"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Idiophones/Struck Idiophones/Shaker, Small/Mid_Shaker_Slap_rr2.wav",
-   "size": 124008,
-   "sha": "5832d2ce730179cd844297b7cb947ac8fd98d069"
-  },
-  {
-   "repo": "VCSL",
    "path": "Idiophones/Struck Idiophones/Vibraphone/Bowed/Vibes_bowed_A2_rr1_Main.wav",
    "size": 2118720,
    "sha": "58956f6d649ae9b633f8c2467d8d0793add0924d"
@@ -1093,36 +2337,6 @@
   },
   {
    "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hand_rr1_Sum.wav",
-   "size": 205484,
-   "sha": "74752d50a1f86b25cc9a7f5c06c7d2420b27cfe7"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v2_rr1_Sum.wav",
-   "size": 305388,
-   "sha": "401c1638c3e7bf730a275575c64cc1e0658a3e17"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v2_rr2_Sum.wav",
-   "size": 287200,
-   "sha": "5db6279874d8a968b4aa0aaa2ddbd9b075d05f2b"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v3_rr1_Sum.wav",
-   "size": 301668,
-   "sha": "a743c67d21d32d085b5a77b7963042f102226a6b"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v3_rr2_Sum.wav",
-   "size": 326976,
-   "sha": "543494a42c6293f8b334a3937e4f7180c64481c6"
-  },
-  {
-   "repo": "VCSL",
    "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v2_rr1_Sum.wav",
    "size": 659856,
    "sha": "d1178f9bc9be4abd7d3e3b02916b232dafc8d470"
@@ -1146,70 +2360,118 @@
    "sha": "9f9d14aa73f2a29ca4d33fb5599c8b84f7cf181b"
   },
   {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hand_v1_rr1_Sum.wav",
-   "size": 148516,
-   "sha": "6bd3d9c9ad0d19c48cbda3ea21b3b4cec71e1ff7"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v2_rr1_Sum.wav",
-   "size": 180420,
-   "sha": "bd9f1d43a89924036656ffde8560731b92491c7e"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v2_rr2_Sum.wav",
-   "size": 164000,
-   "sha": "92f72fe4a897a229bf949263f5d5c9ad23d8c77d"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v3_rr1_Sum.wav",
-   "size": 173168,
-   "sha": "3496c24a8450e4360640176247d21a70962e4179"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v3_rr2_Sum.wav",
-   "size": 175876,
-   "sha": "a41cb6aa3152d09d5161a52db91fec2eaae95ed5"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v2_rr1_Sum.wav",
-   "size": 456272,
-   "sha": "b476cd61f4b04c097a2f7e5448ecb418416f469b"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v2_rr2_Sum.wav",
-   "size": 377260,
-   "sha": "14d6b9c218c0deeb46ee524b8c3c378a11b9ec2a"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v3_rr1_Sum.wav",
-   "size": 370992,
-   "sha": "5e2ab60690c10767a56706dc42015c92a9bcf939"
-  },
-  {
-   "repo": "VCSL",
-   "path": "Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v3_rr2_Sum.wav",
-   "size": 491912,
-   "sha": "5e21cb0502f58c9e431a1e4b90ac6fe0e96d1fe7"
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_A#1_v1_1.wav",
+   "size": 2417592,
+   "sha": "573db456092f7eff6af7245819f162828f749e10"
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_A2_v1_1.wav",
-   "size": 2336738,
-   "sha": "76df6b474aff133b2ac9d96bf2466cb6fd865c72"
+   "path": "Brass/F Horn/sus/MOHorn_sus_A#1_v2_1.wav",
+   "size": 2740036,
+   "sha": "62c15504278f9c2dfaa0006530d34a5a3d92ecb0"
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_A2_v3_1.wav",
-   "size": 3082676,
-   "sha": "ad696c6ad3cbacb37b6d9cf4f26da4a54521e7ce"
+   "path": "Brass/F Horn/sus/MOHorn_sus_A0_v1_1.wav",
+   "size": 947196,
+   "sha": "bec79afe2bde69ed445c52da977b83e31cc81ed7"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_A2_v1_1.wav",
+   "size": 2672192,
+   "sha": "d358aadfb3bb1e0f28ab742d96f5418dc750057b"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_A2_v2_1.wav",
+   "size": 2542000,
+   "sha": "5ea35c7b0bf50d85195ba726380e611817f4ba9a"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_C1_v1_1.wav",
+   "size": 1093856,
+   "sha": "eed8f32ab91afd3381e42d0a5d0ad1d2beccbd11"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_C1_v2_1.wav",
+   "size": 807756,
+   "sha": "48ea1921e88607d0aea8aece16be6bc2456f6a4e"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_C3_v1_1.wav",
+   "size": 2519448,
+   "sha": "e53d2d03f0902c9f3a6add7c6bf51122bcc7d573"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_C3_v2_1.wav",
+   "size": 2240888,
+   "sha": "9f89dc248404a1a1e0240035ac5fa55c89e9c9cd"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_D#1_v1_1.wav",
+   "size": 1425196,
+   "sha": "238de6f129810744e89a22c414daf926e1b55a37"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_D#1_v2_1.wav",
+   "size": 970468,
+   "sha": "20c33d3ffb3bf369e30359e3eb8b8ac7548adda3"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_D2_v1_1.wav",
+   "size": 2500360,
+   "sha": "e63cadc76d2b3e56ee26ad558e52fd633cc8c4b1"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_D2_v2_1.wav",
+   "size": 2583372,
+   "sha": "665f09cf0fe70efdcec1d93b064d5a5a32d6ebe0"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_D4_v1_1.wav",
+   "size": 1445100,
+   "sha": "0d13acd769ecdfc234c416fe859a4eda9aac2f22"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_F2_v1_1.wav",
+   "size": 2163124,
+   "sha": "90c68f7833a7aa2325dea7159aad8af4c9b13a76"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_F2_v2_1.wav",
+   "size": 2558276,
+   "sha": "37655b24ac23b96a47a6bb75c091bedef6913632"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_F4_v1_1.wav",
+   "size": 1477536,
+   "sha": "3061198e82995900230e9ddde1138a076d8dca9f"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_G1_v1_1.wav",
+   "size": 2038728,
+   "sha": "587133d2ed466473bd29438555973d9e75c3285a"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Brass/F Horn/sus/MOHorn_sus_G1_v2_1.wav",
+   "size": 1300556,
+   "sha": "e09ff9550c6ed4b660baeaba5497040ca7add35e"
   },
   {
    "repo": "VSCO-2-CE",
@@ -1225,18 +2487,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_B3_v1_1.wav",
-   "size": 1690082,
-   "sha": "16d846690d7c4d385f3cfc8f1fe25873d6bd5b01"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_B3_v3_1.wav",
-   "size": 2865086,
-   "sha": "3b1685e657db57bd71c979da8c2d9d35d2d0d197"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Cello Section/susvib/susvib_C1_v1_1.wav",
    "size": 2347376,
    "sha": "ff87d1ae488d87189f33a0d18550d3bcde012f3d"
@@ -1249,18 +2499,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_C3_v1_1.wav",
-   "size": 2444174,
-   "sha": "73ccb5dc2cc2a07926a1c41aa3c5621b19f420bf"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_C3_v3_1.wav",
-   "size": 3019394,
-   "sha": "a192845091cb8e669c72d3ff4a88eb1c5968e626"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Cello Section/susvib/susvib_D2_v1_1.wav",
    "size": 2550956,
    "sha": "8076f809d4f6a8057f3835e12d22751a25e39252"
@@ -1270,18 +2508,6 @@
    "path": "Strings/Cello Section/susvib/susvib_D2_v3_1.wav",
    "size": 3291368,
    "sha": "fdb46242bb68876ad275b9b8ed10c4b8508b9292"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_D4_v1_1.wav",
-   "size": 2153228,
-   "sha": "e1125afc13def9b43e4612cdcebd11b99fce20cc"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_D4_v3_1.wav",
-   "size": 2801210,
-   "sha": "9189549dab9d3e0928fc7e42f94c04d66d28c52b"
   },
   {
    "repo": "VSCO-2-CE",
@@ -1303,18 +2529,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_E3_v1_1.wav",
-   "size": 2456672,
-   "sha": "63f4d6df3a25fb95f417b5d45b5f8bf6a11107bf"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_E3_v3_1.wav",
-   "size": 3278270,
-   "sha": "7711cb67795d692b0d732eb8fd234c41d5980f42"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Cello Section/susvib/susvib_F2_v1_1.wav",
    "size": 2186012,
    "sha": "78f52c49ddc8a357657d92b05cd89f15beb6c717"
@@ -1327,18 +2541,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_F4_v1_1.wav",
-   "size": 1922948,
-   "sha": "7f39cccecb392eaa0ff4c94e3607dc2294458a30"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_F4_v3_1.wav",
-   "size": 2726342,
-   "sha": "074f12a91124e13ea0e4fb34d9ecbe7279ec0806"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Cello Section/susvib/susvib_G1_v1_1.wav",
    "size": 2161700,
    "sha": "42a2731d11a4749c3026f0618e21a8c9370c2024"
@@ -1348,18 +2550,6 @@
    "path": "Strings/Cello Section/susvib/susvib_G1_v3_1.wav",
    "size": 3370496,
    "sha": "35971538059e18b8f38cdc556630967777a0a0d5"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_G3_v1_1.wav",
-   "size": 2431598,
-   "sha": "7880157fbb8e57fb0b7a694b8569701bc0d942ea"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Cello Section/susvib/susvib_G3_v3_1.wav",
-   "size": 3335768,
-   "sha": "732d0c80596fdfc593f55b5a24f65c07cd3191cd"
   },
   {
    "repo": "VSCO-2-CE",
@@ -1408,18 +2598,6 @@
    "path": "Strings/Solo Contrabass/Pizz/BKCtbss_Pizz_B2_v1_rr2.wav",
    "size": 332204,
    "sha": "a36c908d3b8b07d9ecc0107d465ab391160e3c79"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Solo Contrabass/Pizz/BKCtbss_Pizz_C#2_v1_rr1.wav",
-   "size": 513824,
-   "sha": "16b7ca596182a49fe693b81ed925df8d2fc1be59"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Solo Contrabass/Pizz/BKCtbss_Pizz_C#2_v1_rr2.wav",
-   "size": 498308,
-   "sha": "1538275fda063011eae150b531752b410186c2b6"
   },
   {
    "repo": "VSCO-2-CE",
@@ -1867,18 +3045,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_A3_v1_1.wav",
-   "size": 2491352,
-   "sha": "a57d0e5e328257ef14a3dd09b1debea045671527"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_A3_v2_1.wav",
-   "size": 2861282,
-   "sha": "b479361fe3bed076db011092b8d48bca54daf83f"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Viola Section/susvib/ViolaEns_susvib_B2_v1_1.wav",
    "size": 2861510,
    "sha": "86e2428bca77c49d795e5e3d5be7dd9b022fce65"
@@ -1891,54 +3057,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_B4_v1_1.wav",
-   "size": 2203118,
-   "sha": "66520dad5b544b8e93c48e0f3aa941b3e85bc633"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_B4_v2_1.wav",
-   "size": 2893766,
-   "sha": "818ac60340e41f1287024c738d43c5bf3cf7dc9d"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_C2_v1_1.wav",
-   "size": 2642360,
-   "sha": "b1cfb66c1ab03bdb9adac7e347b427bc61524b94"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_C2_v2_1.wav",
-   "size": 3318188,
-   "sha": "7851268d881b226650cba4ef1d4e9578ae212099"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_C4_v1_1.wav",
-   "size": 2289656,
-   "sha": "a88aa6006bbc4ad1b25e4f08eb2d8ac974a7097f"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_C4_v2_1.wav",
-   "size": 2954936,
-   "sha": "4561f010d9b6de44b121246731042d1879d38ab7"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D2_v1_1.wav",
-   "size": 2359898,
-   "sha": "d508161e1c7a255d291f1d32f9605a9c215357aa"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D2_v2_1.wav",
-   "size": 3049772,
-   "sha": "bf8a94de83b7d96375bef7c94e07d616f43f9c14"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D3_v1_1.wav",
    "size": 2789648,
    "sha": "9a3a65b93d871964a666d6a86deec4d29425d828"
@@ -1948,42 +3066,6 @@
    "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D3_v2_1.wav",
    "size": 3596756,
    "sha": "2f6d74aa54f4f23889de311ff85d9f704fb600b9"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D5_v1_1.wav",
-   "size": 2087798,
-   "sha": "57d1de0867673e6861f318c01ed3358ffbff2996"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_D5_v2_1.wav",
-   "size": 2638244,
-   "sha": "05a181827b7f6b3f339a92fa8eaf648f352651a5"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_E2_v1_1.wav",
-   "size": 2520044,
-   "sha": "6401156b3518b6f39e95fdaefc74cc814d6aceb2"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_E2_v2_1.wav",
-   "size": 3027656,
-   "sha": "764698fba8db1da82ecc6b5ec54fe61c0036e4f2"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_E4_v1_1.wav",
-   "size": 2044358,
-   "sha": "c97e8f4eeffe3fd94afeb8a3d32099105ab270d2"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_E4_v2_1.wav",
-   "size": 2559086,
-   "sha": "c0e669461ba50854dd80e68767604a6f57471cc2"
   },
   {
    "repo": "VSCO-2-CE",
@@ -2011,30 +3093,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_G4_v1_1.wav",
-   "size": 2542586,
-   "sha": "2f34fb8b8826e09cf0427d1710b650a5c3dd3010"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Viola Section/susvib/ViolaEns_susvib_G4_v2_1.wav",
-   "size": 3103628,
-   "sha": "54255fd83b3bf242022e61ff6d9fe518401dc537"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_A2_v1.wav",
-   "size": 1979216,
-   "sha": "b86c2e7000da2a80466196acca2ddbdf6cf83fe8"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_A2_v2.wav",
-   "size": 2231504,
-   "sha": "5960b46c4678a146834594031d0bba1048855102"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Violin Section/susVib/VlnEns_susVib_A3_v1.wav",
    "size": 1890316,
    "sha": "ec84b89a4b93ecdc7e23d0c023b897b6f151bca7"
@@ -2044,18 +3102,6 @@
    "path": "Strings/Violin Section/susVib/VlnEns_susVib_A3_v2.wav",
    "size": 1671704,
    "sha": "401653718e521b65712da594a53d22184f4a207a"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_B2_v1.wav",
-   "size": 2314360,
-   "sha": "c2bdf89eed02c0e7fbb11b52799ac62276787ff8"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_B2_v2.wav",
-   "size": 2373380,
-   "sha": "4f54ea9180f4c11ec3d0e92f556003be59cb0f0c"
   },
   {
    "repo": "VSCO-2-CE",
@@ -2080,18 +3126,6 @@
    "path": "Strings/Violin Section/susVib/VlnEns_susVib_C4_v2.wav",
    "size": 2017512,
    "sha": "1c8e05059b270f870342a03e19b93882d6dd1e1b"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_D3_v1.wav",
-   "size": 2061808,
-   "sha": "e47f9a53d487475fb049039ca7846e11c1ff830a"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_D3_v2.wav",
-   "size": 2457908,
-   "sha": "31143ae1a31ddd57baa38b3e79a4415b108a0007"
   },
   {
    "repo": "VSCO-2-CE",
@@ -2131,18 +3165,6 @@
   },
   {
    "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_G2_v1.wav",
-   "size": 2341712,
-   "sha": "e2de84e8b912dbfb8df3efe7b8ee241e2bcfa027"
-  },
-  {
-   "repo": "VSCO-2-CE",
-   "path": "Strings/Violin Section/susVib/VlnEns_susVib_G2_v2.wav",
-   "size": 2681324,
-   "sha": "b7693eb5c9d104fc01e130ee2552dac546ee85f7"
-  },
-  {
-   "repo": "VSCO-2-CE",
    "path": "Strings/Violin Section/susVib/VlnEns_susVib_G4_v1.wav",
    "size": 2330236,
    "sha": "81d3994ebbf467cbbc88bb2d2ad0dd94d96e7e04"
@@ -2152,6 +3174,240 @@
    "path": "Strings/Violin Section/susVib/VlnEns_susVib_G4_v2.wav",
    "size": 2150136,
    "sha": "c36674326c6d0b6ae8bf5d20b52b6ddd005719bb"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#2_v1_rr1_sum.wav",
+   "size": 1825324,
+   "sha": "c02251ea67183260dd5f3b4cca97eeb0e8f23bed"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#2_v3_rr1_sum.wav",
+   "size": 2335540,
+   "sha": "d08b0b0242b1695b533f14c7774c4e5bd7f83646"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#3_v1_rr1_sum.wav",
+   "size": 1599888,
+   "sha": "f8db827226f661779d8965737fa0850d8275be9a"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#3_v3_rr1_sum.wav",
+   "size": 2059160,
+   "sha": "08f1508a646a60a8795861688932e38955cc8ba0"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#4_v1_rr1_sum.wav",
+   "size": 1996064,
+   "sha": "27315505c21685cdc911e3ae30ce8712c712da26"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_A#4_v3_rr1_sum.wav",
+   "size": 1885948,
+   "sha": "bc184323f783462fb1bbb3f49ad57ddaaac2cb11"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D2_v1_rr1_sum.wav",
+   "size": 806612,
+   "sha": "22e4849edce9f5f75473852d71b1a71e75502505"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D2_v3_rr1_sum.wav",
+   "size": 1381704,
+   "sha": "3d40552dd6d2dead91c702fe68175869a988009d"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D3_v1_rr1_sum.wav",
+   "size": 2230948,
+   "sha": "8f3f973a0d69c3c721f1eb8b27f208c80bd17ceb"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D3_v3_rr1_sum.wav",
+   "size": 1856124,
+   "sha": "aa7a1f5f31cef8d36552072d9f275b7940c879c0"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D4_v1_rr1_sum.wav",
+   "size": 1987372,
+   "sha": "c3284691eb2dfe4f1be1b116b804a2e41062bb9c"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D4_v3_rr1_sum.wav",
+   "size": 2087348,
+   "sha": "119bec0bc1ad924b04e416966239d6af3a67a764"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D5_v1_rr1_sum.wav",
+   "size": 1692352,
+   "sha": "ee07579d393b6c9a43aaf65f375d2012c3d0c774"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_D5_v3_rr1_sum.wav",
+   "size": 1593652,
+   "sha": "a06b19f95d397920e21a56cdb85223a39e860d47"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F#5_v1_rr1_sum.wav",
+   "size": 1025344,
+   "sha": "0e30b7890f8c35943fa4eb693c704ce5c595acec"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F#5_v3_rr1_sum.wav",
+   "size": 1586272,
+   "sha": "9655d9014a2500386d01f80bf0d7e3100e8caa59"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F2_v1_rr1_sum.wav",
+   "size": 1527412,
+   "sha": "a8b913d7e923c58f150e757f1748da37c80587b4"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F2_v3_rr1_sum.wav",
+   "size": 1747440,
+   "sha": "04b88f5463edcbdfb44e64826d26d8528b4a12f6"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F3_v1_rr1_sum.wav",
+   "size": 1762976,
+   "sha": "31ac755ac1dff319c409505d26706d9851bb7e92"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F3_v3_rr1_sum.wav",
+   "size": 1743712,
+   "sha": "fc79b6d0f5b3420f4e24b0392484b43a864a6d50"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F4_v1_rr1_sum.wav",
+   "size": 2034208,
+   "sha": "04e3a4727ee49ff915baeb65c1d32ee4e9ec37e2"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Clarinet/susLong/DCClar_susLong_F4_v3_rr1_sum.wav",
+   "size": 2373520,
+   "sha": "086d21e2c435964f31b77df757b763e6d6b5eb54"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A3_v1_1.wav",
+   "size": 2706216,
+   "sha": "b690a4d0006b73699176dd2fab82a9249966e33b"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A3_v3_1.wav",
+   "size": 2765718,
+   "sha": "75a6dbb605779e3eaef2a265b6857142211a5837"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A4_v1_1.wav",
+   "size": 3460842,
+   "sha": "3007213aa6264efe0619c7321bf2e8df7966b0a2"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A4_v3_1.wav",
+   "size": 2147490,
+   "sha": "fa6e9dc8429dc62ae37eb6e61cf63aed8ca38529"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A5_v1_1.wav",
+   "size": 2885970,
+   "sha": "3f6ea8e543310a6e97ed97ac5b74c9e53ee3b05e"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_A5_v3_1.wav",
+   "size": 2100774,
+   "sha": "cbcfcd8aef190cf811e141bf9c602953a4c2d935"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C3_v1_1.wav",
+   "size": 2642490,
+   "sha": "ac3b6e4b90480a5a64798c2c399f16ea95754015"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C3_v3_1.wav",
+   "size": 2729730,
+   "sha": "18b1fa490327f38057a2edbaca4f000cffbf633d"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C4_v1_1.wav",
+   "size": 2722056,
+   "sha": "ea9cc7ff40975e8d3917c6e8fa13f67167e142f2"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C4_v3_1.wav",
+   "size": 2539512,
+   "sha": "850db1f598b5ba7a88ec2f929f8b832fb83cdd66"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C5_v1_1.wav",
+   "size": 2491416,
+   "sha": "093129d6a876ce5f004279b2979894d0ed637a8d"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_C6_v1_1.wav",
+   "size": 1618152,
+   "sha": "8b69c3cd65834619ad9c1389b3c9f8d50fab15f5"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_E3_v1_1.wav",
+   "size": 2874126,
+   "sha": "7a921854e39f8addf99a4dc8e4b3f27e187142c2"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_E3_v3_1.wav",
+   "size": 2814822,
+   "sha": "66390898fca3d96f65bbc2bffd26c55af56db11e"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_E4_v1_1.wav",
+   "size": 2591256,
+   "sha": "3f351c4623be881464381ac8de2c3cfef99ac646"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_E4_v3_1.wav",
+   "size": 2449278,
+   "sha": "67357c844a8c88034431d83438bd8ddea729e805"
+  },
+  {
+   "repo": "VSCO-2-CE",
+   "path": "Woodwinds/Flute/susNV/LDFlute_susNV_E5_v1_1.wav",
+   "size": 2956800,
+   "sha": "4017163d62316f9eb0a4a5d375de9f7d110dda64"
   }
  ]
 }

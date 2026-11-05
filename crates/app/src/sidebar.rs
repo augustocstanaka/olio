@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, Rect, RichText, Sense,
-    Stroke, StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
+    Align, Align2, FontId, Key, KeyboardShortcut, Layout, Modifiers, Pos2, Rect, Sense, Stroke,
+    StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
 };
 use olio_library::{Library, Set, SetId, TileId};
 
@@ -81,8 +81,7 @@ pub fn show(
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let new_set = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
-            if ui
-                .button("+ New Set")
+            if crate::skin::button(ui, "+ New Set", false)
                 .on_hover_text(format!(
                     "Add a set ({})",
                     ui.ctx().format_shortcut(&new_set)
@@ -94,21 +93,22 @@ pub fn show(
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let removable = library.sets.len() > 1;
                 let remove = ui
-                    .add_enabled(
-                        removable,
-                        egui::Button::new("−").min_size(Vec2::new(32.0, 0.0)),
-                    )
+                    .add_enabled_ui(removable, |ui| crate::skin::button(ui, "−", false))
+                    .inner
                     .on_hover_text("Remove the front set…");
+                remove.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Button, removable, "Remove Set")
+                });
                 if remove.clicked() {
                     actions.push(SidebarAction::RemoveSet(current));
                 }
             });
         });
-        ui.separator();
+        ui.add_space(6.0);
         ui.with_layout(Layout::top_down(Align::Min), |ui| {
-            ui.add_space(8.0);
-            ui.label(RichText::new("Sets").strong().size(15.0));
-            ui.add_space(4.0);
+            ui.add_space(10.0);
+            crate::skin::legend_label(ui, "Sets");
+            ui.add_space(6.0);
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
@@ -218,31 +218,33 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
             copy: grid::copy_modifier(modifiers),
         });
     }
-    let visuals = ui.visuals();
+    let p = crate::skin::palette(ui.ctx());
     let painter = ui.painter();
+    let radius = crate::skin::BUTTON_RADIUS;
     if drop_here {
-        painter.rect_filled(rect, 6, visuals.selection.bg_fill.gamma_multiply(0.45));
-        painter.rect_stroke(
-            rect,
-            6,
-            Stroke::new(2.0, visuals.selection.stroke.color),
-            StrokeKind::Inside,
-        );
+        painter.rect_filled(rect, radius, p.accent_dim);
+        painter.rect_stroke(rect, radius, Stroke::new(2.0, p.accent), StrokeKind::Inside);
     } else if row.selected {
-        painter.rect_filled(rect, 6, visuals.selection.bg_fill);
+        // The set in front: pressed in, its name lit.
+        crate::skin::inset(
+            painter,
+            rect,
+            radius,
+            p.surface.lerp_to_gamma(p.accent, 0.08),
+        );
     } else if response.hovered() || held_here {
-        painter.rect_filled(rect, 6, visuals.widgets.hovered.weak_bg_fill);
+        painter.rect_filled(
+            rect,
+            crate::skin::ROW_RADIUS,
+            p.surface.lerp_to_gamma(p.light, 0.25),
+        );
     }
     if held_here && let Some(progress) = row.spring.filter(|&progress| progress > 0.0) {
         // The row fills from the left while the hold opens the set.
         let fill = Rect::from_min_size(rect.min, Vec2::new(rect.width() * progress, rect.height()));
-        painter.rect_filled(fill, 6, visuals.selection.bg_fill.gamma_multiply(0.85));
+        painter.rect_filled(fill, radius, p.accent_dim);
     }
-    let text = if row.selected {
-        visuals.selection.stroke.color
-    } else {
-        visuals.text_color()
-    };
+    let text = if row.selected { p.accent } else { p.text };
 
     let mut right = rect.right() - 8.0;
     if drop_here {
@@ -252,7 +254,7 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
             Align2::RIGHT_CENTER,
             if copying { "copy here" } else { "move here" },
             FontId::proportional(12.5),
-            visuals.strong_text_color(),
+            p.text,
         );
         right = drawn.left() - 6.0;
     } else if let Some(key) = keys::set_key(row.number) {
@@ -264,7 +266,7 @@ fn set_row(ui: &mut Ui, row: &Row, actions: &mut Vec<SidebarAction>) -> bool {
             Align2::RIGHT_CENTER,
             shortcut,
             FontId::proportional(12.5),
-            visuals.weak_text_color(),
+            p.text_weak,
         );
         right = drawn.left() - 6.0;
     }

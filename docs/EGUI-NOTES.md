@@ -48,10 +48,30 @@ On a generation bump, re-check every line below and update the versions.
   modal are found by label like any other.
 - Shadows: `egui::Shadow { offset, blur, spread, color }.as_shape(rect,
   radius)` gives a blurred rectangle; the blur reaches half its width on
-  each side of the (offset) rect. egui has no inner shadow: the Soft
-  pressed tile paints a dark rim colour, then a blurred lighter shape
-  shrunk and offset inside it, through `painter.with_clip_rect(rect)`.
-  Shadows reach past their tile, so a Soft grid is inset to leave room.
+  each side of the (offset) rect. egui has no inner shadow:
+  `skin::inset_shapes` (Toca's; Sala's version put the bands on the wrong
+  sides on epaint 0.36.2) draws each band as a wide blurred stroke inside
+  a rectangle that reaches well past the part on the two sides it must
+  not show on, clipped to the part. The clip is a rectangle, so the bands
+  square off rounded corners: `skin::inset_on` puts the corners back in
+  the colour around the inset. Shadows reach past their tile, so the grid
+  is inset to leave room.
+- Glyphs as icons: `▾` and friends are boxes in egui's default fonts.
+  Draw chevrons with `Shape::line` (`skin::chevron`).
+- `ctx.set_visuals_of(theme, visuals)` sets one theme's visuals; the skin
+  installs the palette for the theme egui resolves, every frame
+  (`skin::sync`), so a system appearance change takes effect at once.
+- A hand-made slider is not driven by AccessKit's SetValue, Increment and
+  Decrement unless it reads them: `input.accesskit_action_requests(id,
+  Action::SetValue)` with `ActionData::NumericValue`, and advertises them
+  with `ctx.accesskit_node_builder(id, |b| b.add_action(..))`, as
+  `skin::slider` does after egui's own. It also needs a focus-lock filter
+  for the arrows, or they move focus.
+- `WidgetType::CollapsingHeader` with `WidgetInfo::selected` gives a
+  button with `toggled` in AccessKit: that is how a section's header
+  reports open or closed. A header that names a control (`labelled_by`)
+  is not returned by kittest's `query_all_by_label`; find it by role and
+  label.
 - Per-widget animation state that egui does not keep (when a tile
   started, for the dip) lives in `ctx.data_mut(|d| d.insert_temp(id, ..))`
   and is read back with `get_temp`; time comes from `input.time`, which

@@ -20,9 +20,9 @@ use olio_library::Store;
 use sha2::{Digest, Sha256};
 
 /// The published pack: where it is, what it hashes to, how big it is.
-pub const PACK_URL: &str = "https://github.com/augustocstanaka/olio/releases/download/instruments-1/olio-instruments-1.zip";
-pub const PACK_SHA256: &str = "9b6df58d19982b4beecc8dfd2c93c47ff2f6b1e92bf1ff44ca848efd1db606c4";
-pub const PACK_BYTES: u64 = 71_276_756;
+pub const PACK_URL: &str = "https://github.com/augustocstanaka/olio/releases/download/instruments-2/olio-instruments-2.zip";
+pub const PACK_SHA256: &str = "9e3687252cb3a6b26e6139f6129cde203c2cf0c893125b1fe79e6fcdf0d089c8";
+pub const PACK_BYTES: u64 = 148_235_075;
 /// The pack's folder, inside the zip and once installed.
 const PACK_NAME: &str = "olio-instruments";
 
@@ -38,7 +38,7 @@ pub fn installed(dir: &Path) -> Option<Pack> {
     Pack::open(&dir.join(PACK_NAME)).ok()
 }
 
-/// "71 MB".
+/// "148 MB".
 pub fn megabytes(bytes: u64) -> String {
     format!("{} MB", (bytes as f64 / 1e6).round())
 }
@@ -200,25 +200,31 @@ impl Download {
     }
 }
 
-/// An instrument being loaded from the pack, on a thread of its own.
+/// A voice of an instrument being loaded from the pack, on a thread of
+/// its own.
 pub struct Loading {
     pub instrument: Instrument,
+    pub voice: u8,
     done: mpsc::Receiver<Result<Option<Multisample>, String>>,
 }
 
 impl Loading {
-    pub fn start(ctx: egui::Context, pack: Pack, instrument: Instrument) -> Self {
+    pub fn start(ctx: egui::Context, pack: Pack, instrument: Instrument, voice: u8) -> Self {
         let (sender, done) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("olio-instrument-load".to_owned())
             .spawn(move || {
-                let _ = sender.send(pack.load(instrument));
+                let _ = sender.send(pack.load(instrument, voice));
                 ctx.request_repaint();
             });
         if let Err(err) = spawned {
             eprintln!("olio: could not load an instrument: {err}");
         }
-        Self { instrument, done }
+        Self {
+            instrument,
+            voice,
+            done,
+        }
     }
 
     pub fn poll(&self) -> Option<Result<Option<Multisample>, String>> {
@@ -271,16 +277,16 @@ pub(crate) mod tests {
         };
         let manifest = Manifest {
             version: PACK_VERSION,
-            instruments: vec![InstrumentManifest {
-                instrument: Instrument::Harp,
-                attack: 0.001,
-                release: 0.3,
-                gain: 1.0,
-                zones: vec![
+            instruments: vec![InstrumentManifest::new(
+                Instrument::Harp,
+                0.001,
+                0.3,
+                1.0,
+                vec![
                     zone("harp/A3.wav", 57, 0, 69),
                     zone("harp/A5.wav", 81, 70, 127),
                 ],
-            }],
+            )],
         };
         fs::write(
             pack.join(MANIFEST),
@@ -329,6 +335,6 @@ pub(crate) mod tests {
         // Again, over the top of itself.
         install_zip(&zip_path, None, dir.path()).unwrap();
         assert!(installed(dir.path()).is_some());
-        assert_eq!(megabytes(PACK_BYTES), "71 MB");
+        assert_eq!(megabytes(PACK_BYTES), "148 MB");
     }
 }

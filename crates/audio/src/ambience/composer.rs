@@ -2,7 +2,9 @@
 //!
 //! A slow harmony (a chord degree of the scale) underlies everything: the
 //! bass and strings lean on it, the harp, piano, violin and bells mostly
-//! touch its tones, the pad voices it, the frame drum keeps to the root.
+//! touch its tones, the pad voices it (each of its voices led to the
+//! nearest note of the next chord, the notes they share held over), the
+//! frame drum keeps to the root.
 //! From the middle of energy up the notes keep a pulse and walk a cadence;
 //! below it they drift. Pieces have an intro, a close that thins out and
 //! lands on the root, and a pause.
@@ -24,7 +26,7 @@
 //! middle draw nothing from the random source; variety in the middle
 //! still brings a motif back now and then.
 
-use super::{AmbienceSettings, Form, Instrument, Rng};
+use super::{AmbienceSettings, Form, Instrument, Mode, Rng, Scale, ScaleKind};
 
 /// The note the drums play for a shaker. Any lower note is a frame drum
 /// tuned to it.
@@ -42,6 +44,14 @@ pub struct Note {
     /// Frames to hold a sustained note; 0 lets a plucked or struck one
     /// ring out on its own.
     pub duration: u64,
+    /// A held note this one carries on from: the same note held on, or a
+    /// step away glided to, rather than struck again; with a duration of
+    /// 0, the held note let go and nothing struck. `None` starts it.
+    pub from: Option<u8>,
+    /// Which of the pad's voicings it belongs to, numbered from 1; 0 for
+    /// any other note. One note of a voicing carries a held voice at most,
+    /// so a voice moving onto another's note is never taken for it.
+    pub voicing: u32,
 }
 
 /// A note at a time, in output frames since the start.
@@ -51,9 +61,9 @@ pub struct Event {
     pub note: Note,
 }
 
-/// Most events waiting to play. Pads voice three notes at once, phrases
+/// Most events waiting to play. Pads voice five or six notes at once, phrases
 /// queue a few; more than this and the extra are dropped.
-const QUEUE: usize = 32;
+const QUEUE: usize = 48;
 
 /// `seconds` as a count of frames at `rate`.
 fn frames(rate: u32, seconds: f32) -> u64 {
@@ -70,6 +80,75 @@ const FULLER: f32 = 0.6;
 
 /// From this energy the pad adds a ninth as well.
 const FULLEST: f32 = 0.85;
+
+/// The pad's voices: one low on the root, three above it on the chord's
+/// tones, and a colour over them.
+const PAD_TONES: usize = 5;
+const LOW: usize = 0;
+const COLOUR: usize = 4;
+/// Each voice's level and place, low to high.
+const PAD_LEVELS: [f32; PAD_TONES] = [0.6, 0.9, 0.9, 0.9, 0.55];
+const PAD_PANS: [f32; PAD_TONES] = [0.0, -0.4, 0.0, 0.4, 0.25];
+/// Where the pad's voices keep, in semitones from its root at home: the
+/// low voice an octave below the three, the colour over them.
+const LOW_RANGE: (i32, i32) = (-10, 2);
+const UPPER_RANGE: (i32, i32) = (3, 21);
+const COLOUR_RANGE: (i32, i32) = (12, 28);
+
+/// The note of `target`'s pitch class nearest `near` within `low..=high`
+/// (MIDI notes), if there is one.
+fn within(target: u8, near: i32, low: i32, high: i32) -> Option<i32> {
+    let class = i32::from(target).rem_euclid(12);
+    let mut best: Option<i32> = None;
+    for octave in 0..11 {
+        let candidate = class + 12 * octave;
+        if (low..=high).contains(&candidate)
+            && best.is_none_or(|b| (candidate - near).abs() < (b - near).abs())
+        {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+/// As [`within`], for a range an octave wide or more, which always has
+/// one; `target` itself otherwise.
+fn nearest(target: u8, near: i32, low: i32, high: i32) -> i32 {
+    within(target, near, low, high).unwrap_or(i32::from(target))
+}
+
+/// Every way to share three tones among three voices.
+const SHARES: [[usize; 3]; 6] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+];
+
+/// The three tones `targets` voiced from `previous`: each voice takes one,
+/// in the octave nearest where it was within `low..=high`; of every way to
+/// share them out, the one that moves least in all (and of those, the
+/// one that holds the most notes), so common tones are held and the rest
+/// move by step.
+fn lead(previous: [i32; 3], targets: [u8; 3], low: i32, high: i32) -> [i32; 3] {
+    let mut best = ([0; 3], (i32::MAX, 0));
+    for share in SHARES {
+        let mut voicing = [0; 3];
+        let (mut moved, mut held) = (0, 0);
+        for (voice, &tone) in share.iter().enumerate() {
+            voicing[voice] = nearest(targets[tone], previous[voice], low, high);
+            let step = (voicing[voice] - previous[voice]).abs();
+            moved += step;
+            held -= i32::from(step == 0);
+        }
+        if (moved, held) < best.1 {
+            best = (voicing, (moved, held));
+        }
+    }
+    best.0
+}
 
 /// The most notes a motif holds.
 const MOTIF: usize = 8;
@@ -98,12 +177,23 @@ fn span(concentration: f32, len: i32) -> (i32, i32) {
     (low, high)
 }
 
-/// A melodic instrument's memory: its last degree, and a short motif
-/// (degrees above the chord, and the gaps after them) it comes back to.
+/// A melodic instrument's memory: its last degree and the step that
+/// reached it, and a short motif (degrees above the chord, the gaps after
+/// them, and how many times each echoes) it comes back to.
+///
+/// Played again, the motif is a loop: its gaps are stretched a little so
+/// the whole lasts exactly the line's loop length (or a whole number or
+/// whole fraction of it), and each line's length is a different prime
+/// number of seconds.
+/// The lines then drift against each other as tape loops of unrelated
+/// lengths do, coming back into line only rarely; and the notes of a loop
+/// echo, softer each time.
 #[derive(Clone, Copy, Debug)]
 struct Line {
     degree: i32,
+    step: i32,
     motif: [(i32, f32); MOTIF],
+    echoes: [u8; MOTIF],
     /// Notes written into the motif, up to [`MOTIF`].
     written: usize,
     /// The motif's next note and its last; whether this time through
@@ -112,21 +202,48 @@ struct Line {
     slot: usize,
     repeating: bool,
     again: bool,
+    /// Its loop length in seconds, and what this pass through the motif
+    /// stretches its gaps by to keep to it.
+    loop_seconds: f32,
+    stretch: f32,
 }
 
 impl Line {
-    fn new(degree: i32) -> Self {
+    fn new(degree: i32, loop_seconds: f32) -> Self {
         Self {
             degree,
+            step: 0,
             motif: [(0, 1.0); MOTIF],
+            echoes: [0; MOTIF],
             written: 0,
             next: 0,
             slot: 0,
             repeating: false,
             again: false,
+            loop_seconds,
+            stretch: 1.0,
         }
     }
 }
+
+/// A step of this many degrees or more is a leap, and the next step goes
+/// back the other way this often at the most concentrated (less often as
+/// concentration falls and the lines roam wider).
+const LEAP: i32 = 3;
+const GAP_FILL: f32 = 0.75;
+
+/// The lines' loop lengths in seconds: primes, so they seldom line up.
+const HARP_LOOP: f32 = 17.0;
+const PIANO_LOOP: f32 = 23.0;
+const VIOLIN_LOOP: f32 = 29.0;
+
+/// The most echoes a looped note has, how much softer each is, and how
+/// far apart they come in free time, per line (on the pulse, a beat).
+const ECHOES: u32 = 3;
+const ECHO_SOFTER: f32 = 0.5;
+const HARP_ECHO: f32 = 0.55;
+const PIANO_ECHO: f32 = 0.7;
+const VIOLIN_ECHO: f32 = 0.45;
 
 /// How a melodic instrument picks its new notes, at the middle
 /// concentration.
@@ -171,8 +288,25 @@ pub struct Composer {
     next_harmony: u64,
     /// Where the pulse is in its cadence.
     cadence_step: usize,
+    /// The key the chord is borrowed from, while it is ([`parallel`]):
+    /// everything plays in it until the next chord.
+    borrowed: Option<ScaleKind>,
     /// The drone's last note, so it is only retuned on a change.
     drone_midi: Option<u8>,
+    /// The pad's last voicing (MIDI notes, 0 for a voice that was silent)
+    /// and the notes it sounded (chaos may bend one), whether it has one
+    /// yet, and until when those notes hold.
+    voicing: [i32; PAD_TONES],
+    sounding: [u8; PAD_TONES],
+    voiced: bool,
+    pad_until: u64,
+    /// The pad's last voicing's number ([`Note::voicing`]).
+    voicings: u32,
+    /// Each pad voice's next note while it waits in the queue (its
+    /// voicing's number and note; 0 for none): `sounding` takes it only
+    /// once it is handed out, so a note dropped from the queue is never
+    /// counted as sounding.
+    waiting: [(u32, u8); PAD_TONES],
     /// A closing piece has reached its last chord, and whether the bass
     /// has sounded the root to end on.
     home: bool,
@@ -182,6 +316,8 @@ pub struct Composer {
     phase: Phase,
     /// What the instruments play at: 1, falling to 0 as a piece closes.
     music_gain: f32,
+    /// A piece has just ended, for the synth to let its held notes go.
+    ended: bool,
 }
 
 /// Suspended, the chords that stay open: the tonic, subdominant and
@@ -197,9 +333,59 @@ fn open_chord(settings: &AmbienceSettings, chord: i32) -> i32 {
     }
 }
 
-/// On the pulse the harmony walks this, a chord every two bars: I IV V I,
-/// then VI IV V I.
+/// On the pulse, in a scale of other than seven notes, the harmony walks
+/// this, a chord every two bars: I IV V I, then VI IV V I.
 const CADENCE: [i32; 8] = [0, 3, 4, 0, 5, 3, 4, 0];
+
+/// Where a chord of a seven-note scale tends to go next, row by row (I,
+/// ii, iii, IV, V, vi, vii): how likely each chord is to follow it,
+/// before the character leans on them. Never to vii, whose fifth is
+/// diminished, nor to itself.
+///
+/// On the pulse the harmony is functional: the dominant goes home, the
+/// supertonic and subdominant lead to the dominant, the submediant to the
+/// subdominant or supertonic, as in a cadence.
+const PULSED: [[f32; 7]; 7] = [
+    [0.0, 0.15, 0.1, 0.35, 0.15, 0.25, 0.0],
+    [0.1, 0.0, 0.0, 0.15, 0.7, 0.05, 0.0],
+    [0.05, 0.0, 0.0, 0.35, 0.0, 0.6, 0.0],
+    [0.25, 0.15, 0.0, 0.0, 0.45, 0.15, 0.0],
+    [0.6, 0.0, 0.0, 0.1, 0.0, 0.3, 0.0],
+    [0.05, 0.35, 0.1, 0.4, 0.1, 0.0, 0.0],
+    [0.7, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0],
+];
+
+/// In free time it drifts: home and the subdominant and submediant most,
+/// a plagal turn as often as a cadence, nothing pulling hard.
+const FREE: [[f32; 7]; 7] = [
+    [0.0, 0.15, 0.1, 0.3, 0.1, 0.35, 0.0],
+    [0.2, 0.0, 0.1, 0.2, 0.3, 0.2, 0.0],
+    [0.2, 0.1, 0.0, 0.3, 0.0, 0.4, 0.0],
+    [0.4, 0.15, 0.1, 0.0, 0.15, 0.2, 0.0],
+    [0.4, 0.0, 0.1, 0.2, 0.0, 0.3, 0.0],
+    [0.2, 0.25, 0.1, 0.35, 0.1, 0.0, 0.0],
+    [0.5, 0.0, 0.3, 0.0, 0.0, 0.2, 0.0],
+];
+
+/// From this variety a chord is now and then borrowed from the parallel
+/// key, and how often at the most variety.
+const BORROWING: f32 = 0.7;
+const BORROW_CHANCE: f32 = 0.3;
+
+/// The key a chord is borrowed from, and the chords borrowed (degrees of
+/// it): a major mode borrows the minor's iv, bVI and bVII; a minor one the
+/// major's IV and V. None for the other scales.
+fn parallel(kind: ScaleKind) -> Option<(ScaleKind, &'static [i32])> {
+    match kind {
+        ScaleKind::Mode(Mode::Ionian | Mode::Lydian | Mode::Mixolydian) => {
+            Some((ScaleKind::Mode(Mode::Aeolian), &[3, 5, 6]))
+        }
+        ScaleKind::Mode(Mode::Aeolian | Mode::Dorian) => {
+            Some((ScaleKind::Mode(Mode::Ionian), &[3, 4]))
+        }
+        _ => None,
+    }
+}
 
 impl Composer {
     pub fn new(rate: u32, seed: u64) -> Self {
@@ -211,20 +397,28 @@ impl Composer {
             queue: [None; QUEUE],
             queued: 0,
             next: [0; Instrument::COUNT],
-            harp: Line::new(4),
+            harp: Line::new(4, HARP_LOOP),
             phrase_left: 0,
-            piano: Line::new(4),
-            violin: Line::new(2),
+            piano: Line::new(4, PIANO_LOOP),
+            violin: Line::new(2, VIOLIN_LOOP),
             chord: 0,
             sus: 3,
             next_harmony: 0,
             cadence_step: 0,
+            borrowed: None,
             drone_midi: None,
+            voicing: [0; PAD_TONES],
+            sounding: [0; PAD_TONES],
+            voiced: false,
+            pad_until: 0,
+            voicings: 0,
+            waiting: [(0, 0); PAD_TONES],
             home: false,
             ended_on_root: false,
             origin: 0,
             phase: Phase::Playing,
             music_gain: 1.0,
+            ended: false,
         }
     }
 
@@ -239,6 +433,7 @@ impl Composer {
     fn clear_queue(&mut self) {
         self.queued = 0;
         self.queue = [None; QUEUE];
+        self.waiting = [(0, 0); PAD_TONES];
     }
 
     fn start(&mut self, settings: &AmbienceSettings, now: u64) {
@@ -250,13 +445,17 @@ impl Composer {
         self.chord = 0;
         self.sus = 3;
         self.cadence_step = 0;
+        self.borrowed = None;
         self.next_harmony = now + self.harmony_span(settings);
-        self.harp = Line::new(4);
+        self.harp = Line::new(4, HARP_LOOP);
         self.phrase_left = 0;
-        self.piano = Line::new(4);
-        self.violin = Line::new(2);
+        self.piano = Line::new(4, PIANO_LOOP);
+        self.violin = Line::new(2, VIOLIN_LOOP);
         self.home = false;
         self.ended_on_root = false;
+        self.voiced = false;
+        self.sounding = [0; PAD_TONES];
+        self.pad_until = 0;
         for instrument in Instrument::ALL {
             // The pad and drone open; the rest come in a little later.
             let wait = match instrument {
@@ -302,6 +501,12 @@ impl Composer {
         self.music_gain
     }
 
+    /// True once after a piece has ended, so held notes can be let go
+    /// rather than wait out the pause.
+    pub fn take_ended(&mut self) -> bool {
+        std::mem::take(&mut self.ended)
+    }
+
     /// True once the music has begun: from the first poll after a reset.
     pub fn is_started(&self) -> bool {
         self.started
@@ -321,7 +526,11 @@ impl Composer {
         self.clear_queue();
         self.chord = 0;
         self.cadence_step = 0;
+        self.borrowed = None;
         self.next_harmony = now + self.harmony_span(settings);
+        // The held notes have been let go; the voices lead on from where
+        // they were, into the new key.
+        self.pad_until = 0;
         for (instrument, seconds) in [(Instrument::Pad, 0.6), (Instrument::Strings, 1.5)] {
             let next = &mut self.next[instrument.index()];
             *next = (*next).min(now + frames(self.rate, seconds));
@@ -337,7 +546,40 @@ impl Composer {
         self.queue.copy_within(1..self.queued, 0);
         self.queued -= 1;
         self.queue[self.queued] = None;
+        let note = first.note;
+        if note.instrument == Instrument::Pad && note.voicing > 0 {
+            // A pad voice now sounds this note, or, let go, nothing.
+            if let Some(voice) = self
+                .waiting
+                .iter()
+                .position(|waiting| *waiting == (note.voicing, note.midi))
+            {
+                self.sounding[voice] = if note.duration == 0 { 0 } else { note.midi };
+                self.waiting[voice] = (0, 0);
+            }
+        }
         Some(first)
+    }
+
+    /// Drops an instrument's events still waiting, keeping the rest in
+    /// order.
+    fn drop_queued(&mut self, instrument: Instrument) {
+        let mut kept = 0;
+        for index in 0..self.queued {
+            if let Some(event) = self.queue[index]
+                && event.note.instrument != instrument
+            {
+                self.queue[kept] = Some(event);
+                kept += 1;
+            }
+        }
+        for slot in &mut self.queue[kept..self.queued] {
+            *slot = None;
+        }
+        self.queued = kept;
+        if instrument == Instrument::Pad {
+            self.waiting = [(0, 0); PAD_TONES];
+        }
     }
 
     fn push(&mut self, event: Event) {
@@ -380,6 +622,7 @@ impl Composer {
             if to >= end {
                 self.phase = Phase::Pausing(end + frames(self.rate, pause_seconds));
                 self.music_gain = 0.0;
+                self.ended = true;
                 self.clear_queue();
                 return;
             }
@@ -389,12 +632,22 @@ impl Composer {
             _ => 1.0,
         };
         self.move_harmony(settings, from, progress);
+        let lent = self.lent(settings);
+        let settings = &lent;
         for instrument in Instrument::ALL {
             let layer = settings.layer(instrument);
             if !layer.enabled {
                 if instrument == Instrument::Drone {
                     // Sounded again when it comes back.
                     self.drone_midi = None;
+                }
+                if instrument == Instrument::Pad && self.voiced {
+                    // Nothing it planned plays; it starts afresh when it
+                    // comes back.
+                    self.drop_queued(Instrument::Pad);
+                    self.voiced = false;
+                    self.sounding = [0; PAD_TONES];
+                    self.pad_until = 0;
                 }
                 continue;
             }
@@ -428,8 +681,10 @@ impl Composer {
             }
             self.home = home;
             let wanted = if home { 0 } else { 4 };
-            if self.chord != wanted {
+            if self.chord != wanted || self.borrowed.is_some() {
+                self.borrowed = None;
                 self.chord = wanted;
+                self.drop_queued(Instrument::Pad);
                 self.next[Instrument::Pad.index()] = now;
             }
             return;
@@ -437,7 +692,32 @@ impl Composer {
         if now < self.next_harmony {
             return;
         }
-        self.chord = if settings.pulsed() {
+        let was_borrowed = self.borrowed.take().is_some();
+        self.chord = if was_borrowed {
+            // Back from the borrowed chord: home, or the dominant.
+            if self.rng.chance(0.7) { 0 } else { 4 }
+        } else if settings.scale.degrees() == 7 {
+            let table = if settings.pulsed() { &PULSED } else { &FREE };
+            let mut chord = self.markov(settings, table);
+            if self.maybe(settings.chaos * 0.5) {
+                // Any chord in the key but this one.
+                let here = open_chord(settings, self.chord);
+                let other = 1 + self.rng.below(6) as i32;
+                chord = (self.chord + other).rem_euclid(7);
+                if open_chord(settings, chord) == here {
+                    chord = (chord + 1).rem_euclid(7);
+                }
+            }
+            let borrow = BORROW_CHANCE * (settings.variety - BORROWING) / (1.0 - BORROWING);
+            if !settings.suspended
+                && let Some((kind, chords)) = parallel(settings.scale.kind)
+                && self.maybe(borrow)
+            {
+                self.borrowed = Some(kind);
+                chord = chords[self.rng.below(chords.len() as u32) as usize];
+            }
+            open_chord(settings, chord)
+        } else if settings.pulsed() {
             self.cadence_step = (self.cadence_step + 1) % CADENCE.len();
             let mut chord = CADENCE[self.cadence_step];
             // Variety stands in the supertonic, submediant or mediant now
@@ -461,7 +741,9 @@ impl Composer {
             self.sus = if self.rng.chance(0.5) { 1 } else { 3 };
         }
         self.next_harmony = now + self.harmony_span(settings);
-        // The pad voices the new chord soon.
+        // The pad voices the new chord soon, and none of the old chord's
+        // notes still waiting.
+        self.drop_queued(Instrument::Pad);
         let pad = Instrument::Pad.index();
         self.next[pad] = self.next[pad].min(now + frames(self.rate, self.rng.range(0.3, 1.5)));
     }
@@ -472,7 +754,58 @@ impl Composer {
         if settings.suspended { self.sus } else { 2 }
     }
 
-    /// A chord in free time: mostly home (more so with concentration, less
+    /// The next chord of a seven-note scale from `table`'s row for this
+    /// one, the character leaning on it: home more with concentration and
+    /// less with variety, the supertonic and mediant more with variety.
+    /// Never one that is (suspended) the same chord again, nor one whose
+    /// fifth is diminished (vii in a major key, ii in a minor one), but
+    /// for the tonic.
+    fn markov(&mut self, settings: &AmbienceSettings, table: &[[f32; 7]; 7]) -> i32 {
+        let from = self.chord.rem_euclid(7) as usize;
+        let mut weights = table[from];
+        weights[0] *= (0.5 + settings.concentration) * (1.5 - settings.variety);
+        weights[1] *= 2.0 * settings.variety;
+        weights[2] *= 2.0 * settings.variety;
+        let here = open_chord(settings, self.chord);
+        for (chord, weight) in weights.iter_mut().enumerate() {
+            let chord = chord as i32;
+            let root = settings.scale.note(0, chord);
+            let diminished = settings.scale.note(0, chord + 4) - root != 7;
+            if open_chord(settings, chord) == here || (diminished && chord != 0) {
+                *weight = 0.0;
+            }
+        }
+        let total: f32 = weights.iter().sum();
+        if total <= 0.0 {
+            return if here == 0 { 3 } else { 0 };
+        }
+        let mut roll = self.rng.unit() * total;
+        for (chord, weight) in weights.into_iter().enumerate() {
+            if roll < weight {
+                return chord as i32;
+            }
+            roll -= weight;
+        }
+        // Rounding: the last chord it could go to.
+        weights.iter().rposition(|w| *w > 0.0).unwrap_or(0) as i32
+    }
+
+    /// The settings the notes are made in: the borrowed key's while a
+    /// chord is borrowed.
+    fn lent(&self, settings: &AmbienceSettings) -> AmbienceSettings {
+        match self.borrowed {
+            Some(kind) => AmbienceSettings {
+                scale: Scale {
+                    kind,
+                    ..settings.scale
+                },
+                ..*settings
+            },
+            None => *settings,
+        }
+    }
+
+    /// A chord in free time, in a scale of other than seven notes: mostly home (more so with concentration, less
     /// with variety), the subdominant, submediant and dominant for colour,
     /// the supertonic and mediant as variety rises; with chaos, any.
     fn pick_chord(&mut self, settings: &AmbienceSettings) -> i32 {
@@ -512,6 +845,8 @@ impl Composer {
                     velocity: 1.0,
                     pan: 0.0,
                     duration: 0,
+                    from: None,
+                    voicing: 0,
                 },
             });
         }
@@ -647,23 +982,43 @@ impl Composer {
                 .round()
                 .max(1.0) as i32;
             let mut step = 0;
+            let fill = GAP_FILL * (0.4 + 0.6 * concentration);
+            if line.step.abs() >= LEAP && self.rng.chance(fill) {
+                // After a leap, a step or two back the other way, as a
+                // singer fills the gap it left.
+                step = -line.step.signum() * (1 + self.rng.below(2) as i32).min(widest);
+            }
             while step == 0 {
                 step = self.rng.below(2 * widest as u32 + 1) as i32 - widest;
             }
             line.degree + step
         };
         let (low, high) = span(concentration, len);
+        let before = line.degree;
         line.degree = degree.clamp(low, high);
+        line.step = line.degree - before;
         if !line.again {
             line.motif[slot].0 = line.degree - self.chord;
+            if !line.repeating {
+                // Half its notes echo, once to three times, when the
+                // motif comes back as a loop.
+                line.echoes[slot] = if self.rng.chance(0.5) {
+                    0
+                } else {
+                    1 + self.rng.below(ECHOES) as u8
+                };
+            }
             line.written = (line.written + 1).min(MOTIF);
         }
         line.degree
     }
 
     /// The gap after a line's note, `spacing` times a factor in
-    /// `low..high`: the motif's own when the note was the motif again, so
-    /// a motif keeps its rhythm; else a new one, remembered.
+    /// `low..high`: the motif's own while the motif repeats, so a motif
+    /// keeps its rhythm, stretched so the pass lasts the line's loop
+    /// length (or a whole number or a whole fraction of it, whichever is
+    /// nearest in ratio, so by about 40 % at most); else a new one,
+    /// remembered.
     fn line_gap(
         &mut self,
         settings: &AmbienceSettings,
@@ -672,14 +1027,68 @@ impl Composer {
         low: f32,
         high: f32,
     ) -> u64 {
-        let factor = if line.again {
-            line.motif[line.slot].1
-        } else {
-            let factor = self.gap_factor(settings, low, high);
-            line.motif[line.slot].1 = factor;
-            factor
-        };
+        if line.repeating {
+            if line.slot == 0 {
+                let length = motif_length(settings.variety).min(line.written);
+                let natural: f32 =
+                    spacing * line.motif[..length].iter().map(|(_, gap)| gap).sum::<f32>();
+                // The whole number of loop lengths, or the whole fraction of
+                // one, nearest the motif's own length in ratio.
+                let ratio = (natural / line.loop_seconds).max(1e-3);
+                let (times, parts) = (ratio.max(1.0), (1.0 / ratio).max(1.0));
+                let target = [
+                    times.floor(),
+                    times.ceil(),
+                    1.0 / parts.floor(),
+                    1.0 / parts.ceil(),
+                ]
+                .into_iter()
+                .map(|loops| loops * line.loop_seconds)
+                .min_by(|a, b| {
+                    (a / natural)
+                        .ln()
+                        .abs()
+                        .total_cmp(&(b / natural).ln().abs())
+                })
+                .unwrap_or(line.loop_seconds);
+                line.stretch = if natural > 0.0 { target / natural } else { 1.0 };
+            }
+            return frames(self.rate, spacing * line.motif[line.slot].1 * line.stretch);
+        }
+        let factor = self.gap_factor(settings, low, high);
+        line.motif[line.slot].1 = factor;
         frames(self.rate, spacing * factor)
+    }
+
+    /// Echoes of a note of a looped motif: the same note, softer each
+    /// time, `seconds` apart in free time and a beat apart on the pulse,
+    /// from side to side.
+    #[allow(clippy::too_many_arguments)]
+    fn echo(
+        &mut self,
+        settings: &AmbienceSettings,
+        line: &Line,
+        instrument: Instrument,
+        at: u64,
+        midi: u8,
+        velocity: f32,
+        pan: f32,
+        seconds: f32,
+    ) {
+        if !line.repeating {
+            return;
+        }
+        let apart = if settings.pulsed() {
+            self.beat(settings)
+        } else {
+            frames(self.rate, seconds)
+        };
+        let mut velocity = velocity;
+        for echo in 1..=u64::from(line.echoes[line.slot]) {
+            velocity *= ECHO_SOFTER;
+            let side = if echo % 2 == 1 { -0.8 } else { 0.8 };
+            self.note(at + apart * echo, instrument, midi, velocity, pan * side, 0);
+        }
     }
 
     /// Under chaos, now and then a note a semitone off, out of the key
@@ -722,6 +1131,8 @@ impl Composer {
                 velocity,
                 pan,
                 duration,
+                from: None,
+                voicing: 0,
             },
         });
     }
@@ -800,12 +1211,25 @@ impl Composer {
         let velocity = self.velocity(settings, 0.35, 0.8);
         let pan = self.rng.range(-0.65, 0.65);
         self.note(at, Instrument::Harp, midi, velocity, pan, 0);
+        if self.phrase_left == 0 {
+            self.echo(
+                settings,
+                &line,
+                Instrument::Harp,
+                at,
+                midi,
+                velocity,
+                pan,
+                HARP_ECHO,
+            );
+        }
         let gap = if self.phrase_left > 0 {
             self.phrase_left -= 1;
             self.answer(settings, 0.13, 0.24)
-        } else if self
-            .rng
-            .chance(0.22 * spread(settings.variety) + 0.5 * drive)
+        } else if !line.repeating
+            && self
+                .rng
+                .chance(0.22 * spread(settings.variety) + 0.5 * drive)
         {
             self.phrase_left = if drive > 0.0 {
                 2 + self.rng.below(3) as u8
@@ -883,6 +1307,16 @@ impl Composer {
         let velocity = self.velocity(settings, 0.3, 0.65);
         let pan = self.rng.range(-0.35, 0.35);
         self.note(at, Instrument::Piano, midi, velocity, pan, 0);
+        self.echo(
+            settings,
+            &line,
+            Instrument::Piano,
+            at,
+            midi,
+            velocity,
+            pan,
+            PIANO_ECHO,
+        );
         let drive = drive(settings);
         if self.maybe(0.5 * drive) {
             // A chord beneath: a third and a fifth below; suspended, a
@@ -927,6 +1361,16 @@ impl Composer {
         let velocity = self.velocity(settings, 0.35, 0.7);
         let pan = self.rng.range(-0.5, 0.5);
         self.note(at, Instrument::Violin, midi, velocity, pan, 0);
+        self.echo(
+            settings,
+            &line,
+            Instrument::Violin,
+            at,
+            midi,
+            velocity,
+            pan,
+            VIOLIN_ECHO,
+        );
         if self.rng.chance(0.25 + 0.4 * drive(settings)) {
             let step = if self.rng.chance(0.5) { 1 } else { -1 };
             let answer = settings.note(Instrument::Violin, (degree + step).max(0));
@@ -965,12 +1409,104 @@ impl Composer {
         frames(self.rate, spacing * self.gap_factor(settings, 0.7, 1.8))
     }
 
-    /// The chord as three slow notes, a little staggered; fuller, the
-    /// seventh too, and fullest the ninth (suspended, the octave and the
-    /// fifth above it, so no third creeps in); with chaos, a note bent off now
-    /// and then and a fourth that rubs against them: the second, or at high
-    /// chaos a semitone above the root. Driven, held more briefly, never
-    /// past the next chord.
+    /// The colour over the chord below fuller energy, as a degree above
+    /// its root: the ninth over a major chord, the eleventh over a minor
+    /// one. None over any other chord, in a pentatonic scale, or
+    /// suspended (whose second or fourth is colour enough).
+    fn colour(&self, settings: &AmbienceSettings) -> Option<i32> {
+        let len = settings.scale.degrees();
+        if settings.suspended || len != 7 || settings.energy >= FULLER {
+            return None;
+        }
+        let root = settings.scale.note(0, self.chord);
+        let third = settings.scale.note(0, self.chord + 2) - root;
+        let fifth = settings.scale.note(0, self.chord + 4) - root;
+        match (third, fifth) {
+            (4, 7) => Some(len + 1),
+            (3, 7) => Some(len + 3),
+            _ => None,
+        }
+    }
+
+    /// The pad's next voicing, low to high: the root low; the third, the
+    /// fifth and the octave above it (fuller, the seventh in the octave's
+    /// place), led from the last voicing so common tones hold and the
+    /// rest move by step; and a colour, or fullest the ninth, over them.
+    fn voice(&self, settings: &AmbienceSettings) -> [i32; PAD_TONES] {
+        let len = settings.scale.degrees();
+        let home = i32::from(settings.note(Instrument::Pad, 0));
+        let tone = |degree: i32| settings.note(Instrument::Pad, self.chord + degree);
+        let seventh = len - 1;
+        // In a pentatonic scale the seventh would be the chord's fifth.
+        let top = if !settings.suspended && settings.energy >= FULLER && seventh != 4 {
+            seventh
+        } else {
+            len
+        };
+        let mut upper = [tone(self.third(settings)), tone(4), tone(top)];
+        // In a pentatonic scale or suspended two tones can fall on one
+        // note; the second takes the first other note of the scale above
+        // the chord's root that is not in it yet.
+        let class = |midi: u8| midi % 12;
+        for i in 1..upper.len() {
+            if upper[..i].iter().any(|m| class(*m) == class(upper[i])) {
+                let spare = (0..len).map(tone).find(|m| {
+                    upper[..i]
+                        .iter()
+                        .chain(&upper[i + 1..])
+                        .all(|u| class(*u) != class(*m))
+                });
+                if let Some(spare) = spare {
+                    upper[i] = spare;
+                }
+            }
+        }
+        let range = |(low, high): (i32, i32)| (home + low, home + high);
+        let (low_low, low_high) = range(LOW_RANGE);
+        let (upper_low, upper_high) = range(UPPER_RANGE);
+        let (colour_low, colour_high) = range(COLOUR_RANGE);
+        let previous = if self.voiced {
+            self.voicing
+        } else {
+            // The first chord: the three around the octave above home.
+            [home, home + 12, home + 12, home + 12, home + 19]
+        };
+        let mut voicing = [0; PAD_TONES];
+        voicing[LOW] = nearest(tone(0), previous[LOW], low_low, low_high);
+        let led = lead(
+            [previous[1], previous[2], previous[3]],
+            upper,
+            upper_low,
+            upper_high,
+        );
+        voicing[1..COLOUR].copy_from_slice(&led);
+        let extra = if settings.energy >= FULLEST {
+            Some(if settings.suspended { len + 4 } else { len + 1 })
+        } else {
+            self.colour(settings)
+        };
+        if let Some(degree) = extra {
+            // Over the three, clear of the highest.
+            let highest = led.iter().copied().max().unwrap_or(upper_high);
+            let near = if previous[COLOUR] > 0 {
+                previous[COLOUR]
+            } else {
+                home + 19
+            };
+            // None when the three have climbed so high there is no room:
+            // the chord goes without it rather than crowd them.
+            voicing[COLOUR] =
+                within(tone(degree), near, colour_low.max(highest + 1), colour_high).unwrap_or(0);
+        }
+        voicing
+    }
+
+    /// The chord as five slow voices, a little staggered, led from the last
+    /// so the pad moves as one: held over a change where a note stays, and
+    /// a step away glided to (`Note::from`) while the last are still held.
+    /// With chaos, a note bent off now and then and one that rubs against
+    /// the low root: the second, or more often with chaos a semitone. Driven, held more
+    /// briefly, never past the next chord.
     fn pad(&mut self, settings: &AmbienceSettings, at: u64, spacing: f32) -> u64 {
         let drive = drive(settings);
         let mut seconds = self.rng.range(12.0, 22.0) * (1.0 - 0.5 * drive);
@@ -980,47 +1516,77 @@ impl Composer {
         }
         let duration = frames(self.rate, seconds);
         let velocity = self.velocity(settings, 0.5, 0.7);
-        for (i, tone) in [0, self.third(settings), 4].into_iter().enumerate() {
-            let midi = settings.note(Instrument::Pad, self.chord + tone);
-            let midi = self.unsettle(settings, midi, 0.2);
-            let stagger = frames(self.rate, 0.35 * i as f32);
-            let pan = (i as f32 - 1.0) * 0.4;
-            self.note(at + stagger, Instrument::Pad, midi, velocity, pan, duration);
-        }
-        let len = settings.scale.degrees();
-        let (fuller, fullest) = if settings.suspended {
-            (len, len + 4)
-        } else {
-            (len - 1, len + 1)
-        };
-        let colours = [(FULLER, fuller, 0.7, 0.85), (FULLEST, fullest, 1.4, 0.7)];
-        for (energy, tone, after, softer) in colours {
-            // In a pentatonic scale the seventh would be the chord's top.
-            if settings.energy >= energy && tone != 4 {
-                let midi = settings.note(Instrument::Pad, self.chord + tone);
-                let stagger = frames(self.rate, after);
-                let velocity = velocity * softer;
-                self.note(at + stagger, Instrument::Pad, midi, velocity, 0.0, duration);
+        let held = self.voiced && at < self.pad_until;
+        let voicing = self.voice(settings);
+        self.voicings = self.voicings.wrapping_add(1).max(1);
+        let mut order = 0;
+        for (i, &midi) in voicing.iter().enumerate() {
+            if midi <= 0 {
+                // A voice this voicing leaves out is let go.
+                if held && self.sounding[i] > 0 {
+                    self.push(Event {
+                        at,
+                        note: Note {
+                            instrument: Instrument::Pad,
+                            midi: self.sounding[i],
+                            velocity: 0.0,
+                            pan: PAD_PANS[i],
+                            duration: 0,
+                            from: Some(self.sounding[i]),
+                            voicing: self.voicings,
+                        },
+                    });
+                    self.waiting[i] = (self.voicings, self.sounding[i]);
+                } else {
+                    self.sounding[i] = 0;
+                }
+                continue;
             }
+            let sounding = self.unsettle(settings, midi.clamp(0, 127) as u8, 0.2);
+            let from = (held && self.sounding[i] > 0).then_some(self.sounding[i]);
+            let stagger = frames(self.rate, 0.35 * order as f32);
+            order += 1;
+            self.push(Event {
+                at: at + stagger,
+                note: Note {
+                    instrument: Instrument::Pad,
+                    midi: sounding,
+                    velocity: velocity * PAD_LEVELS[i],
+                    pan: PAD_PANS[i],
+                    duration,
+                    from,
+                    voicing: self.voicings,
+                },
+            });
+            self.waiting[i] = (self.voicings, sounding);
         }
+        self.voicing = voicing;
+        self.voiced = true;
+        self.pad_until = at + duration;
         if self.maybe(settings.chaos * 0.8) {
-            let midi = if self.maybe(settings.chaos - 0.5) {
-                settings.note(Instrument::Pad, self.chord) + 1
+            let low = voicing[LOW].clamp(0, 126) as u8;
+            let midi = if self.maybe(settings.chaos - 0.3) {
+                low + 1
             } else {
-                settings.note(Instrument::Pad, self.chord + 1)
+                let second =
+                    settings.scale.note(0, self.chord + 1) - settings.scale.note(0, self.chord);
+                low.saturating_add(second.rem_euclid(12)).min(127)
             };
             let stagger = frames(self.rate, 1.05);
             self.note(
                 at + stagger,
                 Instrument::Pad,
                 midi,
-                velocity * 0.8,
+                velocity * 0.7,
                 0.0,
                 duration,
             );
         }
-        // Until the chord changes, or the notes die away.
-        let gap = frames(self.rate, seconds * 0.9).min(self.next_harmony.saturating_sub(at).max(1));
+        // Until the notes die away, or past the chord's end: the change
+        // of chord brings the next voicing on (`move_harmony`), so the old
+        // chord is not voiced again just before it.
+        let until_change = self.next_harmony.saturating_sub(at) + frames(self.rate, 2.0);
+        let gap = frames(self.rate, seconds * 0.9).min(until_change);
         gap.max(frames(self.rate, spacing * 0.3))
     }
 }
@@ -1148,7 +1714,7 @@ mod tests {
                 settings.layers[instrument].enabled = instrument == Instrument::Piano;
             }
             settings.layers[Instrument::Piano].density = Density::new(amount);
-            of(&play(&settings, 2, 6), Instrument::Piano).len()
+            struck(&play(&settings, 2, 6), PIANO_ECHO).len()
         };
         let (few, middle, many) = (count(0.0), count(0.5), count(1.0));
         assert!(
@@ -1269,14 +1835,40 @@ mod tests {
         assert!(mean(&lively) > mean(&quiet) + 0.1, "played harder");
         assert!(lively.len() > quiet.len() * 2, "more notes");
 
-        // The pad's chords: three notes at Ambient, five at Vibrant.
+        // The pad's chords: the root low and three above it, at Ambient
+        // with a colour over a major or minor chord (the first, on the
+        // tonic, is major); at Vibrant with the seventh and the ninth.
         let voicing = |events: &[Event]| {
             let pads = of(events, Instrument::Pad);
             let first = pads[0].at;
             pads.iter().filter(|e| e.at < first + 48_000 * 2).count()
         };
-        assert_eq!(voicing(&quiet), 3);
+        assert_eq!(voicing(&quiet), 5);
         assert_eq!(voicing(&lively), 5);
+        // Over the first chord, the tonic: the ninth at both, the seventh
+        // only at Vibrant (in the octave's place).
+        let classes = |events: &[Event], settings: &AmbienceSettings| {
+            let pads = of(events, Instrument::Pad);
+            let first = pads[0].at;
+            let root = i32::from(settings.scale.root);
+            let mut classes: Vec<i32> = pads
+                .iter()
+                .filter(|e| e.at < first + 48_000 * 2)
+                .map(|e| (i32::from(e.note.midi) - root).rem_euclid(12))
+                .collect();
+            classes.sort_unstable();
+            classes.dedup();
+            classes
+        };
+        let (calm, full) = (classes(&quiet, &ambient), classes(&lively, &vibrant));
+        assert!(
+            calm.contains(&2) && !calm.contains(&10) && !calm.contains(&11),
+            "{calm:?}"
+        );
+        assert!(
+            full.contains(&2) && (full.contains(&10) || full.contains(&11)),
+            "{full:?}"
+        );
 
         // The harp runs up the chord: three or more rising notes in a row,
         // half a beat apart.
@@ -1309,6 +1901,23 @@ mod tests {
 
     /// The piano alone, lively, at a character; its main notes (not the
     /// doubles under them) in order.
+    /// The notes struck, not a loop's echoes (the same note a whole
+    /// number of echoes, `seconds` apart, after an earlier one).
+    fn struck(events: &[Event], seconds: f32) -> Vec<Event> {
+        let echo = frames(48_000, seconds);
+        events
+            .iter()
+            .filter(|event| {
+                !events.iter().any(|earlier| {
+                    earlier.note.instrument == event.note.instrument
+                        && earlier.note.midi == event.note.midi
+                        && (1..=u64::from(ECHOES)).any(|k| earlier.at + echo * k == event.at)
+                })
+            })
+            .copied()
+            .collect()
+    }
+
     fn piano_line(variety: f32, concentration: f32, chaos: f32, seed: u64) -> Vec<Event> {
         let mut settings = Style::SeasidePiano.settings();
         settings.enabled = true;
@@ -1320,7 +1929,7 @@ mod tests {
         settings.concentration = concentration;
         settings.chaos = chaos;
         let mut events: Vec<Event> = Vec::new();
-        for event in play(&settings, seed, 6) {
+        for event in struck(&play(&settings, seed, 6), PIANO_ECHO) {
             if events.last().is_none_or(|last| last.at != event.at) {
                 events.push(event);
             }
@@ -1336,7 +1945,9 @@ mod tests {
         let degree = |midi: u8| {
             let above = i32::from(midi) - i32::from(settings.scale.root);
             let class = above.rem_euclid(12) as u8;
-            let index = intervals.iter().position(|i| *i == class).unwrap() as i32;
+            // A note borrowed from the parallel key counts as the step
+            // below it.
+            let index = intervals.iter().rposition(|i| *i <= class).unwrap_or(0) as i32;
             above.div_euclid(12) * intervals.len() as i32 + index
         };
         let figures: Vec<[i32; 3]> = events
@@ -1418,7 +2029,8 @@ mod tests {
                 .filter(|e| !settings.scale.contains(e.note.midi))
                 .count();
             // The pad's chords: a chord's notes are all held as long. A
-            // cluster has two a semitone or a tone apart.
+            // cluster has two a semitone apart, in any octave (a ninth or
+            // an eleventh over the chord is colour, not a cluster).
             let mut chords: Vec<(u64, Vec<u8>)> = Vec::new();
             for pad in of(&events, Instrument::Pad) {
                 let (duration, midi) = (pad.note.duration, pad.note.midi);
@@ -1431,7 +2043,7 @@ mod tests {
                 chord.iter().any(|a| {
                     chord.iter().any(|b| {
                         let class = a.abs_diff(*b) % 12;
-                        matches!(class, 1 | 2 | 10 | 11)
+                        matches!(class, 1 | 11)
                     })
                 })
             };
@@ -1521,6 +2133,496 @@ mod tests {
     }
 
     #[test]
+    fn the_pad_leads_its_voices_by_step_and_holds_common_tones() {
+        for kind in [
+            ScaleKind::Mode(Mode::Ionian),
+            ScaleKind::Mode(Mode::Dorian),
+            ScaleKind::Mode(Mode::Aeolian),
+            ScaleKind::Mode(Mode::Lydian),
+            ScaleKind::MinorPentatonic,
+        ] {
+            let mut settings = Style::RainStudy.settings();
+            settings.scale = Scale { root: 2, kind };
+            let len = settings.scale.degrees();
+            let home = i32::from(settings.note(Instrument::Pad, 0));
+            let mut composer = Composer::new(48_000, 1);
+            // Every chord after every other, twice round.
+            let mut chords: Vec<i32> = Vec::new();
+            for _ in 0..2 {
+                for from in 0..len {
+                    for to in 0..len {
+                        chords.extend([from, to]);
+                    }
+                }
+            }
+            let mut previous: Option<[i32; PAD_TONES]> = None;
+            for chord in chords {
+                composer.chord = chord;
+                let voicing = composer.voice(&settings);
+                for midi in &voicing[1..COLOUR] {
+                    assert!(
+                        (home + UPPER_RANGE.0..=home + UPPER_RANGE.1).contains(midi),
+                        "{kind:?}: {midi} out of range"
+                    );
+                }
+                if let Some(before) = previous {
+                    let moved: Vec<i32> = (1..COLOUR)
+                        .map(|voice| (voicing[voice] - before[voice]).abs())
+                        .collect();
+                    assert!(
+                        moved.iter().all(|m| *m <= 5) && moved.iter().sum::<i32>() <= 8,
+                        "{kind:?}: {before:?} to {voicing:?} moves {moved:?}"
+                    );
+                    // A note the two chords share is held.
+                    for midi in &before[1..COLOUR] {
+                        let class = midi.rem_euclid(12);
+                        if voicing[1..COLOUR].iter().any(|m| m.rem_euclid(12) == class) {
+                            assert!(
+                                voicing[1..COLOUR].contains(midi),
+                                "{kind:?}: {midi} is in both and moved: {before:?} to {voicing:?}"
+                            );
+                        }
+                    }
+                }
+                composer.voicing = voicing;
+                composer.voiced = true;
+                previous = Some(voicing);
+            }
+        }
+    }
+
+    #[test]
+    fn the_pads_colour_sits_over_the_chord_and_no_note_doubles() {
+        let mut checked = 0;
+        for style in Style::ALL {
+            for (energy, suspended) in [
+                (0.4, false),
+                (0.7, false),
+                (0.9, false),
+                (0.9, true),
+                (0.4, true),
+            ] {
+                let mut settings = style.settings();
+                settings.energy = energy;
+                settings.suspended = suspended;
+                let mut composer = Composer::new(48_000, 1);
+                let len = settings.scale.degrees();
+                for step in 0..200 {
+                    composer.chord = open_chord(&settings, (step * 3 + step / 7) % len);
+                    let voicing = composer.voice(&settings);
+                    let top = voicing[1..COLOUR].iter().copied().max().unwrap();
+                    if voicing[COLOUR] > 0 {
+                        assert!(voicing[COLOUR] > top, "{}: {voicing:?}", style.name());
+                        checked += 1;
+                    }
+                    let mut notes: Vec<i32> = voicing.iter().copied().filter(|m| *m > 0).collect();
+                    let count = notes.len();
+                    notes.sort_unstable();
+                    notes.dedup();
+                    assert_eq!(
+                        notes.len(),
+                        count,
+                        "{}: {voicing:?} doubles a note",
+                        style.name()
+                    );
+                    composer.voicing = voicing;
+                    composer.voiced = true;
+                }
+            }
+        }
+        assert!(checked > 1000, "{checked} colours");
+    }
+
+    #[test]
+    fn the_pad_carries_its_notes_over_while_they_hold() {
+        let mut settings = Style::Cathedral.settings();
+        settings.enabled = true;
+        *settings.layer_mut(Instrument::Pad) = Layer::on(0.7, Density::LIVELY);
+        let events = play(&settings, 3, 6);
+        let pads = of(&events, Instrument::Pad);
+        let carried: Vec<_> = pads
+            .iter()
+            .filter_map(|e| e.note.from.map(|from| (from, e.note.midi)))
+            .collect();
+        assert!(
+            carried.len() * 4 > pads.len(),
+            "{} of {} carried",
+            carried.len(),
+            pads.len()
+        );
+        assert!(
+            carried.iter().any(|(from, midi)| from == midi),
+            "a note held on"
+        );
+        assert!(
+            carried.iter().any(|(from, midi)| from != midi),
+            "a note led on"
+        );
+        // Nothing else carries a note.
+        assert!(
+            events
+                .iter()
+                .all(|e| e.note.instrument == Instrument::Pad || e.note.from.is_none())
+        );
+    }
+
+    /// A line alone (every other layer off) for `minutes`, its struck
+    /// notes only.
+    fn line_alone(
+        style: Style,
+        instrument: Instrument,
+        variety: f32,
+        minutes: u64,
+        echo: f32,
+    ) -> Vec<Event> {
+        let mut settings = style.settings();
+        settings.enabled = true;
+        settings.form = Form::Endless;
+        for other in Instrument::ALL {
+            settings.layer_mut(other).enabled = false;
+        }
+        *settings.layer_mut(instrument) = Layer::on(0.7, Density::LIVELY);
+        settings.variety = variety;
+        let events = play(&settings, 4, minutes);
+        struck(
+            &of(&events, instrument)
+                .into_iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            echo,
+        )
+    }
+
+    /// The share of notes another note follows exactly a whole number of
+    /// `seconds` later, or a whole fraction of it (to a few frames).
+    fn looped_share(events: &[Event], seconds: f32) -> f32 {
+        let lengths: Vec<u64> = (1..=4)
+            .map(|n| frames(48_000, seconds * n as f32))
+            .chain((2..=4).map(|n| frames(48_000, seconds / n as f32)))
+            .collect();
+        let looped = events
+            .iter()
+            .filter(|event| {
+                lengths.iter().any(|length| {
+                    events
+                        .iter()
+                        .any(|later| later.at.abs_diff(event.at + length) <= 4)
+                })
+            })
+            .count();
+        looped as f32 / events.len().max(1) as f32
+    }
+
+    #[test]
+    fn at_low_variety_each_line_loops_on_its_own_length() {
+        for (instrument, seconds, echo) in [
+            (Instrument::Piano, PIANO_LOOP, PIANO_ECHO),
+            (Instrument::Violin, VIOLIN_LOOP, VIOLIN_ECHO),
+            (Instrument::Harp, HARP_LOOP, HARP_ECHO),
+        ] {
+            let still = line_alone(Style::SeasidePiano, instrument, 0.0, 12, echo);
+            let restless = line_alone(Style::SeasidePiano, instrument, 1.0, 12, echo);
+            let (looped, wandering) = (
+                looped_share(&still, seconds),
+                looped_share(&restless, seconds),
+            );
+            assert!(
+                looped > 0.5 && wandering < 0.25,
+                "{instrument:?}: {looped} of the notes recur on the loop at low variety, {wandering} at high"
+            );
+        }
+    }
+
+    #[test]
+    fn a_looped_note_echoes_softer_from_side_to_side() {
+        let mut settings = Style::SeasidePiano.settings();
+        settings.enabled = true;
+        settings.form = Form::Endless;
+        for other in Instrument::ALL {
+            settings.layer_mut(other).enabled = false;
+        }
+        *settings.layer_mut(Instrument::Piano) = Layer::on(0.7, Density::LIVELY);
+        settings.variety = 0.0;
+        let events = play(&settings, 4, 8);
+        let piano = of(&events, Instrument::Piano);
+        let echo = frames(48_000, PIANO_ECHO);
+        let mut echoes = 0;
+        for note in &piano {
+            let mut previous = **note;
+            for k in 1..=u64::from(ECHOES) {
+                let Some(next) = piano
+                    .iter()
+                    .find(|e| e.at == note.at + echo * k && e.note.midi == note.note.midi)
+                else {
+                    break;
+                };
+                assert!(
+                    (next.note.velocity - previous.note.velocity * ECHO_SOFTER).abs() < 1e-4,
+                    "each echo half as loud"
+                );
+                if note.note.pan.abs() > 0.05 {
+                    assert!(
+                        next.note.pan
+                            * note.note.pan.signum()
+                            * if k % 2 == 1 { -1.0 } else { 1.0 }
+                            > 0.0,
+                        "from side to side"
+                    );
+                }
+                previous = **next;
+                echoes += 1;
+            }
+            // Never a fourth.
+            assert!(!piano.iter().any(|e| e.at == note.at + echo * 4
+                && e.note.midi == note.note.midi
+                && e.note.velocity < note.note.velocity * 0.1));
+        }
+        assert!(echoes > 20, "{echoes} echoes");
+        // None while the line wanders.
+        let restless = {
+            settings.variety = 1.0;
+            play(&settings, 4, 8)
+        };
+        let piano = of(&restless, Instrument::Piano);
+        let echoed = piano
+            .iter()
+            .filter(|n| {
+                piano
+                    .iter()
+                    .any(|e| e.at == n.at + echo && e.note.midi == n.note.midi)
+            })
+            .count();
+        assert!(
+            echoed * 20 < piano.len(),
+            "{echoed} echoes of {}",
+            piano.len()
+        );
+    }
+
+    /// The chords one after another as the harmony moves, from home.
+    fn chords(settings: &AmbienceSettings, count: usize) -> Vec<(i32, Option<ScaleKind>)> {
+        let mut composer = Composer::new(48_000, 11);
+        composer.start(settings, 0);
+        (0..count)
+            .map(|_| {
+                let now = composer.next_harmony;
+                composer.move_harmony(settings, now, None);
+                (composer.chord, composer.borrowed)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_harmony_follows_its_tables_never_repeating_nor_on_the_seventh() {
+        for pulsed in [false, true] {
+            let mut settings = Style::RainStudy.settings();
+            settings.scale = Scale {
+                root: 0,
+                kind: ScaleKind::Mode(Mode::Ionian),
+            };
+            if pulsed {
+                settings.set_presence(Presence::Declarative);
+            }
+            assert_eq!(settings.pulsed(), pulsed);
+            let walk = chords(&settings, 2000);
+            let mut previous = 0;
+            let mut counts = [[0usize; 7]; 7];
+            for (chord, borrowed) in &walk {
+                assert!(borrowed.is_none(), "nothing borrowed at this variety");
+                assert!((0..6).contains(chord), "never vii: {chord}");
+                assert_ne!(*chord, previous, "never the same chord twice");
+                counts[previous as usize][*chord as usize] += 1;
+                previous = *chord;
+            }
+            let share = |from: usize, to: usize| {
+                counts[from][to] as f32 / counts[from].iter().sum::<usize>().max(1) as f32
+            };
+            if pulsed {
+                assert!(share(4, 0) > 0.5, "the dominant goes home: {}", share(4, 0));
+                assert!(
+                    share(1, 4) > 0.5,
+                    "the supertonic to the dominant: {}",
+                    share(1, 4)
+                );
+            } else {
+                assert!(
+                    share(3, 0) > 0.3 && share(4, 0) > 0.3,
+                    "plagal as much as authentic"
+                );
+                assert!(share(2, 4) == 0.0, "iii never to V in free time");
+            }
+        }
+    }
+
+    #[test]
+    fn a_wandering_mood_borrows_chords_from_the_parallel_key_and_returns() {
+        let at = |kind: ScaleKind, variety: f32, suspended: bool| {
+            let mut settings = Style::RainStudy.settings();
+            settings.scale = Scale { root: 0, kind };
+            settings.variety = variety;
+            settings.suspended = suspended;
+            chords(&settings, 1000)
+        };
+        let walk = at(ScaleKind::Mode(Mode::Ionian), 1.0, false);
+        let borrowed: Vec<_> = walk.iter().filter(|(_, b)| b.is_some()).collect();
+        assert!(borrowed.len() > 100, "{} borrowed", borrowed.len());
+        for (chord, kind) in &borrowed {
+            assert_eq!(*kind, Some(ScaleKind::Mode(Mode::Aeolian)));
+            assert!([3, 5, 6].contains(chord), "iv, bVI or bVII: {chord}");
+        }
+        for pair in walk.windows(2) {
+            if pair[0].1.is_some() {
+                assert!(
+                    pair[1].1.is_none() && [0, 4].contains(&pair[1].0),
+                    "back home or to the dominant"
+                );
+            }
+        }
+        let minor = at(ScaleKind::Mode(Mode::Aeolian), 1.0, false);
+        assert!(
+            minor
+                .iter()
+                .any(|(c, b)| *b == Some(ScaleKind::Mode(Mode::Ionian)) && [3, 4].contains(c))
+        );
+        for quiet in [
+            at(ScaleKind::Mode(Mode::Ionian), 0.6, false),
+            at(ScaleKind::Mode(Mode::Ionian), 1.0, true),
+            at(ScaleKind::Mode(Mode::Phrygian), 1.0, false),
+            at(ScaleKind::MajorPentatonic, 1.0, false),
+        ] {
+            assert!(quiet.iter().all(|(_, b)| b.is_none()));
+        }
+
+        // While borrowed, the notes are the borrowed key's: in C, the
+        // flats of C minor and nothing else outside C major.
+        let mut settings = Style::RainStudy.settings();
+        settings.enabled = true;
+        settings.scale = Scale {
+            root: 0,
+            kind: ScaleKind::Mode(Mode::Ionian),
+        };
+        settings.variety = 1.0;
+        for layer in &mut settings.layers {
+            *layer = Layer::on(0.8, Density::LIVELY);
+        }
+        let events = play(&settings, 7, 10);
+        let outside: Vec<u8> = events
+            .iter()
+            .filter(|e| !(e.note.instrument == Instrument::Drums && e.note.midi == SHAKER))
+            .map(|e| e.note.midi % 12)
+            .filter(|class| !settings.scale.contains(*class))
+            .collect();
+        assert!(!outside.is_empty());
+        assert!(
+            outside.iter().all(|class| [3, 8, 10].contains(class)),
+            "{outside:?}"
+        );
+    }
+
+    #[test]
+    fn a_piece_closes_in_its_own_key_even_from_a_borrowed_chord() {
+        let mut settings = Style::RainStudy.settings();
+        settings.scale = Scale {
+            root: 9,
+            kind: ScaleKind::Mode(Mode::Aeolian),
+        };
+        settings.variety = 1.0;
+        let mut composer = Composer::new(48_000, 11);
+        composer.start(&settings, 0);
+        // Borrowed the major's V, which is where a close heads first.
+        composer.chord = 4;
+        composer.borrowed = Some(ScaleKind::Mode(Mode::Ionian));
+        composer.move_harmony(&settings, 48_000, Some(0.86));
+        assert_eq!((composer.chord, composer.borrowed), (4, None));
+        composer.borrowed = Some(ScaleKind::Mode(Mode::Ionian));
+        composer.move_harmony(&settings, 96_000, Some(0.93));
+        assert_eq!((composer.chord, composer.borrowed), (0, None));
+    }
+
+    #[test]
+    fn suspended_or_unsettled_the_harmony_still_never_stays_put() {
+        for (suspended, chaos) in [(true, 0.0), (false, 1.0), (true, 1.0)] {
+            for kind in [
+                ScaleKind::Mode(Mode::Ionian),
+                ScaleKind::Mode(Mode::Aeolian),
+            ] {
+                let mut settings = Style::RainStudy.settings();
+                settings.scale = Scale { root: 0, kind };
+                settings.suspended = suspended;
+                settings.chaos = chaos;
+                let walk = chords(&settings, 1000);
+                let mut previous = open_chord(&settings, 0);
+                for (chord, _) in walk {
+                    assert_ne!(
+                        chord, previous,
+                        "{kind:?} suspended {suspended} chaos {chaos}"
+                    );
+                    previous = chord;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_tables_avoid_diminished_chords_but_for_the_tonic() {
+        for kind in [
+            ScaleKind::Mode(Mode::Aeolian),
+            ScaleKind::Mode(Mode::Dorian),
+            ScaleKind::HarmonicMinor,
+            ScaleKind::Mode(Mode::Lydian),
+        ] {
+            for pulsed in [false, true] {
+                let mut settings = Style::RainStudy.settings();
+                settings.scale = Scale { root: 0, kind };
+                settings.variety = 0.5;
+                if pulsed {
+                    settings.set_presence(Presence::Declarative);
+                }
+                for (chord, _) in chords(&settings, 1000) {
+                    let root = settings.scale.note(0, chord);
+                    assert!(
+                        chord == 0 || settings.scale.note(0, chord + 4) - root == 7,
+                        "{kind:?}: {chord} is diminished"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn after_a_leap_a_line_steps_back() {
+        // At the middle concentration (no home note), with chord tones
+        // only above: only the step can go down.
+        let mut settings = Style::SeasidePiano.settings();
+        settings.concentration = 0.5;
+        settings.variety = 1.0;
+        let shape = Shape {
+            chord: 0.1,
+            tones: &[14],
+            widest: 2,
+        };
+        let measure = |leap: i32| {
+            let mut composer = Composer::new(48_000, 5);
+            let tries = 4000;
+            let mut back = 0;
+            for _ in 0..tries {
+                let mut line = Line::new(7, PIANO_LOOP);
+                line.step = leap;
+                composer.melody(&settings, &mut line, &shape);
+                if line.step < 0 {
+                    back += 1;
+                }
+            }
+            back as f32 / tries as f32
+        };
+        let (after_leap, after_step) = (measure(4), measure(1));
+        // A free step goes down half the time; after a leap up, gap-fill
+        // takes it down more than half the time on top.
+        assert!(after_step < 0.5, "{after_step}");
+        assert!(after_leap > after_step + 0.15, "{after_leap} {after_step}");
+    }
+
+    #[test]
     fn the_queue_drops_extras_rather_than_growing() {
         let mut composer = Composer::new(48_000, 1);
         for i in 0..(QUEUE as u64 + 10) {
@@ -1532,6 +2634,8 @@ mod tests {
                     velocity: 0.5,
                     pan: 0.0,
                     duration: 0,
+                    from: None,
+                    voicing: 0,
                 },
             });
         }

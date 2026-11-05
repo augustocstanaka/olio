@@ -11,8 +11,8 @@
 //!
 //! `olio generate [--style NAME|all] [--seconds N] [--seed N] [--variety
 //! N] [--concentration N] [--chaos N] [--energy N] [--journey NAME]
-//! [--synthesised] [--out DIR]` renders the Generator's styles to WAV files, without a
-//! window.
+//! [--voice INSTRUMENT=N]... [--synthesised] [--out DIR]` renders the
+//! Generator's styles to WAV files, without a window.
 //!
 //! `olio instruments [--from ZIP] [--dir DIR]` downloads and installs the
 //! Generator's recorded instruments (or a pack built here).
@@ -36,6 +36,8 @@ mod palette;
 mod polish;
 pub mod prefs;
 mod sidebar;
+pub mod skin;
+pub mod theme;
 mod undo;
 
 use std::path::PathBuf;
@@ -50,7 +52,7 @@ usage: olio [--library DIR] [--set NAME] [--screenshot OUT.png] [PATH...]
        olio generate [--style NAME|all] [--seconds N] [--seed N]
                      [--variety N] [--concentration N] [--chaos N]
                      [--energy N] [--journey steady|build|evolve]
-                     [--synthesised]
+                     [--voice INSTRUMENT=N]... [--synthesised]
                      [--out DIR]
        olio instruments [--from ZIP] [--dir DIR]
 

@@ -11,8 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align, CornerRadius, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo,
-    WidgetType,
+    Align, Event, Key, Layout, RichText, Ui, UserData, ViewportCommand, WidgetInfo, WidgetType,
 };
 use olio_audio::{Engine, Mixer, PlayOptions, VoiceId};
 use olio_control::{Command, TileKey, TileSetting};
@@ -31,11 +30,11 @@ use crate::import::{Importer, Report};
 use crate::inspector::{self, InspectorAction};
 use crate::menu::{self, Direction, MenuAction, MenuState};
 use crate::meter::{self, Meter};
-use crate::prefs::{self, Polish, Preferences, TileStyle, UserStyle};
+use crate::prefs::{self, Polish, Preferences, UserStyle};
 use crate::sidebar::{self, Rename, SidebarAction};
 use crate::undo::{Change, History};
-use crate::{instruments, keys, palette, polish};
-use olio_audio::ambience::Instrument;
+use crate::{instruments, keys, palette, polish, skin};
+use olio_audio::ambience::{AmbienceSettings, Instrument};
 use olio_audio::instruments::{Pack, Recorded};
 
 /// Escape must be held this long to stop everything, so a stray tap does
@@ -192,26 +191,10 @@ pub struct OlioApp {
 impl OlioApp {
     pub fn new(cc: &eframe::CreationContext<'_>, store: Store, options: Options) -> Self {
         crate::fonts::install(&cc.egui_ctx);
-        cc.egui_ctx.all_styles_mut(|style| {
-            style.spacing.button_padding = egui::vec2(12.0, 6.0);
-            style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-            style.spacing.interact_size.y = 28.0;
-            style.visuals.slider_trailing_fill = true;
-            let widgets = &mut style.visuals.widgets;
-            for visuals in [
-                &mut widgets.noninteractive,
-                &mut widgets.inactive,
-                &mut widgets.hovered,
-                &mut widgets.active,
-                &mut widgets.open,
-            ] {
-                visuals.corner_radius = CornerRadius::same(6);
-            }
-            style.visuals.menu_corner_radius = CornerRadius::same(8);
-            style.visuals.window_corner_radius = CornerRadius::same(10);
-        });
         let prefs = Preferences::load(cc.storage);
         cc.egui_ctx.set_theme(prefs.theme.preference());
+        // The soft-UI palette for the theme egui resolves (docs/DESIGN.md).
+        crate::skin::sync(&cc.egui_ctx);
 
         let (mut library, load_error) = match store.load() {
             Ok(library) => (library, None),
@@ -407,18 +390,17 @@ impl OlioApp {
         }
     }
 
-    /// True if the Generator wants `instrument` from its recording now:
-    /// playing live, switched on, recorded instruments wanted and in the
-    /// pack.
-    fn wants_recorded(&self, instrument: Instrument) -> bool {
+    /// The voice of `instrument` the Generator wants from its recordings
+    /// now: playing live, switched on, recorded instruments wanted and in
+    /// the pack, the layer's voice or, where the pack has not that one,
+    /// the instrument's own.
+    fn wants_recorded(&self, instrument: Instrument) -> Option<u8> {
         let ambience = &self.prefs.ambience;
-        ambience.enabled
-            && ambience.layer(instrument).enabled
-            && self.prefs.recorded_instruments
-            && self
-                .pack
-                .as_ref()
-                .is_some_and(|pack| pack.instruments().any(|i| i == instrument))
+        let layer = ambience.layer(instrument);
+        if !(ambience.enabled && layer.enabled && self.prefs.recorded_instruments) {
+            return None;
+        }
+        self.pack.as_ref()?.voice_for(instrument, layer.voice)
     }
 
     /// Loads the recorded instruments the music wants, each on a thread of
@@ -430,9 +412,10 @@ impl OlioApp {
                 index += 1;
                 continue;
             };
-            let instrument = self.loading.swap_remove(index).instrument;
+            let loaded = self.loading.swap_remove(index);
+            let instrument = loaded.instrument;
             match result {
-                Ok(Some(samples)) if self.wants_recorded(instrument) => {
+                Ok(Some(samples)) if self.wants_recorded(instrument) == Some(loaded.voice) => {
                     let samples = Arc::new(samples);
                     self.recorded.set(instrument, Some(samples.clone()));
                     if let Audio::Running(engine) = &mut self.audio {
@@ -448,19 +431,29 @@ impl OlioApp {
         }
         for instrument in Instrument::ALL {
             let wanted = self.wants_recorded(instrument);
-            let loaded = self.recorded.get(instrument).is_some();
+            let loaded = self.recorded.voice(instrument);
             let loading = self.loading.iter().any(|l| l.instrument == instrument);
-            if wanted && !loaded && !loading {
-                if let Some(pack) = &self.pack {
-                    let loading =
-                        instruments::Loading::start(ctx.clone(), pack.clone(), instrument);
-                    self.loading.push(loading);
+            match wanted {
+                // Not loaded, or another voice: load the one wanted. The
+                // old voice plays on until the new one arrives.
+                Some(voice) if loaded != Some(voice) && !loading => {
+                    if let Some(pack) = &self.pack {
+                        let loading = instruments::Loading::start(
+                            ctx.clone(),
+                            pack.clone(),
+                            instrument,
+                            voice,
+                        );
+                        self.loading.push(loading);
+                    }
                 }
-            } else if !wanted && loaded {
-                self.recorded.set(instrument, None);
-                if let Audio::Running(engine) = &mut self.audio {
-                    engine.set_instrument(instrument, None);
+                None if loaded.is_some() => {
+                    self.recorded.set(instrument, None);
+                    if let Audio::Running(engine) = &mut self.audio {
+                        engine.set_instrument(instrument, None);
+                    }
                 }
+                _ => {}
             }
         }
     }
@@ -489,6 +482,18 @@ impl OlioApp {
             .into_iter()
             .filter(|instrument| self.recorded.get(*instrument).is_some())
             .collect()
+    }
+
+    /// The voice of an instrument playing from its recordings now, for
+    /// tests.
+    pub fn recorded_voice(&self, instrument: Instrument) -> Option<u8> {
+        self.recorded.voice(instrument)
+    }
+
+    /// Replaces the Generator's settings as the person would, for tests.
+    pub fn set_ambience_for_test(&mut self, settings: AmbienceSettings) {
+        self.prefs.ambience = settings;
+        self.apply_ambience();
     }
 
     /// True while an instrument is loading.
@@ -723,7 +728,6 @@ impl OlioApp {
                     self.start_naming(None);
                 }
             }
-            MenuAction::TileStyle(style) => self.prefs.tile_style = style,
             MenuAction::TileSize(size) => self.prefs.tile_size = size,
             MenuAction::NextTileSize => {
                 let size = self.prefs.tile_size.next();
@@ -2184,9 +2188,8 @@ impl OlioApp {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let muted = self.prefs.muted;
-            let mute = ui
-                .selectable_label(muted, if muted { "🔇" } else { "🔊" })
-                .on_hover_text(format!(
+            let mute =
+                skin::button(ui, if muted { "🔇" } else { "🔊" }, muted).on_hover_text(format!(
                     "{} ({})",
                     if muted { "Unmute" } else { "Mute" },
                     menu::shortcut_text(ui.ctx(), MenuAction::ToggleMute)
@@ -2196,12 +2199,12 @@ impl OlioApp {
                 actions.push(MenuAction::ToggleMute);
             }
             let mut percent = (self.prefs.volume * 100.0).round();
-            ui.spacing_mut().slider_width = 120.0;
-            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-                .show_value(false)
-                .trailing_fill(true);
-            let slider = menu::keeps_arrows(ui.add_enabled(!self.prefs.muted, slider))
-                .on_hover_text(format!("Master volume: {percent:.0}%"));
+            let slider = ui
+                .add_enabled_ui(!self.prefs.muted, |ui| {
+                    skin::slider(ui, &mut percent, 0.0..=100.0, 120.0, false, "Master volume")
+                })
+                .inner;
+            let slider = slider.on_hover_text(format!("Master volume: {percent:.0}%"));
             if slider.changed() {
                 actions.push(MenuAction::SetVolume(percent / 100.0));
             }
@@ -2212,7 +2215,7 @@ impl OlioApp {
                 self.meter_time,
                 egui::vec2(110.0, 14.0),
             );
-            ui.separator();
+            ui.add_space(12.0);
 
             let dark = ui.visuals().dark_mode;
             let mut playing: Vec<(&str, TileColor, TileId, &str)> = self
@@ -2242,23 +2245,9 @@ impl OlioApp {
                     .ambience_now()
                     .map_or(ambience.background, |now| now.background);
                 let emoji = generator::emoji(background);
-                let color = ui.visuals().weak_text_color();
-                let text = RichText::new(format!("■ {style_name}")).color(color);
-                let bubble = match self.images.texture(ui.ctx(), emoji) {
-                    Some(texture) => {
-                        let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
-                            texture,
-                            egui::vec2(16.0, 16.0),
-                        ));
-                        let stop = RichText::new("■").color(color);
-                        let name = RichText::new(&style_name).color(color);
-                        egui::Button::new((stop, picture, name))
-                    }
-                    None => egui::Button::new(text),
-                }
-                .fill(ui.visuals().faint_bg_color);
-                if ui
-                    .add(bubble)
+                let picture = self.images.texture(ui.ctx(), emoji);
+                let colour = skin::palette(ui.ctx()).text_weak;
+                if skin::bubble(ui, &style_name, picture, colour)
                     .on_hover_text(format!(
                         "Ambience: {}, {}. Click to switch it off ({}).",
                         ambience.background.name().to_lowercase(),
@@ -2271,26 +2260,14 @@ impl OlioApp {
                 }
             }
             for (title, color, id, emoji) in playing {
-                let text = RichText::new(format!("■ {title}")).color(palette::strong(color, dark));
                 let picture = (!emoji.is_empty())
                     .then(|| self.images.texture(ui.ctx(), emoji))
-                    .flatten()
-                    .map(|texture| {
-                        egui::Image::from_texture(egui::load::SizedTexture::new(
-                            texture,
-                            egui::vec2(16.0, 16.0),
-                        ))
-                    });
-                let bubble = match picture {
-                    Some(picture) => {
-                        let stop = RichText::new("■").color(palette::strong(color, dark));
-                        let title = RichText::new(title).color(palette::strong(color, dark));
-                        egui::Button::new((stop, picture, title))
-                    }
-                    None => egui::Button::new(text),
-                }
-                .fill(palette::tint(color, dark, 40));
-                if ui.add(bubble).on_hover_text("Stop").clicked() {
+                    .flatten();
+                let colour = palette::strong(color, dark);
+                if skin::bubble(ui, title, picture, colour)
+                    .on_hover_text(format!("Stop “{title}”"))
+                    .clicked()
+                {
                     commands.push(Command::StopTile(id));
                 }
             }
@@ -2298,7 +2275,8 @@ impl OlioApp {
                 let any = !self.playing.is_empty();
                 ui.add_space(4.0);
                 if ui
-                    .add_enabled(any, egui::Button::new("⏹ Stop All"))
+                    .add_enabled_ui(any, |ui| skin::button(ui, "⏹ Stop All", false))
+                    .inner
                     .on_hover_text(format!(
                         "Stop every sound ({}, or hold Esc)",
                         menu::shortcut_text(ui.ctx(), MenuAction::StopAll)
@@ -2308,7 +2286,8 @@ impl OlioApp {
                     commands.push(Command::StopAll);
                 }
                 if ui
-                    .add_enabled(any, egui::Button::new("Fade All"))
+                    .add_enabled_ui(any, |ui| skin::button(ui, "Fade All", false))
+                    .inner
                     .on_hover_text(format!(
                         "Fade every sound out over {} s ({})",
                         FADE_ALL.as_secs(),
@@ -2327,8 +2306,8 @@ impl OlioApp {
     fn bottom_bar(&self, ui: &mut Ui, actions: &mut Vec<MenuAction>) {
         ui.horizontal(|ui| {
             let ctx = ui.ctx().clone();
-            if ui
-                .selectable_label(self.prefs.show_sets, "Sets")
+            ui.add_space(4.0);
+            if skin::tab(ui, "Sets", "Sets", self.prefs.show_sets)
                 .on_hover_text(format!(
                     "Show or hide the sets ({})",
                     menu::shortcut_text(&ctx, MenuAction::ToggleSets)
@@ -2337,9 +2316,8 @@ impl OlioApp {
             {
                 actions.push(MenuAction::ToggleSets);
             }
-            ui.separator();
-            if ui
-                .button("+ Add Sound…")
+            ui.add_space(12.0);
+            if skin::button(ui, "+ Add Sound…", false)
                 .on_hover_text(format!(
                     "Add audio or video files to this set ({})",
                     menu::shortcut_text(&ctx, MenuAction::AddSound)
@@ -2358,14 +2336,12 @@ impl OlioApp {
                     ui.close();
                 }
             });
-            ui.separator();
+            ui.add_space(12.0);
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .selectable_label(
-                        self.prefs.show_inspector && !self.prefs.show_generator,
-                        "Inspector",
-                    )
+                ui.add_space(4.0);
+                let inspector = self.prefs.show_inspector && !self.prefs.show_generator;
+                if skin::tab(ui, "Inspector", "Inspector", inspector)
                     .on_hover_text(format!(
                         "Show or hide the inspector ({})",
                         menu::shortcut_text(&ctx, MenuAction::ToggleInspector)
@@ -2374,8 +2350,7 @@ impl OlioApp {
                 {
                     actions.push(MenuAction::ToggleInspector);
                 }
-                if ui
-                    .selectable_label(self.prefs.show_generator, "Generator")
+                if skin::tab(ui, "Generator", "Generator", self.prefs.show_generator)
                     .on_hover_text(format!(
                         "Make music and backgrounds, live or as tracks ({})",
                         menu::shortcut_text(&ctx, MenuAction::ToggleGenerator)
@@ -2384,7 +2359,7 @@ impl OlioApp {
                 {
                     actions.push(MenuAction::ToggleGenerator);
                 }
-                ui.separator();
+                ui.add_space(12.0);
                 match &self.audio {
                     Audio::Running(engine) => {
                         if let Some(output) = engine.output() {
@@ -2403,7 +2378,7 @@ impl OlioApp {
                         );
                     }
                 }
-                ui.separator();
+                ui.add_space(12.0);
                 // The status takes what is left, truncated.
                 let status = if let Some(error) = &self.load_error {
                     Some((
@@ -2446,6 +2421,9 @@ impl OlioApp {
 
 impl eframe::App for OlioApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        // A change of theme, or of the system's appearance, repaints
+        // everything in the other palette from this frame on.
+        crate::skin::sync(ui.ctx());
         let ctx = ui.ctx().clone();
         self.drive_screenshot(&ctx);
         self.clips.poll();
@@ -2516,15 +2494,14 @@ impl eframe::App for OlioApp {
                     && self.prefs.saved_style().is_none(),
             };
             actions.extend(menu::bar(ui, &state));
-            ui.separator();
-            ui.add_space(2.0);
+            ui.add_space(8.0);
             self.toolbar(ui, &mut commands, &mut actions);
-            ui.add_space(4.0);
+            ui.add_space(8.0);
         });
         egui::Panel::bottom("olio-bottom").show(ui, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             self.bottom_bar(ui, &mut actions);
-            ui.add_space(4.0);
+            ui.add_space(6.0);
         });
 
         let sounding: HashSet<SetId> = self.playing.values().map(|playing| playing.set).collect();
@@ -2565,7 +2542,6 @@ impl eframe::App for OlioApp {
                 }),
                 track_seconds: self.prefs.track_seconds,
                 set_name: &set.name,
-                details: self.prefs.generator_details,
                 styles: &self.prefs.styles,
                 saved: self.prefs.saved_style(),
                 now: self.ambience_now(),
@@ -2579,13 +2555,23 @@ impl eframe::App for OlioApp {
                         loading: !self.loading.is_empty(),
                     },
                 },
+                pack: self
+                    .pack
+                    .as_ref()
+                    .filter(|_| self.prefs.recorded_instruments),
             };
             generator_actions = egui::Panel::right("olio-generator")
                 .resizable(true)
                 .default_size(380.0)
                 .min_size(320.0)
                 .show(ui, |ui| {
-                    generator::show(ui, &mut self.prefs.ambience, &view, &mut self.naming)
+                    generator::show(
+                        ui,
+                        &mut self.prefs.ambience,
+                        &view,
+                        &mut self.naming,
+                        &mut self.prefs.generator,
+                    )
                 })
                 .inner;
             Vec::new()
@@ -2617,7 +2603,7 @@ impl eframe::App for OlioApp {
                         level: tile.and_then(|tile| self.tile_meters.get(&tile.id).copied()),
                         now: self.meter_time,
                     };
-                    inspector::show(ui, &view, &mut self.title_draft)
+                    inspector::show(ui, &view, &mut self.title_draft, &mut self.prefs.inspector)
                 })
                 .inner
         } else {
@@ -2626,10 +2612,7 @@ impl eframe::App for OlioApp {
 
         let progress = self.progress();
         let reveal_selected = std::mem::take(&mut self.reveal_selected);
-        let mut canvas = egui::Frame::central_panel(ui.style());
-        if self.prefs.tile_style == TileStyle::Soft {
-            canvas = canvas.fill(palette::soft(ui.visuals().dark_mode).canvas);
-        }
+        let canvas = egui::Frame::central_panel(ui.style());
         let dragged = egui::DragAndDrop::payload::<TileId>(&ctx)
             .and_then(|id| self.library.tile(*id))
             .map(|(set, tile)| (tile, set.id));
@@ -2644,7 +2627,6 @@ impl eframe::App for OlioApp {
                     reveal_selected,
                     click_plays: self.prefs.click_plays,
                     polish: self.prefs.polish,
-                    style: self.prefs.tile_style,
                     size: self.prefs.tile_size,
                     images: &self.images,
                     spectrograms: self.prefs.show_spectrograms,
@@ -2672,7 +2654,6 @@ impl eframe::App for OlioApp {
             match action {
                 generator::Action::Changed => self.apply_ambience(),
                 generator::Action::Length(seconds) => self.prefs.track_seconds = seconds,
-                generator::Action::Details(details) => self.prefs.generator_details = details,
                 generator::Action::DownloadInstruments => self.download_instruments(&ctx),
                 generator::Action::CancelDownload => {
                     if let Some(download) = &self.download {

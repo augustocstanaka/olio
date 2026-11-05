@@ -11,6 +11,7 @@ use olio_audio::ambience::Style;
 use olio_control::TileSetting;
 use olio_library::{MAX_FADE_SECONDS, Tile};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
@@ -36,27 +37,6 @@ impl Theme {
             Self::System => ThemePreference::System,
             Self::Light => ThemePreference::Light,
             Self::Dark => ThemePreference::Dark,
-        }
-    }
-}
-
-/// How tiles are drawn.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TileStyle {
-    /// Flat cards with a coloured outline.
-    #[default]
-    Flat,
-    /// Raised, softly lit buttons that press in while they play.
-    Soft,
-}
-
-impl TileStyle {
-    pub const ALL: [Self; 2] = [Self::Flat, Self::Soft];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Flat => "Flat Tiles",
-            Self::Soft => "Soft Tiles",
         }
     }
 }
@@ -236,7 +216,6 @@ pub fn style_named(styles: &[UserStyle], name: &str) -> Option<usize> {
 #[serde(default)]
 pub struct Preferences {
     pub theme: Theme,
-    pub tile_style: TileStyle,
     pub tile_size: TileSize,
     /// The generated bed behind the sounds, and the Generator's settings.
     pub ambience: AmbienceSettings,
@@ -252,7 +231,13 @@ pub struct Preferences {
     pub show_inspector: bool,
     /// The Generator in place of the inspector.
     pub show_generator: bool,
-    /// The Generator shows every setting, not only the essentials.
+    /// Which of the inspector's sections are closed, and which Mores open.
+    pub inspector: Disclosure,
+    /// The same for the Generator's.
+    pub generator: Disclosure,
+    /// Before each section had its More: the Generator showed every setting.
+    /// Read once, to open every More; never written.
+    #[serde(skip_serializing)]
     pub generator_details: bool,
     /// Styles of one's own, listed after the built-in ones.
     pub styles: Vec<UserStyle>,
@@ -267,7 +252,6 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: Theme::System,
-            tile_style: TileStyle::Flat,
             tile_size: TileSize::Regular,
             ambience: AmbienceSettings::default(),
             track_seconds: crate::generator::DEFAULT_TRACK_SECONDS,
@@ -278,6 +262,8 @@ impl Default for Preferences {
             show_sets: true,
             show_inspector: true,
             show_generator: false,
+            inspector: Disclosure::default(),
+            generator: Disclosure::default(),
             generator_details: false,
             styles: Vec::new(),
             recorded_instruments: true,
@@ -285,6 +271,50 @@ impl Default for Preferences {
         }
     }
 }
+
+/// What is open in a panel: its sections are open unless closed, and each
+/// section's More is closed unless opened. Sections are named by a key
+/// that does not change with the title (`"key_and_mood"`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Disclosure {
+    closed: BTreeSet<String>,
+    more: BTreeSet<String>,
+}
+
+impl Disclosure {
+    pub fn is_open(&self, section: &str) -> bool {
+        !self.closed.contains(section)
+    }
+
+    pub fn set_open(&mut self, section: &str, open: bool) {
+        if open {
+            self.closed.remove(section);
+        } else {
+            self.closed.insert(section.to_owned());
+        }
+    }
+
+    pub fn shows_more(&self, section: &str) -> bool {
+        self.more.contains(section)
+    }
+
+    pub fn set_more(&mut self, section: &str, open: bool) {
+        if open {
+            self.more.insert(section.to_owned());
+        } else {
+            self.more.remove(section);
+        }
+    }
+
+    /// True when no section's More is open.
+    pub fn no_more(&self) -> bool {
+        self.more.is_empty()
+    }
+}
+
+/// The Generator's sections that have a More, by key.
+pub const GENERATOR_MORE: [&str; 3] = ["key_and_mood", "energy_and_time", "instruments"];
 
 const KEY: &str = "preferences";
 
@@ -311,7 +341,17 @@ impl Preferences {
         {
             prefs.track_seconds = crate::generator::DEFAULT_TRACK_SECONDS;
         }
+        prefs.open_details_from_before();
         prefs
+    }
+
+    /// Preferences saved with Details on open every More instead.
+    fn open_details_from_before(&mut self) {
+        if std::mem::take(&mut self.generator_details) {
+            for section in GENERATOR_MORE {
+                self.generator.set_more(section, true);
+            }
+        }
     }
 
     pub fn store(&self, storage: &mut dyn eframe::Storage) {
@@ -461,7 +501,8 @@ mod tests {
             "no part levels: as made"
         );
         assert!(!prefs.show_generator);
-        assert!(!prefs.generator_details, "the essentials first");
+        assert!(prefs.generator.no_more(), "the essentials first");
+        assert!(prefs.generator.is_open("style"), "every section open");
         assert!(prefs.styles.is_empty());
         assert_eq!(prefs.track_seconds, 120);
     }
@@ -550,9 +591,32 @@ mod tests {
         assert_eq!(prefs.volume, 1.0);
         assert!(prefs.show_sets);
         assert_eq!(prefs.polish, Polish::default());
-        assert_eq!(prefs.tile_style, TileStyle::Flat);
         assert!(prefs.show_spectrograms);
         assert_eq!(prefs.tile_size, TileSize::Regular);
         assert!(!prefs.ambience.enabled);
+    }
+
+    #[test]
+    fn sections_open_unless_closed_and_more_shows_once_opened() {
+        let mut disclosure = Disclosure::default();
+        assert!(disclosure.is_open("how_it_plays"));
+        assert!(!disclosure.shows_more("instruments"));
+        disclosure.set_open("how_it_plays", false);
+        disclosure.set_more("instruments", true);
+        let text = serde_json::to_string(&disclosure).unwrap();
+        let back: Disclosure = serde_json::from_str(&text).unwrap();
+        assert!(!back.is_open("how_it_plays"));
+        assert!(back.shows_more("instruments"));
+        assert!(!back.no_more());
+    }
+
+    #[test]
+    fn details_from_before_opens_every_more_and_is_not_kept() {
+        let mut prefs: Preferences = serde_json::from_str(r#"{"generator_details":true}"#).unwrap();
+        assert!(prefs.generator_details);
+        prefs.open_details_from_before();
+        assert!(GENERATOR_MORE.iter().all(|s| prefs.generator.shows_more(s)));
+        let saved = serde_json::to_string(&prefs).unwrap();
+        assert!(!saved.contains("generator_details"));
     }
 }

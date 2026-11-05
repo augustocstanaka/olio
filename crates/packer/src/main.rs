@@ -2,6 +2,8 @@
 //! from the Versilian Studios CC0 libraries (`sources.json`).
 //!
 //! ```text
+//! olio-packer pin                          list the recordings the recipes take
+//!                                          (rewrites sources.json)
 //! olio-packer fetch --sources DIR          download the listed recordings
 //! olio-packer check --sources DIR          measure their pitches
 //! olio-packer build --sources DIR --out DIR
@@ -17,7 +19,7 @@ mod recipes;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: olio-packer fetch|check|build [--sources DIR] [--out DIR]\n";
+const USAGE: &str = "usage: olio-packer pin|fetch|check|build [--sources DIR] [--out DIR]\n";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -35,6 +37,7 @@ fn main() -> ExitCode {
         }
     }
     let result = match command.as_deref() {
+        Some("pin") => fetch::pin(),
         Some("fetch") => fetch::fetch(&sources),
         Some("check") => build::check(&sources),
         Some("build") => build::build(&sources, &out),

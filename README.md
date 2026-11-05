@@ -8,11 +8,13 @@ app.
 
 ![Olio's main window: sets on the left, a grid of tiles, the inspector on the right](docs/images/window.png)
 
-The window follows the system theme; there is a [light version](docs/images/window-light.png)
-too, or pick one in the View menu. View ▸ Soft Tiles draws tiles as
-raised buttons that press in while they play:
+The whole window is soft UI: one matte surface, each tile raised out of
+it at rest and pressed in, tinted with its colour, while it plays; the
+panels are short columns of sections that open and close. It follows the
+system theme, and has a [light version](docs/images/window-light.png) too,
+or pick one in the View menu:
 
-![Soft tiles: raised at rest, pressed in while playing](docs/images/window-soft-light.png)
+![The light theme: raised tiles, two playing pressed in](docs/images/window-light.png)
 
 The Generator makes gentle music and backgrounds, live or as tracks on
 tiles:
@@ -68,9 +70,9 @@ Milestone 0, the playable skeleton, is done. Olio can:
 - **Generate gentle music.** The Generator (⇧⌘G, or the Generator
   button in the status bar) makes up sparse, quiet music as it goes, in
   place of the inspector. It shows the essentials (a style, the key, a
-  mood, how it changes over time, a background, which instruments play);
-  **Details** adds every setting
-  for fine adjustment:
+  mood, how it changes over time, a background, which instruments play),
+  each in a section that opens and closes; a section's **More** adds what
+  refines it, for fine adjustment:
   - **a background**: rain, distant thunder, wind, a winter wind, waves
     on a shore, a forest with a bird now and then, a desert wind, or a
     crackling fire, with one **Balance** slider between it and the
@@ -79,11 +81,24 @@ Milestone 0, the playable skeleton, is done. Olio can:
     strings, a pad, a drone, a piano, a plucked violin and soft hand
     drums (a frame drum and a shaker), each with its own level, a Notes
     slider from very sparse to busy, and register. They are synthesised
-    until you press **Download Recorded Instruments** (71 MB, once): then
+    until you press **Download Recorded Instruments** (148 MB, once): then
     a real grand piano, concert harp, hand chimes, violin and bass
     pizzicato, cello, viola and violin sections, bowed vibraphone under
     the pad, and a frame drum and shaker play instead, each loaded as
-    the music uses it; the Recorded instruments switch turns them off;
+    the music uses it; the Recorded instruments switch turns them off.
+    The pack has several recordings, **voices**, of some instruments,
+    chosen under Instruments' More: the
+    harp as a folk harp, a dan tranh or a kalimba; the bells as a
+    glockenspiel or a vibraphone; the strings as a flute, a clarinet or a
+    horn; the pad as a bowed psaltery, wine glasses or an organ. Soft and
+    loud notes blend into each other rather than switching.
+    Each has its place in the room, the melody near and the bells and pad
+    far, and each slowly drifts in level, brightness and place, so the
+    music keeps moving while its notes repeat; the pad leads its chords
+    voice by voice, holding the notes they share; at low variety the
+    harp, piano and violin loop their motifs on lengths that never line
+    up, each looped note echoing softer; and a wandering mood now and
+    then borrows a chord from the parallel key;
   - **a key** from the seven Greek (church) modes, pentatonics, harmonic
     minor or whole tone, among the essentials, and **Suspended**: chords
     with a second or a fourth in place of their third and no third in the
@@ -104,7 +119,7 @@ Milestone 0, the playable skeleton, is done. Olio can:
     with cadences) to *Vibrant*: played harder and busier on a brisk
     pulse, the harp running up the chords, the bass answering itself,
     piano chords, a doubled shaker, strings in fifths, and the pad adding
-    sevenths and ninths; and **form** (with Details): endless, or pieces
+    sevenths and ninths; and **form** (Energy and time's More): endless, or pieces
     that close on the root and pause.
 
   Every control in the Generator says what it does when you hover it.
@@ -196,8 +211,13 @@ the `OLIO_LIBRARY` environment variable.
   contents, so moving or deleting the originals breaks nothing and a sound
   used twice is stored once.
 - `preferences.ron` remembers the window's size and position, the panel
-  widths, the theme and tile style, the master volume, the Polish preset,
+  widths, the theme, which sections are open, the master volume, the Polish preset,
   the Generator's settings, your saved styles and which panels are shown.
+- `Instruments/` holds the Generator's recorded instruments, once
+  downloaded.
+- A `MusicModel/` folder (about 7 GB) is left over from earlier versions
+  that could install a music model. Olio no longer uses it; delete it to
+  get the space back.
 
 ## Development
 
@@ -212,11 +232,17 @@ demo board through the real binary. CI runs the same command on macOS and
 Windows. Enable the pre-commit hook once per clone with
 `git config core.hooksPath .githooks`.
 
+`cargo xtask check-windows` runs clippy for the Windows target from a Mac
+(after `rustup target add x86_64-pc-windows-msvc` and `brew install llvm`),
+so the Windows-only code is type-checked and linted without a Windows
+machine; nothing is linked or run, so CI's Windows run is still the real
+one.
+
 `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-offscreen in both themes and both tile styles to `target/screenshots/`
-(`window.png`, `window-light.png`, `window-soft.png`,
-`window-soft-light.png`, and the Generator in `window-generator.png` and
-`window-generator-details.png`).
+offscreen in both themes to `target/screenshots/` (`window.png`,
+`window-light.png`, and the Generator in `window-generator.png`,
+and `window-generator-more.png`). How the window
+looks, and why, is [docs/DESIGN.md](docs/DESIGN.md).
 
 Read [CLAUDE.md](CLAUDE.md) for the map of the code and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

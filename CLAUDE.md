@@ -13,7 +13,8 @@ and UI text.
   (the Generator's music: `mod.rs` settings, scales and styles,
   `composer.rs` what plays when, `synth.rs` the instruments,
   `background.rs` rain, waves, fire and the rest, `journey.rs` building
-  up and evolving over time, `hall.rs` the instruments' chorus and hall,
+  up and evolving over time, `hall.rs` each layer's place (near or far), the
+  instruments' chorus and hall, `modulation.rs` every layer's slow drift,
   `sampler.rs` recorded instruments played, `dsp.rs` shared
   filters, `track.rs` rendering a track offline), `instruments.rs`
   (instrument packs: the manifest, loading recorded instruments), and
@@ -30,15 +31,19 @@ and UI text.
   `execute(Command)` and `act(MenuAction)`, `menu.rs` the menu bar and
   every keyboard shortcut, `grid.rs` tiles, `sidebar.rs` sets,
   `inspector.rs` tile settings, `confirm.rs` the remove confirmation,
-  `polish.rs` the Polish Preset window, `generator.rs` the Generator
+  `polish.rs` the Polish Preset window, `skin.rs` the soft-UI parts
+  (surfaces, buttons, chips, switches, sliders, sections and their More)
+  and `theme.rs` the palette they draw with, `generator.rs` the Generator
   panel and the thread that generates tracks, `instruments.rs` the
-  recorded instruments (where the pack lives, its download, loading), `meter.rs` level meters,
+  recorded instruments (where the pack lives, its download, loading),
+  `meter.rs` level meters,
   `emoji.rs` Twemoji pictures and the emoji picker, `undo.rs` undo and
   redo of removals, duplicates and moves,
   `prefs.rs` window preferences (`preferences.ron` beside the library),
   `fonts.rs` the macOS symbol font for ⌘-style shortcuts,
   `import.rs` files/folders/boards (shared with `cli.rs`, the headless
-  `olio import` and `olio generate`), `clips.rs` background decoding.
+  `olio import`, `olio generate` and `olio instruments`), `clips.rs`
+  background decoding.
 - `xtask/`: the `cargo xtask` commands below; `demo.rs` synthesises the
   demo pack.
 - `crates/packer` (`olio-packer`): builds the Generator's instrument pack
@@ -47,11 +52,16 @@ and UI text.
   instruments`.
 - `docs/ARCHITECTURE.md`: threads, data flow, where a feature goes.
 - `docs/EGUI-NOTES.md`: read before changing UI code; egui 0.36 API traps.
+- `docs/DESIGN.md`: how the window looks and why (soft UI, the palette,
+  the parts, how panels group). Read it before changing anything the
+  user sees.
 - `docs/BOARD-JSON.md`: the board format users script against. Keep it in
   step with `manifest.rs`.
 - `docs/adr/`: read the matching ADR before changing the UI stack (0001),
-  the audio engine (0002), the library format (0003), or control surfaces
-  and the Stream Deck plan (0004).
+  the audio engine (0002), the library format (0003), control surfaces
+  and the Stream Deck plan (0004), the window's look and the panels'
+  sections (0006), or how the Generator makes music (0007: procedural,
+  no music model; 0005 is superseded).
 - `docs/ROADMAP.md`: milestones and the Farrago parity checklist.
 - `CODING_STANDARDS.md`: the rules review enforces, above all the
   audio-thread rules.
@@ -59,7 +69,9 @@ and UI text.
 ## Commands
 
 - `cargo fmt --all && cargo xtask check` before committing; CI runs
-  `cargo xtask check` on Windows and macOS.
+  `cargo xtask check` on Windows and macOS. `cargo xtask check-windows`
+  type-checks and lints the Windows-only code from a Mac (clippy for the
+  Windows target; nothing linked or run), for when CI is not running.
 - `cargo xtask run [args]` to try the app (runs a copy of the binary, so
   you can rebuild while a window is open). `cargo xtask demo` builds a demo
   library to open with `--library target/demo/library`. `cargo xtask
@@ -67,15 +79,17 @@ and UI text.
   `cargo xtask instruments fetch`, then `build`, makes the instrument pack
   in `target/instruments/` (`check` reports the recordings' pitches).
 - `OLIO_RENDER=1 cargo test -p olio-app --test window` renders the window
-  in both themes and both tile styles to `target/screenshots/`; use it
+  in both themes to `target/screenshots/`; use it
   for visual changes, and copy the results to `docs/images/` when they
   change. The window's own `--screenshot` only works while the window is
   visible on screen.
 - UI rules: every command reachable from a menu, with its shortcut
   declared once in `menu.rs`; shortcuts formatted by egui so they read
   ⌘ on macOS and Ctrl on Windows; anything destructive confirms in the
-  window (`confirm.rs`), never with a native dialog; check both themes
-  and both tile styles.
+  window (`confirm.rs`), never with a native dialog; every part drawn
+  from `skin.rs` in `skin::palette`'s colours, no colour literal,
+  gradient or shadow in window code (`docs/DESIGN.md`); a control that is
+  not obvious says what it does on hover; check both themes.
 
 ## Platform notes
 

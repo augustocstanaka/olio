@@ -2,10 +2,12 @@
 //! shaped, played live under the sounds, and rendered to tracks that land
 //! on tiles. It shows the essentials (style, key, mood, energy, how it
 //! changes over time, background and its balance with the instruments,
-//! instruments); Details adds every setting (the character's amounts,
-//! each instrument's level, density and register, and the form) under the
-//! essential it belongs to. Every control explains itself on hover. Custom settings can be saved
-//! as a style of one's own, listed after the built-in styles.
+//! instruments), each in a section that opens and closes; a section's
+//! More adds what refines it (the character's amounts, the form, each
+//! instrument's level, density and register). Which sections are open is
+//! kept in the preferences. Every control explains itself on hover.
+//! Custom settings can be saved as a style of one's own, listed after the
+//! built-in styles.
 //!
 //! The settings live in the preferences and go to the engine when they
 //! change. A track is rendered on a thread of its own ([`Generation`]),
@@ -17,9 +19,9 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use egui::{Align, Key, Layout, RichText, Ui};
+use egui::{Align, Color32, Key, Layout, Ui};
 use olio_audio::ambience::{
-    AmbienceSettings, Background, Density, Form, Instrument, Journey, Mood, Now, Presence,
+    AmbienceSettings, Background, Density, Form, Instrument, Journey, Layer, Mood, Now, Presence,
     ROOT_NAMES, Register, ScaleKind, Style,
 };
 use olio_audio::instruments::{Pack, Recorded as Recordings};
@@ -28,8 +30,8 @@ use olio_library::{Sound, Store};
 
 use crate::emoji::EmojiImages;
 use crate::instruments::{PACK_BYTES, megabytes};
-use crate::prefs::{UserStyle, style_name_problem, style_named};
-use crate::{inspector, menu};
+use crate::prefs::{Disclosure, UserStyle, style_name_problem, style_named};
+use crate::skin;
 
 /// The lengths a track can be, in seconds, and how they read.
 pub const TRACK_LENGTHS: [(u32, &str); 5] = [
@@ -74,7 +76,7 @@ pub fn character_words(settings: &AmbienceSettings) -> String {
         v if v < 0.2 => "Repeats a short motif",
         v if v < 0.45 => "Comes back to a motif often",
         v if v < 0.7 => "Comes back to a motif now and then",
-        _ => "Always finding new melodies",
+        _ => "Always finding new melodies, now and then a borrowed chord",
     };
     let concentration = match settings.concentration {
         c if c < 0.3 => "wandering wide",
@@ -413,16 +415,8 @@ impl Job {
     /// Loads from the pack any recorded instrument the track plays that is
     /// not loaded yet; one that will not load stays synthesised.
     fn load_for(&mut self, track: &TrackPlan) {
-        let Some(pack) = &self.pack else {
-            return;
-        };
-        for instrument in track.settings.playing() {
-            if self.recorded.get(instrument).is_none()
-                && pack.instruments().any(|i| i == instrument)
-                && let Ok(Some(samples)) = pack.load(instrument)
-            {
-                self.recorded.set(instrument, Some(Arc::new(samples)));
-            }
+        if let Some(pack) = &self.pack {
+            load_voices(pack, &mut self.recorded, &track.settings);
         }
     }
 
@@ -508,8 +502,6 @@ pub struct View<'a> {
     pub track_seconds: u32,
     /// The set a track would go to.
     pub set_name: &'a str,
-    /// Every setting, not only the essentials.
-    pub details: bool,
     /// Styles of one's own, and the one the settings are, if any.
     pub styles: &'a [UserStyle],
     pub saved: Option<usize>,
@@ -519,6 +511,27 @@ pub struct View<'a> {
     pub before_surprise: Option<&'a str>,
     /// Whether the recorded instruments are installed, downloading or on.
     pub recorded: Recorded,
+    /// The pack, while recorded instruments are on: what voices it has.
+    pub pack: Option<&'a Pack>,
+}
+
+/// Loads into `recorded` the voice of each instrument the `settings` play
+/// that is not loaded as such: the layer's, or the instrument's own where
+/// the pack has not that one. A voice that will not load leaves the
+/// instrument synthesised, not playing another voice's recordings.
+fn load_voices(pack: &Pack, recorded: &mut Recordings, settings: &AmbienceSettings) {
+    for instrument in settings.playing() {
+        let layer = settings.layer(instrument);
+        if let Some(voice) = pack.voice_for(instrument, layer.voice)
+            && recorded.voice(instrument) != Some(voice)
+        {
+            let samples = match pack.load(instrument, voice) {
+                Ok(Some(samples)) => Some(Arc::new(samples)),
+                _ => None,
+            };
+            recorded.set(instrument, samples);
+        }
+    }
 }
 
 /// Where the recorded instruments are.
@@ -546,8 +559,6 @@ pub enum Action {
     /// Generate a new set of tracks of the picked length.
     GenerateSet(SetOf),
     Cancel,
-    /// Show every setting, or only the essentials.
-    Details(bool),
     /// Start naming the settings as a new style of one's own.
     SaveStyle,
     /// Start renaming the saved style.
@@ -573,24 +584,10 @@ pub fn show(
     settings: &mut AmbienceSettings,
     view: &View,
     naming: &mut Option<Naming>,
+    disclosure: &mut Disclosure,
 ) -> Vec<Action> {
     let before = *settings;
     let mut actions = Vec::new();
-    let details = view.details;
-
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Generator").strong().size(16.0));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .selectable_label(details, "Details")
-                .on_hover_text("Show every setting, not only the essentials")
-                .clicked()
-            {
-                actions.push(Action::Details(!details));
-            }
-        });
-    });
 
     // The track: pinned to the bottom, always in reach.
     egui::Panel::bottom("olio-generator-track")
@@ -602,47 +599,77 @@ pub fn show(
         .show(ui, |ui| {
             // Clear of the scroll bar.
             ui.set_max_width(ui.available_width() - 12.0);
-            ui.add_space(8.0);
-            live(ui, settings, details);
-            let title = section(ui, "Style");
-            // One scope whatever it holds, so the widgets below keep
-            // their ids (and a focused slider its focus) when the settings
-            // turn Custom and Save Style… appears.
-            ui.scope(|ui| {
-                style(ui, settings, &title, view);
-                match naming {
-                    Some(naming) => naming_row(ui, naming, view.styles, &mut actions),
-                    None => style_actions(ui, settings, view, &mut actions),
-                }
+            ui.add_space(10.0);
+            live(ui, settings);
+            section_with(ui, disclosure, "style", "Style", |ui, header| {
+                // One scope whatever it holds, so the widgets below keep
+                // their ids (and a focused slider its focus) when the
+                // settings turn Custom and Save Style… appears.
+                ui.scope(|ui| {
+                    style(ui, settings, header, view);
+                    match naming {
+                        Some(naming) => naming_row(ui, naming, view.styles, &mut actions),
+                        None => style_actions(ui, settings, view, &mut actions),
+                    }
+                });
             });
-            section(ui, "Key");
-            key(ui, settings);
-            section(ui, "Mood");
-            mood(ui, settings, details);
-            section(ui, "Energy");
-            // One scope: the pulse's row comes and goes with the energy.
-            ui.scope(|ui| energy(ui, settings));
-            section(ui, "Over time");
-            // One scope, so the line saying where it has got to never
-            // moves the ids of the widgets below.
-            ui.scope(|ui| over_time(ui, settings, view.now.as_ref()));
-            section(ui, "Background");
-            background(ui, settings, view.images);
-            section(ui, "Instruments");
-            // In one scope: it changes as the pack downloads and installs.
-            ui.scope(|ui| recorded_row(ui, view.recorded, &mut actions));
-            ui.add_space(4.0);
-            if details {
-                instrument_rows(ui, settings);
-            } else {
-                instrument_chips(ui, settings);
+            let more = disclosure.shows_more("key_and_mood");
+            let shown = section(ui, disclosure, "key_and_mood", "Key and mood", |ui| {
+                key(ui, settings);
+                ui.add_space(8.0);
+                mood(ui, settings);
+                let open = more_toggle(ui, "Key and mood", more);
+                ui.scope(|ui| {
+                    if open {
+                        character(ui, settings);
+                    }
+                });
+                open
+            });
+            if let Some(open) = shown.inner {
+                disclosure.set_more("key_and_mood", open);
             }
-            if settings.layers.iter().all(|layer| !layer.enabled) {
-                ui.weak("No instruments: the background only.");
+            let more = disclosure.shows_more("energy_and_time");
+            let shown = section(ui, disclosure, "energy_and_time", "Energy and time", |ui| {
+                // One scope: the pulse's row comes and goes with the energy.
+                ui.scope(|ui| energy(ui, settings));
+                ui.add_space(8.0);
+                // One scope, so the line saying where it has got to never
+                // moves the ids of the widgets below.
+                ui.scope(|ui| over_time(ui, settings, view.now.as_ref()));
+                let open = more_toggle(ui, "Energy and time", more);
+                ui.scope(|ui| {
+                    if open {
+                        form(ui, settings);
+                    }
+                });
+                open
+            });
+            if let Some(open) = shown.inner {
+                disclosure.set_more("energy_and_time", open);
             }
-            if details {
-                section(ui, "Form");
-                form(ui, settings);
+            section(ui, disclosure, "background", "Background", |ui| {
+                background(ui, settings, view.images);
+            });
+            let more = disclosure.shows_more("instruments");
+            let shown = section(ui, disclosure, "instruments", "Instruments", |ui| {
+                // In one scope: it changes as the pack downloads and installs.
+                ui.scope(|ui| recorded_row(ui, view.recorded, &mut actions));
+                ui.add_space(4.0);
+                ui.scope(|ui| {
+                    if more {
+                        instrument_rows(ui, settings, view.pack);
+                    } else {
+                        instrument_chips(ui, settings);
+                    }
+                    if settings.layers.iter().all(|layer| !layer.enabled) {
+                        ui.weak("No instruments: the background only.");
+                    }
+                });
+                more_toggle(ui, "Instruments", more)
+            });
+            if let Some(open) = shown.inner {
+                disclosure.set_more("instruments", open);
             }
             ui.add_space(10.0);
         });
@@ -659,36 +686,65 @@ pub fn show(
     actions
 }
 
-/// A section's title, spaced as in the inspector.
-fn section(ui: &mut Ui, title: &str) -> egui::Response {
-    ui.add_space(16.0);
-    let response = ui.label(RichText::new(title).strong());
-    ui.add_space(6.0);
-    response
+/// A section of the Generator, open or closed as the preferences say.
+fn section<R>(
+    ui: &mut Ui,
+    disclosure: &mut Disclosure,
+    key: &str,
+    title: &str,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> skin::Disclosed<R> {
+    section_with(ui, disclosure, key, title, |ui, _| body(ui))
 }
 
-/// Play live and the level; with details, ducking.
-fn live(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut settings.enabled, "Play live")
-            .on_hover_text("Play the ambience now, under your sounds");
-        ui.add_space(8.0);
-        let mut percent = settings.level * 100.0;
-        inspector::fill_with_slider(ui);
-        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-            .suffix(" %")
-            .max_decimals(0);
-        if menu::keeps_arrows(ui.add(slider))
-            .on_hover_text("Level. Even at full level the ambience stays well under the sounds")
-            .changed()
-        {
-            settings.level = percent / 100.0;
-        }
-    });
-    if details {
-        ui.checkbox(&mut settings.duck, "Quieter while sounds play")
-            .on_hover_text("Down to about a third while any sound plays, and back up after");
+fn section_with<R>(
+    ui: &mut Ui,
+    disclosure: &mut Disclosure,
+    key: &str,
+    title: &str,
+    body: impl FnOnce(&mut Ui, &egui::Response) -> R,
+) -> skin::Disclosed<R> {
+    let mut open = disclosure.is_open(key);
+    let shown = skin::section_with(ui, title, &mut open, body);
+    disclosure.set_open(key, open);
+    shown
+}
+
+/// A section's More, after a little room: whether it is open now.
+fn more_toggle(ui: &mut Ui, section: &str, open: bool) -> bool {
+    let mut open = open;
+    ui.add_space(4.0);
+    skin::more(ui, section, &mut open);
+    open
+}
+
+/// A 0-to-1 `value` on a slider row reading in percent: named `name`,
+/// known as `label`; true when it moved.
+fn percent_row(ui: &mut Ui, name: &str, label: &str, value: &mut f32, hint: &str) -> bool {
+    let mut percent = *value * 100.0;
+    let readout = format!("{percent:.0} %");
+    let moved = skin::slider_row(ui, name, label, &mut percent, 0.0..=100.0, &readout)
+        .on_hover_text(hint)
+        .changed();
+    if moved {
+        *value = percent / 100.0;
     }
+    moved
+}
+
+/// Play live, its level, and whether it ducks under the sounds.
+fn live(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    skin::switch(ui, "Play live", &mut settings.enabled)
+        .on_hover_text("Plays the ambience now, under your sounds");
+    percent_row(
+        ui,
+        "Level",
+        "Ambience level",
+        &mut settings.level,
+        "How loud the ambience plays. Even at full level it stays well under the sounds",
+    );
+    skin::switch(ui, "Quieter while sounds play", &mut settings.duck)
+        .on_hover_text("Sinks to about a third while any sound plays, and comes back after");
 }
 
 /// The style to start from, built-in or one's own, a new variation of
@@ -696,7 +752,7 @@ fn live(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
 fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, view: &View) {
     let saved = view.saved.and_then(|index| view.styles.get(index));
     ui.horizontal(|ui| {
-        let width = (ui.available_width() - 112.0).max(120.0);
+        let width = (ui.available_width() - 128.0).max(120.0);
         let chosen_name = match (settings.style, saved) {
             (Some(style), _) => style.name(),
             (None, Some(style)) => style.name.as_str(),
@@ -749,8 +805,7 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
             .labelled_by(title.id)
             .on_hover_text("Start from a style; touch anything and the settings are yours");
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .button("New variation")
+            if skin::button(ui, "New variation", false)
                 .on_hover_text("The same settings, different notes")
                 .clicked()
             {
@@ -765,25 +820,14 @@ fn style(ui: &mut Ui, settings: &mut AmbienceSettings, title: &egui::Response, v
     });
 }
 
-/// Custom settings can be saved as a style; a saved one renamed or
-/// removed.
 /// Surprise Me, and Back after one; Custom settings can be saved as a
 /// style, a saved one renamed or removed.
 fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions: &mut Vec<Action>) {
+    ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let dice = match view.images.texture(ui.ctx(), "🎲") {
-            Some(texture) => {
-                let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
-                    texture,
-                    egui::vec2(16.0, 16.0),
-                ));
-                egui::Button::new((picture, "Surprise Me"))
-            }
-            None => egui::Button::new("Surprise Me"),
-        };
-        if ui
-            .add(dice)
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let dice = view.images.texture(ui.ctx(), "🎲");
+        if skin::picture_button(ui, "Surprise Me", dice)
             .on_hover_text(
                 "Something new, playing now: a key, a background, a few instruments and a \
                  mood picked at random",
@@ -793,8 +837,7 @@ fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions:
             actions.push(Action::Surprise);
         }
         if let Some(name) = view.before_surprise
-            && ui
-                .button("Back")
+            && skin::button(ui, "Back", false)
                 .on_hover_text(format!("Back to {name}"))
                 .clicked()
         {
@@ -805,24 +848,21 @@ fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions:
         }
         match view.saved {
             Some(index) => {
-                if ui
-                    .button("Rename…")
+                if skin::button(ui, "Rename…", false)
                     .on_hover_text("Give this style another name")
                     .clicked()
                 {
                     actions.push(Action::RenameStyle(index));
                 }
-                if ui
-                    .button("Remove Style")
-                    .on_hover_text("Tracks made from it stay")
+                if skin::button(ui, "Remove Style", false)
+                    .on_hover_text("Takes the style out of the list; tracks made from it stay")
                     .clicked()
                 {
                     actions.push(Action::RemoveStyle(index));
                 }
             }
             None => {
-                if ui
-                    .button("Save Style…")
+                if skin::button(ui, "Save Style…", false)
                     .on_hover_text("Keep these settings as a style of your own, in the Style list")
                     .clicked()
                 {
@@ -837,23 +877,27 @@ fn style_actions(ui: &mut Ui, settings: &AmbienceSettings, view: &View, actions:
 /// doesn't.
 fn naming_row(ui: &mut Ui, naming: &mut Naming, styles: &[UserStyle], actions: &mut Vec<Action>) {
     let problem = style_name_problem(styles, &naming.text, naming.of);
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let width = (ui.available_width() - 130.0).max(100.0);
-        let edit = egui::TextEdit::singleline(&mut naming.text)
-            .hint_text("Style name")
-            .desired_width(width);
-        let response = ui.add(edit);
+        let width = (ui.available_width() - 150.0).max(100.0);
+        let response = skin::field(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut naming.text)
+                    .hint_text("Style name")
+                    .desired_width(width),
+            )
+        });
         if !naming.focused {
             response.request_focus();
             naming.focused = true;
         }
         let entered = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
         let save = ui
-            .add_enabled(problem.is_none(), egui::Button::new("Save"))
+            .add_enabled_ui(problem.is_none(), |ui| skin::button(ui, "Save", false))
+            .inner
             .on_hover_text("Keep the style under this name (Return)")
             .clicked();
-        let cancel = ui
-            .button("Cancel")
+        let cancel = skin::button(ui, "Cancel", false)
             .on_hover_text("Leave the styles as they were (Escape)")
             .clicked();
         if cancel || ui.input(|input| input.key_pressed(Key::Escape)) {
@@ -876,6 +920,8 @@ fn naming_row(ui: &mut Ui, naming: &mut Naming, styles: &[UserStyle], actions: &
 
 /// Steady, building up or evolving, and where it has got to.
 fn over_time(ui: &mut Ui, settings: &mut AmbienceSettings, now: Option<&Now>) {
+    skin::legend_label(ui, "Over time")
+        .on_hover_text("Whether the music stays as it is or changes as it plays");
     choose(
         ui,
         &mut settings.journey,
@@ -883,22 +929,21 @@ fn over_time(ui: &mut Ui, settings: &mut AmbienceSettings, now: Option<&Now>) {
         Journey::name,
         Journey::describe,
     );
-    ui.add_space(2.0);
     ui.weak(sentence(settings.journey.describe()));
     if let Some(now) = now {
         ui.label(now_words(now));
     }
 }
 
-/// The moods; with details, the three amounts behind them.
-fn mood(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
+/// The moods, and what the one chosen sounds like.
+fn mood(ui: &mut Ui, settings: &mut AmbienceSettings) {
     let now = settings.mood();
+    skin::legend_label(ui, "Mood")
+        .on_hover_text("How the music moves: how often a motif comes back, how near the notes stay, how much they clash");
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        ui.spacing_mut().button_padding.x = 6.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
         for mood in Mood::ALL {
-            if ui
-                .selectable_label(now == Some(mood), mood.name())
+            if skin::chip(ui, mood.name(), None, now == Some(mood))
                 .on_hover_text(mood.describe())
                 .clicked()
             {
@@ -906,20 +951,14 @@ fn mood(ui: &mut Ui, settings: &mut AmbienceSettings, details: bool) {
             }
         }
         if now.is_none() {
-            let _ = ui
-                .selectable_label(true, "Custom")
+            let _ = skin::chip(ui, "Custom", None, true)
                 .on_hover_text("Pick a mood to start over from one");
         }
     });
-    if details {
-        ui.add_space(4.0);
-        character(ui, settings);
-    }
-    ui.add_space(2.0);
     ui.weak(character_words(settings));
 }
 
-/// A row of choices, wrapping; true when one was picked.
+/// A row of chips, wrapping, one of them chosen.
 fn choose<T: Copy + PartialEq>(
     ui: &mut Ui,
     value: &mut T,
@@ -928,9 +967,9 @@ fn choose<T: Copy + PartialEq>(
     hint: impl Fn(T) -> &'static str,
 ) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
         for &choice in all {
-            let response = ui.selectable_label(*value == choice, name(choice));
+            let response = skin::chip(ui, name(choice), None, *value == choice);
             let response = match hint(choice) {
                 "" => response,
                 text => response.on_hover_text(text),
@@ -977,11 +1016,10 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
             .on_hover_text("Which notes the music uses, and so its colour");
     });
     ui.add_space(4.0);
-    ui.checkbox(&mut settings.suspended, "Suspended")
-        .on_hover_text(
-            "Chords with a second or a fourth in place of their third, and no third in the \
-             tunes: neither major nor minor, open and floating",
-        );
+    skin::switch(ui, "Suspended", &mut settings.suspended).on_hover_text(
+        "Chords with a second or a fourth in place of their third, and no third in the \
+         tunes: neither major nor minor, open and floating",
+    );
     ui.weak(if settings.suspended {
         format!(
             "{}, suspended: neither major nor minor; open, floating.",
@@ -996,73 +1034,38 @@ fn key(ui: &mut Ui, settings: &mut AmbienceSettings) {
     });
 }
 
+/// The three amounts behind a mood, under Key and mood's More.
 fn character(ui: &mut Ui, settings: &mut AmbienceSettings) {
-    egui::Grid::new("olio-generator-character")
-        .num_columns(2)
-        .spacing([10.0, 6.0])
-        .show(ui, |ui| {
-            ui.spacing_mut().slider_width = (ui.available_width() - 170.0).max(100.0);
-            amount(
-                ui,
-                "Variety",
-                &mut settings.variety,
-                "Low: a short motif comes back again and again, on few chords, in an even \
-                 rhythm. High: new melodies, more chords, freer rhythm",
-            );
-            amount(
-                ui,
-                "Concentration",
-                &mut settings.concentration,
-                "High: the notes gather around the chord and the home note, in small steps \
-                 and a narrow range. Low: they wander wide",
-            );
-            amount(
-                ui,
-                "Chaos",
-                &mut settings.chaos,
-                "Dissonance: notes from outside the key, clashing seconds and tritones, \
-                 chords from anywhere and looser timing, more as it rises",
-            );
-        });
-}
-
-/// A grid row: `name` and a slider showing the 0-to-1 `value` in percent.
-fn amount(ui: &mut Ui, name: &str, value: &mut f32, hint: &str) {
-    let label = ui.label(name).on_hover_text(hint);
-    let mut percent = *value * 100.0;
-    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-        .suffix(" %")
-        .max_decimals(0);
-    if menu::keeps_arrows(ui.add(slider))
-        .labelled_by(label.id)
-        .on_hover_text(hint)
-        .changed()
-    {
-        *value = percent / 100.0;
-    }
-    ui.end_row();
+    ui.add_space(4.0);
+    percent_row(
+        ui,
+        "Variety",
+        "Variety",
+        &mut settings.variety,
+        "Low: a short motif loops again and again, its notes echoing, on few chords, in an \
+         even rhythm. High: new melodies, more chords (now and then one borrowed from the \
+         parallel key), freer rhythm",
+    );
+    percent_row(
+        ui,
+        "Concentration",
+        "Concentration",
+        &mut settings.concentration,
+        "High: the notes gather around the chord and the home note, in small steps and a \
+         narrow range. Low: they wander wide",
+    );
+    percent_row(
+        ui,
+        "Chaos",
+        "Chaos",
+        &mut settings.chaos,
+        "Dissonance: notes from outside the key, clashing seconds and tritones, chords from \
+         anywhere and looser timing, more as it rises",
+    );
 }
 
 fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        for choice in Background::ALL {
-            let chosen = settings.background == choice;
-            let button = match images.texture(ui.ctx(), emoji(choice)) {
-                Some(texture) => {
-                    let picture = egui::Image::from_texture(egui::load::SizedTexture::new(
-                        texture,
-                        egui::vec2(16.0, 16.0),
-                    ));
-                    egui::Button::selectable(chosen, (picture, choice.name()))
-                }
-                None => egui::Button::selectable(chosen, choice.name()),
-            };
-            if ui.add(button).on_hover_text(choice.describe()).clicked() {
-                settings.background = choice;
-            }
-        }
-    });
+    background_chips(ui, &mut settings.background, images);
     ui.weak(settings.background.describe());
     // Its balance with the instruments: in one scope, so whether it shows
     // never moves the ids of the widgets below.
@@ -1070,6 +1073,22 @@ fn background(ui: &mut Ui, settings: &mut AmbienceSettings, images: &EmojiImages
         if settings.background != Background::None {
             ui.add_space(2.0);
             balance(ui, settings);
+        }
+    });
+}
+
+/// Each background as a chip with its picture, the chosen one lit.
+fn background_chips(ui: &mut Ui, value: &mut Background, images: &EmojiImages) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for choice in Background::ALL {
+            let picture = images.texture(ui.ctx(), emoji(choice));
+            if skin::chip(ui, choice.name(), picture, *value == choice)
+                .on_hover_text(choice.describe())
+                .clicked()
+            {
+                *value = choice;
+            }
         }
     });
 }
@@ -1084,20 +1103,23 @@ fn balance(ui: &mut Ui, settings: &mut AmbienceSettings) {
         settings.balance * 100.0
     );
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        ui.weak(settings.background.name())
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.label(settings.background.name())
             .on_hover_text(hint.clone());
+        let instruments = ui
+            .painter()
+            .layout_no_wrap("Instruments".to_owned(), skin::body_font(), Color32::WHITE)
+            .size()
+            .x;
+        let length = (ui.available_width() - instruments - 8.0).clamp(60.0, 260.0);
         let mut percent = settings.balance * 100.0;
-        ui.spacing_mut().slider_width = (ui.available_width() - 84.0).clamp(60.0, 220.0);
-        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-            .show_value(false)
-            .trailing_fill(true);
-        let response = menu::keeps_arrows(ui.add(slider));
-        response.widget_info(|| egui::WidgetInfo::slider(true, f64::from(percent), "Balance"));
-        if response.on_hover_text(hint.clone()).changed() {
+        if skin::slider(ui, &mut percent, 0.0..=100.0, length, false, "Balance")
+            .on_hover_text(hint.clone())
+            .changed()
+        {
             settings.balance = percent / 100.0;
         }
-        ui.weak("Instruments").on_hover_text(hint);
+        ui.label("Instruments").on_hover_text(hint);
     });
 }
 
@@ -1105,14 +1127,14 @@ fn balance(ui: &mut Ui, settings: &mut AmbienceSettings) {
 /// installed, a switch between them and the synthesised ones.
 fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
     const ABOUT: &str = "A grand piano, harp, hand chimes, violin and bass pizzicato, string \
-                         sections, bowed vibraphone and hand drums, recorded by Versilian \
-                         Studios (public domain)";
+                         sections, bowed vibraphone and hand drums, with other recordings of \
+                         the harp, bells, strings and pad to choose from, recorded by \
+                         Versilian Studios (public domain)";
     match recorded {
         Recorded::Unavailable => {}
         Recorded::Missing => {
             let label = format!("Download Recorded Instruments ({})", megabytes(PACK_BYTES));
-            if ui
-                .button(label)
+            if skin::button(ui, &label, false)
                 .on_hover_text(format!(
                     "{ABOUT}. Downloaded once, then played in place of the synthesised ones"
                 ))
@@ -1123,8 +1145,7 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
         }
         Recorded::Downloading(progress) => {
             ui.horizontal(|ui| {
-                if ui
-                    .button("Stop Download")
+                if skin::button(ui, "Stop Download", false)
                     .on_hover_text("Stop; the synthesised instruments play on")
                     .clicked()
                 {
@@ -1137,10 +1158,9 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
         Recorded::Installed { on, loading } => {
             ui.horizontal(|ui| {
                 let mut value = on;
-                if ui
-                    .checkbox(&mut value, "Recorded instruments")
+                if skin::switch(ui, "Recorded instruments", &mut value)
                     .on_hover_text(format!("{ABOUT}. Off, every instrument is synthesised"))
-                    .changed()
+                    .clicked()
                 {
                     actions.push(Action::RecordedInstruments(value));
                 }
@@ -1155,11 +1175,10 @@ fn recorded_row(ui: &mut Ui, recorded: Recorded, actions: &mut Vec<Action>) {
 /// Each instrument on or off, side by side.
 fn instrument_chips(ui: &mut Ui, settings: &mut AmbienceSettings) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
         for instrument in Instrument::ALL {
             let layer = &mut settings.layers[instrument];
-            if ui
-                .selectable_label(layer.enabled, instrument.name())
+            if skin::chip(ui, instrument.name(), None, layer.enabled)
                 .on_hover_text(instrument.describe())
                 .clicked()
             {
@@ -1169,22 +1188,27 @@ fn instrument_chips(ui: &mut Ui, settings: &mut AmbienceSettings) {
     });
 }
 
-/// The width of the instruments' name column, so their sliders line up.
-const NAME_WIDTH: f32 = 84.0;
+/// The width of the instruments' switch column, so their sliders line up.
+const INSTRUMENT_COLUMN: f32 = 132.0;
 
 /// Each instrument on or off with its level; one that is on also shows
 /// how many notes it plays (the drone holds one) and its register.
-fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
+fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings, pack: Option<&Pack>) {
     for instrument in Instrument::ALL {
         let seconds = settings.spacing(instrument);
         let layer = &mut settings.layers[instrument];
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let name = ui.add_sized(
-                [NAME_WIDTH, 20.0],
-                egui::Checkbox::new(&mut layer.enabled, instrument.name()),
+            ui.allocate_ui_with_layout(
+                egui::vec2(INSTRUMENT_COLUMN, skin::SLIDER_BREADTH),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    // The whole column, however long the name, so the
+                    // sliders line up.
+                    ui.set_min_width(INSTRUMENT_COLUMN);
+                    skin::switch(ui, instrument.name(), &mut layer.enabled)
+                        .on_hover_text(instrument.describe());
+                },
             );
-            name.on_hover_text(instrument.describe());
             ui.add_enabled_ui(layer.enabled, |ui| {
                 let hint = format!(
                     "{} at {:.0} %, among the instruments",
@@ -1192,7 +1216,7 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
                     layer.level * 100.0
                 );
                 let label = format!("{} level", instrument.name());
-                amount_slider(ui, &mut layer.level, &label, hint);
+                amount_slider(ui, &mut layer.level, &label, &hint);
             });
         });
         if !layer.enabled {
@@ -1200,11 +1224,14 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
         }
         if instrument != Instrument::Drone {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
                 ui.allocate_ui_with_layout(
-                    egui::vec2(NAME_WIDTH, 18.0),
+                    egui::vec2(INSTRUMENT_COLUMN, skin::SLIDER_BREADTH),
                     Layout::right_to_left(Align::Center),
-                    |ui| ui.weak("Notes"),
+                    |ui| {
+                        ui.set_min_width(INSTRUMENT_COLUMN);
+                        ui.add_space(8.0);
+                        ui.weak("Notes");
+                    },
                 );
                 let label = format!("{} notes", instrument.name());
                 let hint = format!(
@@ -1213,14 +1240,13 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
                     layer.density.name()
                 );
                 let mut amount = layer.density.amount();
-                if amount_slider(ui, &mut amount, &label, hint) {
+                if amount_slider(ui, &mut amount, &label, &hint) {
                     layer.density = Density::new(amount);
                 }
             });
         }
         ui.horizontal(|ui| {
-            ui.add_space(NAME_WIDTH + 6.0);
-            ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+            ui.add_space(INSTRUMENT_COLUMN + ui.spacing().item_spacing.x);
             row(
                 ui,
                 &mut layer.register,
@@ -1229,23 +1255,55 @@ fn instrument_rows(ui: &mut Ui, settings: &mut AmbienceSettings) {
                 Register::describe,
             );
         });
-        ui.add_space(4.0);
+        if let Some(pack) = pack {
+            voice_chips(ui, instrument, layer, pack);
+        }
+        ui.add_space(6.0);
     }
 }
 
-/// A slider without a value box for a 0-to-1 `value`, as wide as the
-/// row allows, named `label` for screen readers and reading in percent;
-/// true when it moved.
-fn amount_slider(ui: &mut Ui, value: &mut f32, label: &str, hint: String) -> bool {
+/// The recordings an instrument can be played from, when the pack has more
+/// than one: the instrument's own and the others of its role (a folk harp
+/// for the harp), side by side under its register.
+fn voice_chips(ui: &mut Ui, instrument: Instrument, layer: &mut Layer, pack: &Pack) {
+    let voices: Vec<(u8, &str)> = pack.voices(instrument).collect();
+    if voices.len() < 2 {
+        return;
+    }
+    let chosen = pack.voice_for(instrument, layer.voice);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(INSTRUMENT_COLUMN + ui.spacing().item_spacing.x);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (voice, name) in voices {
+            let name = if name.is_empty() {
+                instrument.name()
+            } else {
+                name
+            };
+            if skin::chip(ui, name, None, chosen == Some(voice))
+                .on_hover_text(format!(
+                    "Plays the {} from the recording of the {}.",
+                    instrument.name().to_lowercase(),
+                    name.to_lowercase()
+                ))
+                .clicked()
+            {
+                layer.voice = voice;
+            }
+        }
+    });
+}
+
+/// A slider for a 0-to-1 `value` filling the rest of the row, with its
+/// percent in a readout after it, named `label`; true when it moved.
+fn amount_slider(ui: &mut Ui, value: &mut f32, label: &str, hint: &str) -> bool {
     let mut percent = *value * 100.0;
-    ui.spacing_mut().slider_width = (ui.available_width() - 8.0).clamp(60.0, 200.0);
-    let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-        .show_value(false)
-        .trailing_fill(true);
-    let response = menu::keeps_arrows(ui.add(slider));
-    let enabled = ui.is_enabled();
-    response.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(percent), label));
-    let moved = response.on_hover_text(hint).changed();
+    let spacing = ui.spacing().item_spacing.x;
+    let length = (ui.available_width() - skin::ROW_READOUT_WIDTH - spacing).max(60.0);
+    let moved = skin::slider(ui, &mut percent, 0.0..=100.0, length, false, label)
+        .on_hover_text(hint)
+        .changed();
+    skin::readout_label(ui, skin::ROW_READOUT_WIDTH, &format!("{percent:.0} %"));
     if moved {
         *value = percent / 100.0;
     }
@@ -1260,10 +1318,9 @@ fn row<T: Copy + PartialEq>(
     name: impl Fn(T) -> &'static str,
     hint: impl Fn(T) -> &'static str,
 ) {
-    ui.spacing_mut().item_spacing.x = 2.0;
+    ui.spacing_mut().item_spacing.x = 6.0;
     for &choice in all {
-        if ui
-            .selectable_label(*value == choice, name(choice))
+        if skin::chip(ui, name(choice), None, *value == choice)
             .on_hover_text(sentence(hint(choice)))
             .clicked()
         {
@@ -1277,11 +1334,9 @@ fn row<T: Copy + PartialEq>(
 fn energy(ui: &mut Ui, settings: &mut AmbienceSettings) {
     let now = settings.presence();
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        ui.spacing_mut().button_padding.x = 6.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
         for presence in Presence::ALL {
-            if ui
-                .selectable_label(now == Some(presence), presence.name())
+            if skin::chip(ui, presence.name(), None, now == Some(presence))
                 .on_hover_text(presence.describe())
                 .clicked()
             {
@@ -1289,49 +1344,44 @@ fn energy(ui: &mut Ui, settings: &mut AmbienceSettings) {
             }
         }
     });
-    ui.horizontal(|ui| {
-        let hint = format!(
-            "Energy {:.0} %: how much there is of the music, not how loud. Softer and sparser \
-             to the left; harder and busier to the right, on a pulse from the middle, with \
-             running lines and fuller chords near the top",
-            settings.energy * 100.0
-        );
-        amount_slider(ui, &mut settings.energy, "Energy", hint);
-    });
+    let hint = format!(
+        "Energy {:.0} %: how much there is of the music, not how loud. Softer and sparser to \
+         the left; harder and busier to the right, on a pulse from the middle, with running \
+         lines and fuller chords near the top",
+        settings.energy * 100.0
+    );
+    percent_row(ui, "Energy", "Energy", &mut settings.energy, &hint);
     if settings.pulsed() {
-        ui.horizontal(|ui| {
-            let hint = "Beats per minute of the pulse; the chords change every eight beats";
-            ui.label("Pulse").on_hover_text(hint);
-            let mut tempo = f32::from(settings.tempo);
-            ui.spacing_mut().slider_width = 160.0;
-            let slider = egui::Slider::new(&mut tempo, 30.0..=120.0)
-                .suffix(" BPM")
-                .max_decimals(0);
-            if menu::keeps_arrows(ui.add(slider))
-                .on_hover_text(hint)
-                .changed()
-            {
-                settings.tempo = tempo.round() as u16;
-            }
-        });
+        let hint = "Beats per minute of the pulse; the chords change every eight beats";
+        let mut tempo = f32::from(settings.tempo);
+        let readout = format!("{tempo:.0} BPM");
+        if skin::slider_row(ui, "Pulse", "Pulse", &mut tempo, 30.0..=120.0, &readout)
+            .on_hover_text(hint)
+            .changed()
+        {
+            settings.tempo = tempo.round() as u16;
+        }
     }
-    ui.add_space(2.0);
     ui.weak(sentence(Presence::nearest(settings.energy).describe()));
 }
 
+/// Endless or in pieces, and how long a piece and its pause are; under
+/// Energy and time's More.
 fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {
+    ui.add_space(4.0);
+    skin::legend_label(ui, "Form")
+        .on_hover_text("Whether the music plays on, or in pieces with a pause between them");
     let pieces = matches!(settings.form, Form::Piece { .. });
     ui.horizontal(|ui| {
-        if ui
-            .selectable_label(!pieces, "Endless")
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if skin::chip(ui, "Endless", None, !pieces)
             .on_hover_text("Plays on without a break")
             .clicked()
             && pieces
         {
             settings.form = Form::Endless;
         }
-        if ui
-            .selectable_label(pieces, "Pieces")
+        if skin::chip(ui, "Pieces", None, pieces)
             .on_hover_text("Each piece opens, builds, closes on the root, then pauses")
             .clicked()
             && !pieces
@@ -1347,44 +1397,26 @@ fn form(ui: &mut Ui, settings: &mut AmbienceSettings) {
         pause_seconds,
     } = &mut settings.form
     {
-        egui::Grid::new("olio-generator-form")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                ui.spacing_mut().slider_width = 160.0;
-                let hint = "How long each piece plays before it closes on the root";
-                let label = ui.label("Piece").on_hover_text(hint);
-                let length = egui::Slider::new(minutes, 0.5..=30.0)
-                    .suffix(" min")
-                    .max_decimals(1);
-                let _ = menu::keeps_arrows(ui.add(length))
-                    .labelled_by(label.id)
-                    .on_hover_text(hint);
-                ui.end_row();
-                let hint = "The background alone between one piece and the next";
-                let label = ui.label("Pause").on_hover_text(hint);
-                let pause = egui::Slider::new(pause_seconds, 0.0..=120.0)
-                    .suffix(" s")
-                    .max_decimals(0);
-                let _ = menu::keeps_arrows(ui.add(pause))
-                    .labelled_by(label.id)
-                    .on_hover_text(hint);
-                ui.end_row();
-            });
+        let readout = format!("{minutes:.1} min");
+        let _ = skin::slider_row(ui, "Piece", "Piece", minutes, 0.5..=30.0, &readout)
+            .on_hover_text("How long each piece plays before it closes on the root");
+        let readout = format!("{pause_seconds:.0} s");
+        let _ = skin::slider_row(ui, "Pause", "Pause", pause_seconds, 0.0..=120.0, &readout)
+            .on_hover_text("The background alone between one piece and the next");
     }
 }
 
 fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
+    ui.add_space(12.0);
+    skin::legend_label(ui, "Track")
+        .on_hover_text("These settings rendered to a sound in the library, on a tile");
     ui.add_space(4.0);
-    ui.separator();
-    ui.label(RichText::new("Track").strong());
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
         let hint = "How long the generated track is";
         ui.label("Length").on_hover_text(hint);
         for (seconds, name) in TRACK_LENGTHS {
-            if ui
-                .selectable_label(view.track_seconds == seconds, name)
+            if skin::chip(ui, name, None, view.track_seconds == seconds)
                 .on_hover_text(hint)
                 .clicked()
             {
@@ -1392,12 +1424,11 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
             }
         }
     });
-    ui.add_space(2.0);
+    ui.add_space(6.0);
     match &view.busy {
         Some(busy) => {
             ui.horizontal(|ui| {
-                if ui
-                    .button("Cancel")
+                if skin::button(ui, "Cancel", false)
                     .on_hover_text("Stop generating; tracks already made stay")
                     .clicked()
                 {
@@ -1411,14 +1442,12 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
                     ),
                     None => format!("Generating “{}” {percent:.0} %", busy.title),
                 };
-                ui.add(egui::ProgressBar::new(busy.progress).text(text));
+                let bar = egui::ProgressBar::new(busy.progress).text(text);
+                ui.add(bar);
             });
         }
         None => {
-            let generate = egui::Button::new("Generate Track")
-                .min_size(egui::vec2(ui.available_width(), 28.0));
-            if ui
-                .add(generate)
+            if skin::wide_button(ui, "Generate Track", None, false)
                 .on_hover_text(
                     "Renders this ambience to a sound in the library and puts it on a tile, \
                      to play, loop and polish like any other",
@@ -1430,22 +1459,72 @@ fn track(ui: &mut Ui, view: &View, actions: &mut Vec<Action>) {
             ui.weak(format!("onto a tile in “{}”", view.set_name));
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                ui.label("New set of");
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label("New set of")
+                    .on_hover_text("Several tracks at once, in a set of their own");
                 for of in SetOf::ALL {
-                    if ui.button(of.name()).on_hover_text(of.describe()).clicked() {
+                    if skin::button(ui, of.name(), false)
+                        .on_hover_text(of.describe())
+                        .clicked()
+                    {
                         actions.push(Action::GenerateSet(of));
                     }
                 }
             });
         }
     }
-    ui.add_space(6.0);
+    ui.add_space(8.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pack with a harp of two voices whose second has no recordings on
+    /// disk, and the settings of a style that plays the harp with `voice`.
+    fn harp_pack(dir: &std::path::Path, voice: u8) -> (Pack, AmbienceSettings) {
+        use olio_audio::instruments::{MANIFEST, Manifest};
+        crate::instruments::tests::write_pack(dir);
+        let folder = dir.join("olio-instruments");
+        let text = fs::read_to_string(folder.join(MANIFEST)).unwrap();
+        let mut manifest: Manifest = serde_json::from_str(&text).unwrap();
+        let mut broken = manifest.instruments[0].clone();
+        broken.voice = 1;
+        broken.name = "Broken harp".to_owned();
+        for zone in &mut broken.zones {
+            zone.file = "harp/missing.wav".to_owned();
+        }
+        manifest.instruments.push(broken);
+        fs::write(
+            folder.join(MANIFEST),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut settings = Style::RainStudy.settings();
+        settings.layers[Instrument::Harp].voice = voice;
+        (Pack::open(&folder).unwrap(), settings)
+    }
+
+    #[test]
+    fn a_track_plays_the_voice_its_settings_ask_for_and_never_another_when_it_will_not_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut recorded = Recordings::default();
+
+        // The instrument's own, loaded for a track that asks for it.
+        let (pack, settings) = harp_pack(dir.path(), 0);
+        load_voices(&pack, &mut recorded, &settings);
+        assert_eq!(recorded.voice(Instrument::Harp), Some(0));
+
+        // A voice the pack has not: the own one stays.
+        let (pack, settings) = harp_pack(dir.path(), 7);
+        load_voices(&pack, &mut recorded, &settings);
+        assert_eq!(recorded.voice(Instrument::Harp), Some(0));
+
+        // A voice the pack lists but cannot read: synthesised, not voice 0.
+        let (pack, settings) = harp_pack(dir.path(), 1);
+        load_voices(&pack, &mut recorded, &settings);
+        assert!(recorded.get(Instrument::Harp).is_none());
+    }
 
     #[test]
     fn a_set_holds_variations_moods_or_every_style() {

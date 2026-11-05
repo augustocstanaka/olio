@@ -7,6 +7,8 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Ui, Vec2, WidgetInfo, WidgetType};
 
+use crate::skin;
+
 /// The quietest level drawn; anything below reads as silence.
 pub const FLOOR_DB: f32 = -48.0;
 /// How fast the bar falls back.
@@ -110,39 +112,18 @@ pub fn readout(db: f32) -> String {
 /// How a bar is coloured.
 #[derive(Clone, Copy)]
 pub enum Colors {
-    /// Green, amber and red, as on a mixing desk.
+    /// The accent, warming into the alarm colour near full scale: the
+    /// output and the inspector's level.
     Zones,
-    /// One colour (a tile's), turning red near full scale.
+    /// One colour (a tile's), turning to the alarm colour near full scale.
     Tinted(Color32),
 }
 
-fn zone_colors(dark: bool) -> [Color32; 3] {
-    if dark {
-        [
-            Color32::from_rgb(52, 199, 89),
-            Color32::from_rgb(255, 184, 0),
-            Color32::from_rgb(255, 69, 58),
-        ]
-    } else {
-        [
-            Color32::from_rgb(36, 160, 70),
-            Color32::from_rgb(222, 145, 0),
-            Color32::from_rgb(215, 45, 45),
-        ]
-    }
-}
-
-pub fn track_color(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_white_alpha(18)
-    } else {
-        Color32::from_black_alpha(22)
-    }
-}
-
-/// Paints one bar: along `rect` from the left, or from the bottom when it
-/// is taller than wide.
-pub fn paint_bar(painter: &Painter, rect: Rect, meter: &Meter, colors: Colors, dark: bool) {
+/// Paints one bar, an inset track filling along `rect` from the left, or
+/// from the bottom when it is taller than wide. Colours are the palette's
+/// (`docs/DESIGN.md`): the accent, then the alarm.
+pub fn paint_bar(painter: &Painter, rect: Rect, meter: &Meter, colors: Colors) {
+    let p = skin::palette(painter.ctx());
     let vertical = rect.height() > rect.width();
     let span = |from: f32, to: f32| -> Rect {
         if vertical {
@@ -158,19 +139,19 @@ pub fn paint_bar(painter: &Painter, rect: Rect, meter: &Meter, colors: Colors, d
         }
     };
     let radius = (rect.width().min(rect.height()) / 2.0).min(3.0) as u8;
-    painter.rect_filled(rect, radius, track_color(dark));
+    skin::inset(painter, rect, radius, p.groove);
 
-    let [green, amber, red] = zone_colors(dark);
+    let warm = p.accent.lerp_to_gamma(p.alarm, 0.5);
     let zones = match colors {
         Colors::Zones => [
-            (0.0, fraction(AMBER_DB), green),
-            (fraction(AMBER_DB), fraction(RED_DB), amber),
-            (fraction(RED_DB), 1.0, red),
+            (0.0, fraction(AMBER_DB), p.accent),
+            (fraction(AMBER_DB), fraction(RED_DB), warm),
+            (fraction(RED_DB), 1.0, p.alarm),
         ],
         Colors::Tinted(color) => [
             (0.0, fraction(RED_DB), color),
             (fraction(RED_DB), fraction(RED_DB), color),
-            (fraction(RED_DB), 1.0, red),
+            (fraction(RED_DB), 1.0, p.alarm),
         ],
     };
     let level = fraction(meter.level_db());
@@ -186,7 +167,7 @@ pub fn paint_bar(painter: &Painter, rect: Rect, meter: &Meter, colors: Colors, d
         let color = zones
             .iter()
             .find(|(from, to, _)| (*from..=*to).contains(&hold))
-            .map_or(red, |zone| zone.2);
+            .map_or(p.alarm, |zone| zone.2);
         let tick = 2.0
             / if vertical {
                 rect.height()
@@ -200,7 +181,7 @@ pub fn paint_bar(painter: &Painter, rect: Rect, meter: &Meter, colors: Colors, d
 /// The output meter in the toolbar: a bar per channel and a clip lamp.
 pub fn stereo(ui: &mut Ui, meters: &[Meter; 2], now: f64, size: Vec2) -> Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
-    let dark = ui.visuals().dark_mode;
+    let p = skin::palette(ui.ctx());
     let lamp = size.y * 0.55;
     let bars = Rect::from_min_max(
         rect.min,
@@ -211,18 +192,15 @@ pub fn stereo(ui: &mut Ui, meters: &[Meter; 2], now: f64, size: Vec2) -> Respons
     for (index, meter) in meters.iter().enumerate() {
         let top = bars.top() + index as f32 * (height + gap);
         let bar = Rect::from_x_y_ranges(bars.x_range(), top..=top + height);
-        paint_bar(ui.painter(), bar, meter, Colors::Zones, dark);
+        paint_bar(ui.painter(), bar, meter, Colors::Zones);
     }
     let clipped = meters.iter().any(|meter| meter.clipped(now));
-    let lamp_color = if clipped {
-        zone_colors(dark)[2]
-    } else {
-        track_color(dark)
-    };
-    ui.painter().circle_filled(
+    skin::lamp(
+        ui.painter(),
         Pos2::new(rect.right() - lamp / 2.0, rect.center().y),
         lamp / 2.0,
-        lamp_color,
+        p.alarm,
+        clipped,
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Output level"));
     let [left, right] = meters.map(|meter| readout(meter.hold_db()));

@@ -54,7 +54,9 @@ live in [`adr/`](adr/); this document describes the shape that resulted.
    is not loaded yet.
 5. **Instrument threads** (`instruments.rs`): one downloads and installs
    the instrument pack when asked; one per instrument decodes its
-   recordings when the live ambience starts playing it, and the UI hands
+   recordings (the voice its layer asks for, the instrument's own where
+   the pack has not that one) when the live ambience starts playing it,
+   and again when the voice changes, and the UI hands
    the result to the mixer (`Engine::set_instrument`). Recordings the
    mixer lets go come back through `Engine::poll` and are freed there.
 
@@ -111,3 +113,22 @@ import) unless forced.
   `ambience/background.rs`, or an `Instrument` added at the end of
   `Instrument::ALL` (saved layers are read by position) with its voice in
   `synth.rs` and its part in `composer.rs`; offline tests beside each.
+- A new recorded voice for an instrument of the Generator: a `Recipe`
+  in `crates/packer/src/recipes.rs` (the next voice number of its role,
+  a name, the folders it takes, its blend and range), then `cargo xtask
+  instruments pin`, `fetch`, `check` (the notes' pitches against their
+  names) and `build`; the gain from the ignored `measure_recorded_against_
+  synthesised` test; the packer's tests fail until `sources.json` is
+  what the recipes take and every voice has a licence and a credit.
+  Nothing in the app changes: the voice chips list what the pack has.
+- A new part of the window (a kind of button, a meter): a function in
+  `skin.rs` drawn from `raised`, `inset` and the palette, with a line in
+  `docs/DESIGN.md`; a new colour is a `Palette` token in both lightness
+  tables and in the contrast test. A new group in a panel is a section
+  (`skin::section`) with a key in its `Disclosure`; what refines it goes
+  under its More.
+- A new kind of generated track: a `TrackPlan` (settings and title) that
+  `Generation` renders through `render_track` and imports with
+  `Store::import_sound`, so it lands on a tile, is undoable and shows
+  progress like the others; tested by rendering offline. Everything the
+  Generator plays is made by rules, with no music model (ADR 0007).

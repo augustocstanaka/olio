@@ -49,8 +49,13 @@ are intentions, reordered as real use dictates.
   character (variety, concentration, chaos), a journey over time
   (steady, building up, or evolving through related keys, moods and
   backgrounds), energy from barely there to vibrant, endless or pieces; recorded instruments (a
-  71 MB pack of CC0 recordings, downloaded once) or synthesised ones, in
-  a chorus and hall of their own. It plays live
+  148 MB pack of CC0 recordings, downloaded once) or synthesised ones,
+  each near or far in a hall of their own and slowly drifting, the pad's
+  chords led voice by voice, the lines looping and echoing at low
+  variety, chords chosen from tables (and borrowed from the parallel key
+  when the mood wanders); a version 2 instrument pack with several
+  recorded voices of some instruments (a folk harp, a kalimba, a
+  glockenspiel, a flute, an organ...) and soft and loud notes that blend. It plays live
   as the ambience, synthesised on the audio thread without allocation (a
   `SetAmbience` command for control surfaces), and generates tracks of
   30 s to 10 min onto tiles, or a new set of them (variations, moods or
@@ -69,9 +74,12 @@ are intentions, reordered as real use dictates.
   every playing tile, and the selected tile in the inspector.
 - **Emoji on tiles**: colour Twemoji, a picker with search and groups,
   boards accept emoji or shortcodes.
-- **Soft tiles** (View menu): raised tiles that press in while playing,
-  a restrained take on neumorphism that keeps contrast in both themes;
-  every tile dips briefly when it starts (the trigger bounce).
+- **Soft UI** for the whole window, after Sala and Toca: one surface,
+  tiles raised at rest and pressed in while playing, chips, switches and
+  sliders with readouts, a palette tested for contrast in both themes;
+  the inspector and Generator in sections that open and close, each with
+  a More for what refines it; every tile dips briefly when it starts (the
+  trigger bounce). See `docs/DESIGN.md` and ADR 0006.
 
 ## M1 - Core playback
 

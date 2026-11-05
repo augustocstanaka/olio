@@ -23,6 +23,7 @@ mod composer;
 mod dsp;
 mod hall;
 mod journey;
+mod modulation;
 mod sampler;
 mod synth;
 mod track;
@@ -36,9 +37,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::mixer::Ramp;
 use background::Bed;
 pub use composer::{Composer, Event, Note, SHAKER};
-use hall::{Chorus, Hall};
+use hall::{Chorus, Hall, Stage};
 use journey::Course;
 pub use journey::{Journey, Now};
+use modulation::{CONTROL, Motion};
 use synth::Synth;
 pub use track::{TRACK_RATE, render_track};
 
@@ -514,6 +516,16 @@ pub struct Layer {
     #[serde(rename = "notes")]
     pub density: Density,
     pub register: Register,
+    /// Which recorded voice of the instrument plays (the harp's folk
+    /// harp, say): 0 is its own, the others are in the instrument pack
+    /// and fall back to 0 where the pack has no such voice. Saved only
+    /// when not 0.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub voice: u8,
+}
+
+fn is_zero(voice: &u8) -> bool {
+    *voice == 0
 }
 
 /// A layer as saved: its density an amount (`notes`), or from before
@@ -527,6 +539,7 @@ struct SavedLayer {
     notes: f32,
     density: Step,
     register: Register,
+    voice: u8,
 }
 
 impl Default for SavedLayer {
@@ -538,6 +551,7 @@ impl Default for SavedLayer {
             notes: f32::NAN,
             density: Step::Unset,
             register: layer.register,
+            voice: layer.voice,
         }
     }
 }
@@ -558,6 +572,7 @@ impl From<SavedLayer> for Layer {
             level: saved.level,
             density,
             register: saved.register,
+            voice: saved.voice,
         }
     }
 }
@@ -569,6 +584,7 @@ impl Default for Layer {
             level: 0.8,
             density: Density::SPARSE,
             register: Register::Middle,
+            voice: 0,
         }
     }
 }
@@ -580,6 +596,7 @@ impl Layer {
             level,
             density,
             register: Register::Middle,
+            voice: 0,
         }
     }
 }
@@ -1640,10 +1657,10 @@ impl Rng {
 const FULL_LEVEL_GAIN: f32 = 0.16;
 /// How much quieter while sounds play.
 const DUCKED: f32 = 0.35;
-/// How much of the instruments goes into their hall, and how much they
-/// are trimmed by so that, hall and all, they sit where they did.
-const HALL_SEND: f32 = 0.6;
-const MUSIC_TRIM: f32 = 0.72;
+/// How much the instruments are trimmed by so that, hall and all, they
+/// sit where they did. Each layer's send into the hall is its place's
+/// (`hall::place`).
+const MUSIC_TRIM: f32 = 0.8;
 /// Below this the hall's tail is no longer heard, and rendering can stop.
 const HALL_QUIET: f32 = 1e-6;
 
@@ -1665,8 +1682,10 @@ pub struct Ambience {
     /// The background against the instruments, and they against it.
     bed_gain: Ramp,
     music_level: Ramp,
-    /// The instruments' ensemble and their hall, and whether its tail
-    /// still rings.
+    /// Each layer's place and drift, the instruments' ensemble and their
+    /// hall, and whether its tail still rings.
+    stage: Stage,
+    motion: Motion,
     chorus: Chorus,
     hall: Hall,
     ringing: bool,
@@ -1691,6 +1710,8 @@ impl Ambience {
             duck: Ramp::at(1.0),
             bed_gain: Ramp::at(1.0),
             music_level: Ramp::at(1.0),
+            stage: Stage::new(rate),
+            motion: Motion::new(rate, seed.rotate_left(29)),
             chorus: Chorus::new(rate),
             hall: Hall::new(rate),
             ringing: false,
@@ -1767,7 +1788,8 @@ impl Ambience {
     }
 
     /// Adds the next `out.len() / channels` frames into `out`: the
-    /// background, and the instruments through their chorus and hall.
+    /// background, and the instruments each in its place, drifting,
+    /// through their chorus and hall.
     /// `ducking` while sounds play.
     pub fn render(&mut self, out: &mut [f32], channels: usize, ducking: bool) {
         let frames = out.len() / channels;
@@ -1802,6 +1824,10 @@ impl Ambience {
             let heard = self.course.settings(&self.settings, from, piece);
             self.follow(heard, from);
             self.composer.poll(&self.heard, from, to);
+            if self.composer.take_ended() {
+                // Silent through the pause, and not heard again after it.
+                self.synth.release_held();
+            }
         }
         let music_gain = self.composer.music_gain();
         let mut tail = 0.0f32;
@@ -1815,14 +1841,21 @@ impl Ambience {
             let (mut left, mut right) = self.bed.next();
             left *= bed_gain;
             right *= bed_gain;
-            let (sl, sr) = self
-                .synth
-                .next(music_gain * self.music_level.next() * MUSIC_TRIM);
-            let (sl, sr) = self.chorus.process(sl, sr);
+            if now.is_multiple_of(CONTROL) {
+                self.motion.tick();
+            }
+            let mut stems = [[0.0; 2]; Instrument::COUNT];
+            self.synth.next(
+                music_gain * self.music_level.next() * MUSIC_TRIM,
+                &mut stems,
+            );
+            let mixed = self.stage.mix(&stems, &self.motion);
+            let (cl, cr) = self.chorus.process(mixed.chorused[0], mixed.chorused[1]);
+            let (sl, sr) = (cl + mixed.plain[0], cr + mixed.plain[1]);
             // The hall rings on after the bed is switched off.
             let (hl, hr) = self
                 .hall
-                .process(sl * gain * HALL_SEND, sr * gain * HALL_SEND);
+                .process(mixed.send[0] * gain, mixed.send[1] * gain);
             tail = tail.max(hl.abs()).max(hr.abs());
             left = (left + sl) * gain + hl;
             right = (right + sr) * gain + hr;
@@ -1841,6 +1874,28 @@ impl Ambience {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_seed_renders_the_same_music_every_time() {
+        let render = |seed: u64| {
+            let mut settings = Style::OpenRoad.settings();
+            settings.enabled = true;
+            for layer in &mut settings.layers {
+                layer.enabled = true;
+            }
+            let mut ambience = Ambience::new(48_000, seed);
+            ambience.set(settings);
+            let mut out = vec![0.0f32; 48_000 * 2 * 20];
+            for block in out.chunks_mut(1024) {
+                ambience.render(block, 2, false);
+            }
+            out
+        };
+        let first = render(9);
+        assert!(first.iter().any(|x| x.abs() > 1e-4));
+        assert_eq!(first, render(9), "the same seed, the same music");
+        assert_ne!(first, render(10), "another seed, other music");
+    }
 
     #[test]
     fn scales_step_through_their_intervals_and_wrap_at_the_octave() {
@@ -2140,9 +2195,9 @@ mod tests {
         }
     }
 
-    /// Prints how much louder each instrument of the pack in `OLIO_PACK`
-    /// is than its synthesised voice, to set the pack's gains; run with
-    /// `--ignored --nocapture`.
+    /// Prints how much louder each voice of each instrument of the pack in
+    /// `OLIO_PACK` is than the instrument's synthesised voice, to set the
+    /// pack's gains; run with `--ignored --nocapture`.
     #[test]
     #[ignore]
     fn measure_recorded_against_synthesised() {
@@ -2152,31 +2207,245 @@ mod tests {
         };
         let pack = Pack::open(std::path::Path::new(&dir)).unwrap();
         let rate = 48_000;
-        for instrument in pack.instruments() {
-            let samples = std::sync::Arc::new(pack.load(instrument).unwrap().unwrap());
+        let voices: Vec<(Instrument, u8, String)> = pack
+            .instruments()
+            .flat_map(|instrument| {
+                pack.voices(instrument)
+                    .map(move |(voice, name)| (instrument, voice, name.to_owned()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let mut off: Vec<String> = Vec::new();
+        for (instrument, voice, name) in voices {
+            let samples = std::sync::Arc::new(pack.load(instrument, voice).unwrap().unwrap());
+            // Over several seeds, so which notes happen to be played does
+            // not decide it: the power of four minutes.
             let level = |recorded: bool| {
-                let mut settings = Style::RainStudy.settings();
-                settings.enabled = true;
-                settings.background = Background::None;
-                for other in Instrument::ALL {
-                    settings.layers[other].enabled = other == instrument;
+                let mut power = 0.0f32;
+                for seed in [9, 11, 13, 17] {
+                    let mut settings = Style::RainStudy.settings();
+                    settings.enabled = true;
+                    settings.background = Background::None;
+                    for other in Instrument::ALL {
+                        settings.layers[other].enabled = other == instrument;
+                    }
+                    settings.layers[instrument].density = Density::LIVELY;
+                    let mut ambience = Ambience::new(rate as u32, seed);
+                    if recorded {
+                        ambience.set_samples(instrument, Some(samples.clone()));
+                    }
+                    ambience.set(settings);
+                    let mut out = vec![0.0; rate * 60 * 2];
+                    ambience.render(&mut out, 2, false);
+                    power += out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32;
                 }
-                settings.layers[instrument].density = Density::LIVELY;
-                let mut ambience = Ambience::new(rate as u32, 9);
-                if recorded {
-                    ambience.set_samples(instrument, Some(samples.clone()));
-                }
-                ambience.set(settings);
-                let mut out = vec![0.0; rate * 60 * 2];
-                ambience.render(&mut out, 2, false);
-                (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt()
+                (power / 4.0).sqrt()
             };
             let (synth, recorded) = (level(false), level(true));
+            // The pad keeps its synthesised voice beneath the recording:
+            // the recording alone is what the two make over the synth, and
+            // its aim is a fixed level (the bowed vibraphone's, as it was
+            // first set) rather than the synthesised pad's.
+            const PAD_ALONE: f32 = 0.001_935;
+            let (alone, aim) = if instrument == Instrument::Pad {
+                (
+                    (recorded * recorded - synth * synth).max(0.0).sqrt(),
+                    PAD_ALONE,
+                )
+            } else {
+                (recorded, synth)
+            };
+            let gain = aim / alone.max(1e-9);
             println!(
-                "GAIN {instrument:?}: synth {synth:.5}, recorded {recorded:.5}, gain {:.3}",
-                synth / recorded
+                "GAIN {instrument:?} {name}: synth {synth:.7}, recorded {recorded:.7}, \
+                 alone {alone:.7}, gain {gain:.3}"
             );
+            // Each voice as loud as the instrument's synthesised voice (the
+            // pad's recording as its aim), to within a dB and a half.
+            if !(0.85..=1.17).contains(&gain) {
+                off.push(format!("{instrument:?} {name}: {gain:.3} times"));
+            }
         }
+        assert!(off.is_empty(), "voices off their level: {off:?}");
+    }
+
+    /// Plays every voice of the pack in `OLIO_PACK` on notes across the
+    /// range at three velocities: each must sound, stay finite and not
+    /// peak so high that the bus (which scales it by at most 0.16 more)
+    /// could clip, and a held note must still sound ten seconds on. Run
+    /// with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn every_voice_of_the_pack_plays_every_note() {
+        use super::composer::{Event, Note};
+        use super::sampler::Sampler;
+        use crate::instruments::Pack;
+        use std::sync::Arc;
+        let Ok(dir) = std::env::var("OLIO_PACK") else {
+            return;
+        };
+        let pack = Pack::open(std::path::Path::new(&dir)).unwrap();
+        let rate = 48_000usize;
+        let mut cases = 0;
+        let mut problems: Vec<String> = Vec::new();
+        for instrument in pack.instruments() {
+            if instrument == Instrument::Drums {
+                continue;
+            }
+            let voices: Vec<(u8, String)> = pack
+                .voices(instrument)
+                .map(|(voice, name)| (voice, name.to_owned()))
+                .collect();
+            for (voice, name) in voices {
+                let samples = Arc::new(pack.load(instrument, voice).unwrap().unwrap());
+                let held = samples.zones.iter().all(|zone| zone.looped.is_some());
+                // Inside its loop a held note stays level: no half second
+                // is more than 10 dB from another (glasses and sections
+                // beat by up to 8; a loop taken in the ring-out falls by
+                // 17 to 36), so a pass does not swell or die away.
+                for zone in samples.zones.iter().filter(|zone| zone.looped.is_some()) {
+                    let (start, end) = zone.looped.unwrap();
+                    // Half a second, or a quarter of a shorter loop.
+                    let window =
+                        ((end - start) / 4).clamp(zone.rate as usize / 20, zone.rate as usize / 2);
+                    let levels: Vec<f32> = (start..end.saturating_sub(window))
+                        .step_by(window / 2)
+                        .map(|from| {
+                            let part = &zone.data[from * 2..(from + window) * 2];
+                            let power: f32 =
+                                part.iter().map(|s| (f32::from(*s) / 32768.0).powi(2)).sum();
+                            (power / part.len() as f32).sqrt()
+                        })
+                        .collect();
+                    let high = levels.iter().copied().fold(0.0f32, f32::max);
+                    let low = levels.iter().copied().fold(f32::MAX, f32::min);
+                    if !levels.is_empty() && high > low.max(1e-6) * 3.2 {
+                        problems.push(format!(
+                            "{instrument:?} {name} root {}: its loop swells or dies away, \
+                             {:.1} dB between its quietest and loudest half second",
+                            zone.root,
+                            20.0 * (high / low.max(1e-6)).log10()
+                        ));
+                    }
+                }
+                // Level against velocity: stepping it by 0.02, the played
+                // level changes by what the velocity itself does, give or
+                // take 6 dB: no step at the line between two layers.
+                let roots: Vec<i32> = samples.zones.iter().map(|z| i32::from(z.root)).collect();
+                let (lowest, highest) = (
+                    roots.iter().copied().min().unwrap_or(0),
+                    roots.iter().copied().max().unwrap_or(127),
+                );
+                for midi in [48u8, 60, 72, 84] {
+                    if !(lowest..=highest).contains(&i32::from(midi)) {
+                        continue;
+                    }
+                    let level = |velocity: f32| {
+                        let mut sampler = Sampler::new(rate as u32, 1);
+                        sampler.set(instrument, Some(samples.clone()));
+                        let event = Event {
+                            at: 0,
+                            note: Note {
+                                instrument,
+                                midi,
+                                velocity,
+                                pan: 0.0,
+                                duration: if held { 4 * rate as u64 } else { 0 },
+                                from: None,
+                                voicing: 0,
+                            },
+                        };
+                        sampler.play(event, velocity);
+                        let mut power = 0.0f32;
+                        for _ in 0..rate / 2 {
+                            let mut stems = [[0.0; 2]; Instrument::COUNT];
+                            sampler.next(&mut stems);
+                            let sample = stems[instrument.index()][0];
+                            power += sample * sample;
+                        }
+                        (power / (rate / 2) as f32).sqrt().max(1e-9)
+                    };
+                    let mut before = level(0.1);
+                    for step in 6..=49 {
+                        let velocity = step as f32 * 0.02;
+                        let now = level(velocity);
+                        let law = 20.0 * (velocity / (velocity - 0.02)).log10();
+                        let excess = 20.0 * (now / before).log10() - law;
+                        if excess.abs() > 6.0 {
+                            problems.push(format!(
+                                "{instrument:?} {name} note {midi}: its level steps {excess:+.1} dB \
+                                 more than the velocity does at velocity {velocity:.2}"
+                            ));
+                        }
+                        before = now;
+                    }
+                }
+                for midi in (28..=100u8).step_by(3) {
+                    for velocity in [0.15f32, 0.5, 0.95] {
+                        let mut sampler = Sampler::new(rate as u32, 1);
+                        sampler.set(instrument, Some(samples.clone()));
+                        let event = Event {
+                            at: 0,
+                            note: Note {
+                                instrument,
+                                midi,
+                                velocity,
+                                pan: 0.0,
+                                duration: if held { 12 * rate as u64 } else { 0 },
+                                from: None,
+                                voicing: 0,
+                            },
+                        };
+                        sampler.play(event, velocity);
+                        // Pitched no further from a recording than a fifth
+                        // (a little more) for notes among the voice's
+                        // recordings, whatever the velocity.
+                        let stretch = sampler.greatest_stretch();
+                        let roots = samples.zones.iter().map(|zone| i32::from(zone.root));
+                        let (lowest, highest) =
+                            (roots.clone().min().unwrap_or(0), roots.max().unwrap_or(127));
+                        if (lowest..=highest).contains(&i32::from(midi)) && stretch > 7.5 {
+                            problems.push(format!(
+                                "{instrument:?} {name} note {midi} velocity {velocity}: \
+                                 stretched {stretch:.1} semitones within its recordings"
+                            ));
+                        }
+                        let seconds = if held { 11 } else { 2 };
+                        let (mut start, mut late, mut peak) = (0.0f32, 0.0f32, 0.0f32);
+                        let mut bad = false;
+                        for frame in 0..rate * seconds {
+                            let mut stems = [[0.0; 2]; Instrument::COUNT];
+                            sampler.next(&mut stems);
+                            let sample = stems[instrument.index()][0];
+                            bad |= !sample.is_finite();
+                            peak = peak.max(sample.abs());
+                            if frame < rate / 2 {
+                                start = start.max(sample.abs());
+                            }
+                            if frame >= rate * 10 {
+                                late = late.max(sample.abs());
+                            }
+                        }
+                        cases += 1;
+                        let who = format!("{instrument:?} {name} note {midi} velocity {velocity}");
+                        if bad {
+                            problems.push(format!("{who}: not finite"));
+                        } else if start < 1e-4 {
+                            problems.push(format!("{who}: silent at the start ({start})"));
+                        } else if peak > 6.0 {
+                            problems.push(format!("{who}: peaks at {peak}"));
+                        } else if held && late < 1e-4 {
+                            problems.push(format!("{who}: silent after ten seconds ({late})"));
+                        }
+                    }
+                }
+            }
+        }
+        println!("{cases} cases, {} problems", problems.len());
+        for problem in &problems {
+            println!("PROBLEM {problem}");
+        }
+        assert!(problems.is_empty());
     }
 
     #[test]

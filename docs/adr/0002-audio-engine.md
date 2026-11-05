@@ -24,16 +24,29 @@ files: everything it needs (delay lines, voice pools, noise filters) is
 allocated when the mixer is built, its composer plans with fixed-size
 queues, and settings arrive as one `Message::Ambience` value. The mixing
 rules apply to it unchanged. Its instruments go through a space of their
-own (`ambience/hall.rs`: an ensemble chorus and a long feedback-delay-
-network hall, also allocated up front) rather than the tiles' room, and
-the ambience stays audible until the hall's tail has died away.
+own (`ambience/hall.rs`, also allocated up front) rather than the tiles'
+room: the synth hands back each layer on its own, and each is put in its
+place (mostly dry and clear when near, darker, quieter dry and wetter
+when far), drifting slowly in level, brightness, pan and send
+(`ambience/modulation.rs`, worked out every 64 frames of the music's
+clock so a render does not depend on the buffer size); the layers that
+sustain or ring go through an ensemble chorus, the bass, drone and drums
+around it; and all of them into a long feedback-delay-network hall with
+early reflections. The ambience stays audible until the hall's tail has
+died away.
 
 Its instruments can also play from recordings: an instrument pack's
 notes are decoded off the audio thread into a `Multisample` (16-bit
 stereo, about 10 MB a stereo minute) and handed to the mixer in an `Arc`
-(`Message::Instrument`). A fixed pool of 40 sampler voices plays them,
-pitch-shifted with Catmull-Rom interpolation, held notes looping where
-the pack baked a seamless join. Replaced recordings are not freed on the
+(`Message::Instrument`). A fixed pool of 48 sampler voices (and 12 more
+for those fading) plays them, pitch-shifted with Catmull-Rom
+interpolation, held notes looping where the pack baked a seamless join.
+A note may start two of them: between two velocity layers that blend
+(pack version 2) it plays both, at equal power. A pack holds several
+recordings of a role, its voices; a layer's `voice` says which the app
+loads (the instrument's own where the pack has not that one), and
+notes outside a voice's range are moved by octaves into it. Replaced
+recordings are not freed on the
 audio thread: their voices fade over 50 ms, then the `Arc` travels back
 as `Event::Released` to be dropped by `Engine::poll`. An instrument with
 no recordings keeps its synthesised voice. A generated track is the same ambience
